@@ -1,0 +1,58 @@
+<!-- based on the pmtiles reference example -->
+<html>
+    <head>
+        <title>PMTiles MapLibre Example</title>
+        <meta charset="utf-8"/>
+        <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.css" crossorigin="anonymous">
+        <script src="https://unpkg.com/maplibre-gl@5.13.0/dist/maplibre-gl.js" crossorigin="anonymous"></script>
+        <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+        <script src="https://unpkg.com/@protomaps/basemaps@5/dist/basemaps.js" crossorigin="anonymous"></script>
+        <style>
+            body {
+                margin: 0;
+            }
+            #map {
+                height:100%; width:100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <script type="text/javascript">
+          var bmhrooms = [{"lat":61.18947380836121,"lon":-149.8337258244514,"name":"100"},{"lat":61.18949222073579,"lon":-149.83366107711598,"name":"101"},{"lat":61.18949426655519,"lon":-149.83378787398118,"name":"102"},{"lat":61.189491538795984,"lon":-149.8335990275862,"name":"103"},{"lat":61.18949085685619,"lon":-149.8338472257053,"name":"104"},{"lat":61.18949767625418,"lon":-149.8335423736677,"name":"105"},{"lat":61.18949631237458,"lon":-149.8339092752351,"name":"106"},{"lat":61.18953381906355,"lon":-149.83391332194356,"name":"108"},{"lat":61.18953995652174,"lon":-149.8338512724138,"name":"110"},{"lat":61.189538592642144,"lon":-149.83378652507835,"name":"112"},{"lat":61.189538592642144,"lon":-149.83366917053291,"name":"111"},{"lat":61.18953586488294,"lon":-149.83360981880878,"name":"109"},{"lat":61.189535182943146,"lon":-149.8335437225705,"name":"107"},{"lat":61.189572007692306,"lon":-149.83354507147334,"name":"113A"},{"lat":61.18957064381271,"lon":-149.8336057721003,"name":"113B"},{"lat":61.18957064381271,"lon":-149.83366512382443,"name":"113C"},{"lat":61.18957064381271,"lon":-149.83379596739812,"name":"100S1"},{"lat":61.18956927993311,"lon":-149.83388499498432,"name":"114A"},{"lat":61.18961087826087,"lon":-149.83387285485892,"name":"114"},{"lat":61.18962178929766,"lon":-149.8337757338558,"name":"100U1"},{"lat":61.18961974347826,"lon":-149.83368265956113,"name":"100J1"},{"lat":61.18960678662207,"lon":-149.8335990275862,"name":"113"},{"lat":61.189685209699,"lon":-149.83361116771158,"name":"115"},{"lat":61.18967702642141,"lon":-149.83372717335422,"name":"100C3"},{"lat":61.18970362207358,"lon":-149.8338404811912,"name":"116"},{"lat":61.18981136856187,"lon":-149.8338404811912,"name":"118"},{"lat":61.189795683946485,"lon":-149.83360712100313,"name":"117"},{"lat":61.189870697324416,"lon":-149.8337258244514,"name":"100L1"},{"lat":61.189872061204014,"lon":-149.83397537147334,"name":"100V2"},{"lat":61.189870697324416,"lon":-149.83347627742947,"name":"100V3"},{"lat":61.18988024448161,"lon":-149.83389848401254,"name":"122"},{"lat":61.18987683478261,"lon":-149.83380540971785,"name":"120"},{"lat":61.18986592374582,"lon":-149.83361116771158,"name":"119"},{"lat":61.18992593444816,"lon":-149.83391871755487,"name":"100U2"},{"lat":61.18991843311037,"lon":-149.83365163479624,"name":"121A"},{"lat":61.189930026086955,"lon":-149.83355990940439,"name":"121"},{"lat":61.18992729832776,"lon":-149.83351404670844,"name":"100U3"},{"lat":61.18994571070234,"lon":-149.83392546206895,"name":"100V4"},{"lat":61.18994230100334,"lon":-149.8337258244514,"name":"100C4"},{"lat":61.189964123076926,"lon":-149.8336556815047,"name":"100E1"},{"lat":61.18997707993311,"lon":-149.83356395611284,"name":"100M1"},{"lat":61.189984581270906,"lon":-149.8336678216301,"name":"100U4"},{"lat":61.189985945150504,"lon":-149.833789222884,"name":"100S2"},{"lat":61.18997639799331,"lon":-149.8338836460815,"name":"100W1"},{"lat":61.19003709063545,"lon":-149.8338593658307,"name":"124"},{"lat":61.190041864214045,"lon":-149.83371773103448,"name":"125"},{"lat":61.19003845451505,"lon":-149.83359093416928,"name":"123"},{"lat":61.190077325083614,"lon":-149.8336745661442,"name":"100U5"},{"lat":61.190075279264214,"lon":-149.8337055909091,"name":"125A"},{"lat":61.19010937625418,"lon":-149.83376089592477,"name":"a00U6"},{"lat":61.19010596655519,"lon":-149.83365972821315,"name":"100S3"},{"lat":61.189514724749166,"lon":-149.83382564326018,"name":"100C1"},{"lat":61.189516088628764,"lon":-149.83362870344826,"name":"100C2"}]
+            // add the PMTiles plugin to the maplibregl global.
+            // setting metadata = true fills out the "attribution" field of the source, and is required for some inspector applications,
+            // but requires an additional blocking HTTP request before loading the map.
+            let protocol = new pmtiles.Protocol({metadata: true});
+            maplibregl.addProtocol("pmtiles", protocol.tile);
+
+            const map = new maplibregl.Map({
+              container: "map",
+              zoom: 16,
+              center: [-149.832240,61.189856],
+              style: "https://navigator.cheeseverse.net/style.json",
+            });
+            map.showTileBoundaries = false;
+            for(room of bmhrooms) {
+              new maplibregl.Marker()
+                .setLngLat([room.lon, room.lat])
+                .setPopup(new maplibregl.Popup({offset: 25}).setText(room.name))
+                .addTo(map);
+            }
+            let draggablemarker = new maplibregl.Marker({draggable:true}).setLngLat([-149.832240,61.189856]).addTo(map);
+            map.on("style.load", () => {
+                map.addSource('bmh', {
+                type: 'image',
+                url: 'https://navigator.cheeseverse.net/bmh.png',
+                coordinates: [
+                    [-149.834033, 61.190137], //top left
+                    [-149.833406, 61.190137], //top right
+                    [-149.833406, 61.189445], //bottom right
+                    [-149.834033, 61.189445], //bottom left
+                ]
+                });
+                map.addLayer({id:"bmh-layer", type:"raster", source:"bmh", paint:{"raster-opacity": 1}})
+            })  //AI
+        </script>
+    </body>
+</html>
