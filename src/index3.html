@@ -1,0 +1,714 @@
+<!-- PMTiles + MapLibre Navigation Demo -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Indoor Navigation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+  
+  <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+  
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      height: 100dvh;
+      width: 100vw;
+      width: 100dvw;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #controls {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      z-index: 10;
+    }
+
+    .control-btn {
+      background: #ffffff;
+      border: 2px solid #333333;
+      border-radius: 50%;
+      width: 56px;
+      height: 56px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      font-size: 1.5rem;
+      padding: 0;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .control-btn:active {
+      transform: scale(0.95);
+      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .control-btn.active {
+      background: #4a90e2;
+      border-color: #4a90e2;
+      color: #ffffff;
+    }
+
+    #sidebar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #ffffff;
+      border-radius: 1rem 1rem 0 0;
+      max-height: 40vh;
+      max-height: 40dvh;
+      overflow-y: auto;
+      padding: 1rem 1.25rem 2rem 1.25rem;
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+      z-index: 20;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+
+    #sidebar.visible {
+      transform: translateY(0);
+    }
+
+    #sidebar-handle {
+      width: 40px;
+      height: 4px;
+      background: #cccccc;
+      border-radius: 2px;
+      margin: 0 auto 1rem auto;
+      cursor: pointer;
+    }
+
+    h2 {
+      margin: 0 0 1rem 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+
+    .info-section {
+      margin-bottom: 1rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #eeeeee;
+    }
+
+    .info-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .info-label {
+      font-size: 0.75rem;
+      color: #666666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+
+    .info-value {
+      font-size: 0.9rem;
+      color: #333333;
+    }
+
+    #compass {
+      font-weight: 600;
+    }
+
+    @media (min-width: 768px) {
+      #controls {
+        top: 1.5rem;
+        right: 1.5rem;
+        gap: 1rem;
+      }
+
+      .control-btn {
+        width: 64px;
+        height: 64px;
+        font-size: 1.75rem;
+      }
+
+      #sidebar {
+        left: 1.5rem;
+        right: auto;
+        bottom: 1.5rem;
+        width: 320px;
+        max-height: calc(100vh - 3rem);
+        max-height: calc(100dvh - 3rem);
+        border-radius: 0.75rem;
+        transform: translateY(0);
+        display: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      #sidebar.visible {
+        display: block;
+      }
+
+      #sidebar-handle {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  
+  <div id="controls">
+    <button id="menu-btn" class="control-btn" aria-label="Menu">☰</button>
+    <button id="location-btn" class="control-btn" aria-label="My Location">📍</button>
+    <button id="path-btn" class="control-btn" aria-label="Find Path">🧭</button>
+  </div>
+  
+  <div id="sidebar">
+    <div id="sidebar-handle"></div>
+    <h2>Navigation</h2>
+    
+    <div class="info-section">
+      <div class="info-label">Status</div>
+      <div id="status-text" class="info-value">Ready</div>
+    </div>
+    
+    <div class="info-section">
+      <div class="info-label">Heading</div>
+      <div id="compass" class="info-value">0°</div>
+    </div>
+    
+    <div class="info-section">
+      <div class="info-label">Graph Stats</div>
+      <div id="graph-stats" class="info-value">Not built</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as maplibregl from '/maplibre-gl.mjs';
+    import { buildGraph } from './navgraph.mjs';
+    maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
+    
+    // Protocol registration
+    const protocol = new pmtiles.Protocol({ metadata: true });
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    // Map initialization
+    const map = new maplibregl.Map({
+      container: 'map',
+      zoom: 17,
+      center: [-149.832240, 61.189856],
+      style: 'https://navigator.cheeseverse.net/style.json',
+      touchZoomRotate: true,
+      dragPan: true,
+      dragRotate: true,
+      pitchWithRotate: false,
+    });
+
+    // State
+    let navGraph = null;
+    let wallsFeatureCollection = null;
+    let destinationMarker = null;
+    let isDefiningPath = false;
+    let firstPathPoint = null;
+
+    // UI Elements
+    const menuBtn = document.getElementById('menu-btn');
+    const locationBtn = document.getElementById('location-btn');
+    const pathBtn = document.getElementById('path-btn');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarHandle = document.getElementById('sidebar-handle');
+    const compassDisplay = document.getElementById('compass');
+    const statusText = document.getElementById('status-text');
+    const graphStats = document.getElementById('graph-stats');
+
+    // Event listeners
+    menuBtn.addEventListener('click', toggleSidebar);
+    sidebarHandle.addEventListener('click', toggleSidebar);
+    
+    pathBtn.addEventListener('click', () => {
+      isDefiningPath = !isDefiningPath;
+      pathBtn.classList.toggle('active', isDefiningPath);
+      statusText.textContent = isDefiningPath ? 'Tap two points on map' : 'Ready';
+      if (!isDefiningPath) {
+        firstPathPoint = null;
+      }
+    });
+    
+    locationBtn.addEventListener('click', startLiveLocate);
+
+    function toggleSidebar() {
+      sidebar.classList.toggle('visible');
+    }
+
+    // Utility functions
+    function metresPerDegree(lat) {
+      const p = (lat * Math.PI) / 180;
+      const c = (k) => Math.cos(k * p);
+      return {
+        lat: 111132.92 - 559.82 * c(2) + 1.175 * c(4) - 0.0023 * c(6),
+        lon: 111412.84 * c(1) - 93.5 * c(3) + 0.118 * c(5),
+      };
+    }
+
+    function dxfCoordsToLonLat(origin, x, y, rot, scaleE, scaleN) {
+      const mPerDeg = metresPerDegree(origin.lat);
+      const east = x * scaleE * Math.cos(rot) - y * scaleE * Math.sin(rot);
+      const north = x * scaleN * Math.sin(rot) + y * scaleN * Math.cos(rot);
+      const lat = origin.lat + north / mPerDeg.lat;
+      const lon = origin.lon + east / mPerDeg.lon;
+      return [lon, lat];
+    }
+
+    // Map click handler
+    map.on('click', (e) => {
+      const coords = e.lngLat;
+      const coordArray = [coords.lng, coords.lat];
+
+      if (isDefiningPath && navGraph) {
+        if (firstPathPoint === null) {
+          firstPathPoint = coordArray;
+          statusText.textContent = 'Tap destination point';
+        } else {
+          const startPoint = firstPathPoint;
+          const endPoint = coordArray;
+          statusText.textContent = 'Calculating route...';
+          const pathResult = navGraph.findPath(startPoint, endPoint);
+
+          if (pathResult) {
+            const routeGeoJson = {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: pathResult,
+              },
+            };
+
+            if (!map.getSource('navigation-route')) {
+              map.addSource('navigation-route', {
+                type: 'geojson',
+                data: routeGeoJson,
+              });
+              map.addLayer({
+                id: 'navigation-route',
+                type: 'line',
+                source: 'navigation-route',
+                layout: {
+                  'line-join': 'round',
+                  'line-cap': 'round',
+                },
+                paint: {
+                  'line-color': '#e74c3c',
+                  'line-width': 4,
+                },
+              });
+            } else {
+              map.getSource('navigation-route').setData(routeGeoJson);
+            }
+            statusText.textContent = 'Route found';
+          } else {
+            statusText.textContent = 'No route found';
+          }
+          firstPathPoint = null;
+          isDefiningPath = false;
+          pathBtn.classList.remove('active');
+        }
+      } else {
+        if (destinationMarker) {
+          destinationMarker.setLngLat(coords);
+        } else {
+          destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
+        }
+        statusText.textContent = `Destination set at ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+      }
+    });
+
+    // Live location
+    let livePosMarker = null;
+    let accuracyIndicator = null;
+    let headingIndicator = null;
+    let lastAccuracyMeters = 0;
+    let geoWatchId = null;
+
+    function successPosition(position) {
+      const { latitude, longitude, accuracy } = position.coords;
+      const posLonLat = [longitude, latitude];
+
+      if (livePosMarker) {
+        livePosMarker.setLngLat([longitude, latitude]);
+      }
+      lastAccuracyMeters = accuracy;
+
+      const accuracyCircle = turf.circle([longitude, latitude], accuracy, {
+        steps: 64,
+        units: 'meters',
+      });
+      if (map.getSource('location-radius')) {
+        map.getSource('location-radius').setData(accuracyCircle);
+      }
+
+      if (destinationMarker && navGraph) {
+        const destPos = destinationMarker.getLngLat();
+        const pathResult = navGraph.findPath(posLonLat, [destPos.lng, destPos.lat]);
+        if (pathResult) {
+          if (map.getSource('navigation-route')) {
+            map.getSource('navigation-route').setData({
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: pathResult,
+              },
+            });
+          } else {
+            map.addSource('navigation-route', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: pathResult,
+                },
+              },
+            });
+            map.addLayer({
+              id: 'navigation-route',
+              type: 'line',
+              source: 'navigation-route',
+              layout: {
+                'line-join': 'round',
+                'line-cap': 'round',
+              },
+              paint: {
+                'line-color': '#e74c3c',
+                'line-width': 4,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    function errorPosition() {
+      statusText.textContent = 'Location access denied';
+    }
+
+    function startLiveLocate() {
+      locationBtn.classList.add('active');
+      statusText.textContent = 'Locating...';
+
+      if (livePosMarker) {
+        livePosMarker.remove();
+      }
+      livePosMarker = new maplibregl.Marker().setLngLat([0, 0]).addTo(map);
+
+      if (map.getSource('location-radius')) {
+        map.removeLayer('location-radius-outline');
+        map.removeLayer('location-radius');
+        map.removeSource('location-radius');
+      }
+
+      accuracyIndicator = turf.circle([0, 0], 1, { steps: 64, units: 'meters' });
+      map.addSource('location-radius', {
+        type: 'geojson',
+        data: accuracyIndicator,
+      });
+      map.addLayer({
+        id: 'location-radius',
+        type: 'fill',
+        source: 'location-radius',
+        paint: {
+          'fill-color': '#4a90e2',
+          'fill-opacity': 0.3,
+        },
+      });
+      map.addLayer({
+        id: 'location-radius-outline',
+        type: 'line',
+        source: 'location-radius',
+        paint: {
+          'line-color': '#4a90e2',
+          'line-width': 2,
+        },
+      });
+
+      if (map.getSource('location-heading')) {
+        map.removeLayer('location-heading-outline');
+        map.removeSource('location-heading');
+      }
+
+      headingIndicator = turf.lineString([
+        [0, 0],
+        [0, 1],
+      ]);
+      map.addSource('location-heading', {
+        type: 'geojson',
+        data: headingIndicator,
+      });
+      map.addLayer({
+        id: 'location-heading-outline',
+        type: 'line',
+        source: 'location-heading',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#4a90e2',
+          'line-width': 3,
+        },
+      });
+
+      if (geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId);
+      }
+      geoWatchId = navigator.geolocation.watchPosition(successPosition, errorPosition, {
+        maximumAge: 5000,
+        enableHighAccuracy: true,
+      });
+
+      if (window.DeviceOrientationEvent) {
+        window.DeviceOrientationEvent.requestPermission?.();
+        window.addEventListener(
+          'deviceorientationabsolute',
+          (event) => {
+            const rotateDegrees = 360 - event.alpha;
+            if (!isNaN(rotateDegrees)) {
+              compassDisplay.textContent = `${Math.round(rotateDegrees)}°`;
+              map.setBearing(rotateDegrees);
+            }
+
+            if (livePosMarker) {
+              const markerPos = livePosMarker.getLngLat();
+              const outsidePoint = turf.destination([markerPos.lng, markerPos.lat], lastAccuracyMeters, rotateDegrees, {
+                units: 'meters',
+              });
+              const headingFeature = {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: {
+                      type: 'LineString',
+                      coordinates: [
+                        [markerPos.lng, markerPos.lat],
+                        outsidePoint.geometry.coordinates,
+                      ],
+                    },
+                  },
+                ],
+              };
+              if (map.getSource('location-heading')) {
+                map.getSource('location-heading').setData(headingFeature);
+              }
+            }
+          },
+          true
+        );
+      }
+    }
+
+    // Load building configuration
+    const buildingsConfig = [
+      {
+        id: 'AS103-01',
+        url: '/AS103-01.json',
+        origin: { lon: -149.83392948231224, lat: 61.1894702373051 },
+        offset: { x: 0, y: 0, rot: 0 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as103-01-walls',
+        roomLayerId: 'as103-01-roomnumbers',
+      },
+      {
+        id: 'AS106-01',
+        url: '/AS106-01.json',
+        origin: { lon: -149.83263956536967, lat: 61.18970332221574 },
+        offset: { x: 450, y: 400, rot: 0 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as106-01-walls',
+        roomLayerId: 'as106-01-roomnumbers',
+      },
+      {
+        id: 'AS101-01',
+        url: '/AS101-01.json',
+        origin: { lon: -149.83258657016332, lat: 61.18860052108826 },
+        offset: { x: 2880, y: 390, rot: 0.005 },
+        scale: { e: 0.0254, n: 0.0254 },
+        showRoomLabels: false,
+        wallLayerId: 'as101-01-walls',
+        roomLayerId: null,
+      },
+      {
+        id: 'AS102-01',
+        url: '/AS102-01.json',
+        origin: { lon: -149.83345376471846, lat: 61.1890024920514 },
+        offset: { x: 1392, y: 1144, rot: 0 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as102-01-walls',
+        roomLayerId: 'as102-01-roomnumbers',
+      },
+      {
+        id: 'AS105-01',
+        url: '/AS105-01.json',
+        origin: { lon: -149.83151758160494, lat: 61.189320207472804 },
+        offset: { x: 267, y: 0, rot: 119.39 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as105-01-walls',
+        roomLayerId: 'as105-01-roomnumbers',
+      },
+    ];
+
+    async function loadBuilding(config) {
+      try {
+        const res = await fetch(config.url);
+        const data = await res.json();
+
+        const walls = data.shapes.filter((i) => i.layer === 'WALLS' || i.layer === 'Windows');
+        const lines = walls.map((wall) => [
+          dxfCoordsToLonLat(
+            config.origin,
+            wall.bbox[0] - config.offset.x,
+            wall.bbox[1] - config.offset.y,
+            config.offset.rot,
+            config.scale.e,
+            config.scale.n
+          ),
+          dxfCoordsToLonLat(
+            config.origin,
+            wall.bbox[2] - config.offset.x,
+            wall.bbox[3] - config.offset.y,
+            config.offset.rot,
+            config.scale.e,
+            config.scale.n
+          ),
+        ]);
+
+        const wallFeatureCollection = turf.lineStrings(lines);
+
+        map.addSource(config.wallLayerId, {
+          type: 'geojson',
+          data: wallFeatureCollection,
+        });
+        map.addLayer({
+          id: config.wallLayerId,
+          type: 'line',
+          source: config.wallLayerId,
+          paint: {
+            'line-color': '#333333',
+            'line-width': 2,
+          },
+        });
+
+        if (config.showRoomLabels && data.text_lines && config.roomLayerId) {
+          const roomLabels = data.text_lines.map((roomno) => ({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: dxfCoordsToLonLat(
+                config.origin,
+                roomno.x - config.offset.x,
+                roomno.y - config.offset.y,
+                0,
+                config.scale.e,
+                config.scale.n
+              ),
+            },
+            properties: { text: roomno.text },
+          }));
+
+          map.addSource(config.roomLayerId, {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: roomLabels,
+            },
+          });
+          map.addLayer({
+            id: config.roomLayerId,
+            type: 'symbol',
+            source: config.roomLayerId,
+            layout: {
+              'text-field': ['get', 'text'],
+              'text-size': 12,
+              'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+            },
+            paint: {
+              'text-color': '#2c3e50',
+            },
+          });
+        }
+
+        return wallFeatureCollection;
+      } catch (e) {
+        console.warn(`Failed to load ${config.id}:`, e);
+        return null;
+      }
+    }
+
+    // Map load
+    map.on('style.load', async () => {
+      statusText.textContent = 'Loading buildings...';
+      const wallCollections = [];
+      for (const config of buildingsConfig) {
+        const fc = await loadBuilding(config);
+        if (fc) {
+          wallCollections.push(fc);
+        }
+      }
+
+      const allFeatures = [];
+      wallCollections.forEach((fc) => {
+        if (fc.features) {
+          allFeatures.push(...fc.features);
+        }
+      });
+      wallsFeatureCollection = turf.featureCollection(allFeatures);
+
+      if (wallsFeatureCollection.features.length > 0) {
+        try {
+          statusText.textContent = 'Building navigation graph...';
+          navGraph = buildGraph(wallsFeatureCollection);
+          const stats = navGraph.stats;
+          graphStats.textContent = `${stats.nodes} nodes, ${Math.round(stats.edges)} edges, ${stats.buildMs}ms`;
+          statusText.textContent = 'Ready';
+        } catch (err) {
+          console.error('Failed to build navigation graph:', err);
+          statusText.textContent = 'Graph build failed';
+        }
+      } else {
+        statusText.textContent = 'No walls loaded';
+      }
+    });
+  </script>
+</body>
+</html>

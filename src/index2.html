@@ -1,0 +1,528 @@
+<!-- PMTiles + MapLibre Navigation Demo -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Indoor Navigation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+  
+  <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: row;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    #sidebar {
+      width: 30vw;
+      margin: 0 5ch;
+      padding-top: 5ch;
+      overflow-y: auto;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    button {
+      padding: 1ch;
+      border-radius: 1ch;
+      cursor: pointer;
+    }
+
+    #sidebar-toggle {
+      z-index: 1;
+      position: fixed;
+      left: 1ch;
+      top: 1ch;
+      height: 9ch;
+      width: 9ch;
+      border-radius: 3ch;
+      background-color: rgb(0, 221, 255);
+      border: none;
+    }
+
+    #live-locate-button {
+      margin-left: 8ch;
+    }
+
+    #compass {
+      margin-top: 1ch;
+    }
+  </style>
+</head>
+
+<body>
+  <button id="sidebar-toggle">Tools</button>
+  
+  <div id="sidebar" class="hidden">
+    <button id="live-locate-button">Live Location</button>
+    <div id="compass">0 deg</div>
+    <button id="find-path">Find Path</button>
+  </div>
+  
+  <div id="map"></div>
+
+  <script type="module">
+    import * as maplibregl from '/maplibre-gl.mjs';
+    import { buildGraph } from './navgraph.mjs';
+    maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
+    
+    // Protocol registration
+    const protocol = new pmtiles.Protocol({ metadata: true });
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    // Map initialization
+    const map = new maplibregl.Map({
+      container: 'map',
+      zoom: 16,
+      center: [-149.832240, 61.189856],
+      style: 'https://navigator.cheeseverse.net/style.json',
+    });
+
+    // State
+    let navGraph = null;
+    let wallsFeatureCollection = null;
+    let destinationMarker = null;
+    let isDefiningPath = false;
+    let firstPathPoint = null;
+
+    // UI Elements
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const compassDisplay = document.getElementById('compass');
+    const findPathBtn = document.getElementById('find-path');
+    const liveLocateBtn = document.getElementById('live-locate-button');
+
+    // Event listeners
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('hidden');
+    });
+    findPathBtn.addEventListener('click', startDefinePath);
+    liveLocateBtn.addEventListener('click', startLiveLocate);
+
+    // Utility functions
+    function metresPerDegree(lat) {
+      const p = (lat * Math.PI) / 180;
+      const c = (k) => Math.cos(k * p);
+      return {
+        lat: 111132.92 - 559.82 * c(2) + 1.175 * c(4) - 0.0023 * c(6),
+        lon: 111412.84 * c(1) - 93.5 * c(3) + 0.118 * c(5),
+      };
+    }
+
+    function dxfCoordsToLonLat(origin, x, y, rot, scaleE, scaleN) {
+      const mPerDeg = metresPerDegree(origin.lat);
+      const east = x * scaleE * Math.cos(rot) - y * scaleE * Math.sin(rot);
+      const north = x * scaleN * Math.sin(rot) + y * scaleN * Math.cos(rot);
+      const lat = origin.lat + north / mPerDeg.lat;
+      const lon = origin.lon + east / mPerDeg.lon;
+      return [lon, lat];
+    }
+
+    function startDefinePath() {
+      isDefiningPath = true;
+    }
+
+    // Map click handler
+    map.on('click', (e) => {
+      const coords = e.lngLat;
+      const coordArray = [coords.lng, coords.lat];
+
+      if (isDefiningPath && navGraph) {
+        if (firstPathPoint === null) {
+          firstPathPoint = coordArray;
+        } else {
+          const startPoint = firstPathPoint;
+          const endPoint = coordArray;
+          const pathResult = navGraph.findPath(startPoint, endPoint);
+
+          if (pathResult) {
+            const routeGeoJson = {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: pathResult,
+              },
+            };
+
+            if (!map.getSource('navigation-route')) {
+              map.addSource('navigation-route', {
+                type: 'geojson',
+                data: routeGeoJson,
+              });
+              map.addLayer({
+                id: 'navigation-route',
+                type: 'line',
+                source: 'navigation-route',
+                layout: {
+                  'line-join': 'round',
+                  'line-cap': 'round',
+                },
+                paint: {
+                  'line-color': '#FF0212',
+                  'line-width': 3,
+                },
+              });
+            } else {
+              map.getSource('navigation-route').setData(routeGeoJson);
+            }
+          }
+          firstPathPoint = null;
+          isDefiningPath = false;
+        }
+      } else {
+        if (destinationMarker) {
+          destinationMarker.setLngLat(coords);
+        } else {
+          destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
+        }
+      }
+    });
+
+    // Live location
+    let livePosMarker = null;
+    let accuracyIndicator = null;
+    let headingIndicator = null;
+    let lastAccuracyMeters = 0;
+    let geoWatchId = null;
+
+    function successPosition(position) {
+      const { latitude, longitude, accuracy } = position.coords;
+      const posLonLat = [longitude, latitude];
+
+      if (livePosMarker) {
+        livePosMarker.setLngLat([longitude, latitude]);
+      }
+      lastAccuracyMeters = accuracy;
+
+      const accuracyCircle = turf.circle([longitude, latitude], accuracy, {
+        steps: 64,
+        units: 'meters',
+      });
+      if (map.getSource('location-radius')) {
+        map.getSource('location-radius').setData(accuracyCircle);
+      }
+
+      if (destinationMarker && navGraph) {
+        const destPos = destinationMarker.getLngLat();
+        const pathResult = navGraph.findPath(posLonLat, [destPos.lng, destPos.lat]);
+        if (pathResult && map.getSource('navigation-route')) {
+          map.getSource('navigation-route').setData({
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: pathResult,
+            },
+          });
+        } else if (pathResult && !map.getSource('navigation-route')) {
+          map.addSource('navigation-route', {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: pathResult,
+              },
+            },
+          });
+          map.addLayer({
+            id: 'navigation-route',
+            type: 'line',
+            source: 'navigation-route',
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': '#FF0212',
+              'line-width': 3,
+            },
+          });
+        }
+      }
+    }
+
+    function errorPosition() {
+      console.warn('Error retrieving location');
+    }
+
+    function startLiveLocate() {
+      if (livePosMarker) {
+        livePosMarker.remove();
+      }
+      livePosMarker = new maplibregl.Marker().setLngLat([0, 0]).addTo(map);
+
+      if (map.getSource('location-radius')) {
+        map.removeLayer('location-radius-outline');
+        map.removeLayer('location-radius');
+        map.removeSource('location-radius');
+      }
+
+      accuracyIndicator = turf.circle([0, 0], 1, { steps: 64, units: 'meters' });
+      map.addSource('location-radius', {
+        type: 'geojson',
+        data: accuracyIndicator,
+      });
+      map.addLayer({
+        id: 'location-radius',
+        type: 'fill',
+        source: 'location-radius',
+        paint: {
+          'fill-color': '#8CCFFF',
+          'fill-opacity': 0.5,
+        },
+      });
+      map.addLayer({
+        id: 'location-radius-outline',
+        type: 'line',
+        source: 'location-radius',
+        paint: {
+          'line-color': '#0094ff',
+          'line-width': 3,
+        },
+      });
+
+      if (map.getSource('location-heading')) {
+        map.removeLayer('location-heading-outline');
+        map.removeSource('location-heading');
+      }
+
+      headingIndicator = turf.lineString([
+        [0, 0],
+        [0, 1],
+      ]);
+      map.addSource('location-heading', {
+        type: 'geojson',
+        data: headingIndicator,
+      });
+      map.addLayer({
+        id: 'location-heading-outline',
+        type: 'line',
+        source: 'location-heading',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#0094ff',
+          'line-width': 3,
+        },
+      });
+
+      if (geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId);
+      }
+      geoWatchId = navigator.geolocation.watchPosition(successPosition, errorPosition, {
+        maximumAge: 5000,
+        enableHighAccuracy: true,
+      });
+
+      if (window.DeviceOrientationEvent) {
+        window.DeviceOrientationEvent.requestPermission?.();
+        window.addEventListener(
+          'deviceorientationabsolute',
+          (event) => {
+            const rotateDegrees = 360 - event.alpha;
+            compassDisplay.textContent = `${Math.round(rotateDegrees)} deg`;
+            map.setBearing(rotateDegrees);
+
+            if (livePosMarker) {
+              const markerPos = livePosMarker.getLngLat();
+              const outsidePoint = turf.destination([markerPos.lng, markerPos.lat], lastAccuracyMeters, rotateDegrees, {
+                units: 'meters',
+              });
+              const headingFeature = {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: {
+                      type: 'LineString',
+                      coordinates: [
+                        [markerPos.lng, markerPos.lat],
+                        outsidePoint.geometry.coordinates,
+                      ],
+                    },
+                  },
+                ],
+              };
+              if (map.getSource('location-heading')) {
+                map.getSource('location-heading').setData(headingFeature);
+              }
+            }
+          },
+          true
+        );
+      }
+    }
+
+    // Load building configuration
+    const buildingsConfig = [
+      {
+        id: 'AS103-01',
+        url: '/AS103-01.json',
+        origin: { lon: -149.83392948231224, lat: 61.1894702373051 },
+        offset: { x: 0, y: 0, rot: 0 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as103-01-walls',
+        roomLayerId: 'as103-01-roomnumbers',
+      },
+      {
+        id: 'AS101-01',
+        url: '/AS101-01.json',
+        origin: { lon: -149.83258657016332, lat: 61.18860052108826 },
+        offset: { x: 2929, y: 489, rot: 0.005 },
+        scale: { e: 0.0266, n: 0.0318 },
+        showRoomLabels: false,
+        wallLayerId: 'as101-01-walls',
+        roomLayerId: null,
+      },
+      {
+        id: 'AS102-01',
+        url: '/AS102-01.json',
+        origin: { lon: -149.83345376471846, lat: 61.1890024920514 },
+        offset: { x: 1392, y: 1144, rot: 0 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as102-01-walls',
+        roomLayerId: 'as102-01-roomnumbers',
+      },
+      {
+        id: 'AS105-01',
+        url: '/AS105-01.json',
+        origin: { lon: -149.83151758160494, lat: 61.189320207472804 },
+        offset: { x: 267, y: 0, rot: 119.39 },
+        scale: { e: 0.0245, n: 0.0254 },
+        showRoomLabels: true,
+        wallLayerId: 'as105-01-walls',
+        roomLayerId: 'as105-01-roomnumbers',
+      },
+    ];
+
+    async function loadBuilding(config) {
+      try {
+        const res = await fetch(config.url);
+        const data = await res.json();
+
+        const walls = data.shapes.filter((i) => i.layer === 'WALLS' || i.layer === 'Windows');
+        const lines = walls.map((wall) => [
+          dxfCoordsToLonLat(
+            config.origin,
+            wall.bbox[0] - config.offset.x,
+            wall.bbox[1] - config.offset.y,
+            config.offset.rot,
+            config.scale.e,
+            config.scale.n
+          ),
+          dxfCoordsToLonLat(
+            config.origin,
+            wall.bbox[2] - config.offset.x,
+            wall.bbox[3] - config.offset.y,
+            config.offset.rot,
+            config.scale.e,
+            config.scale.n
+          ),
+        ]);
+
+        const wallFeatureCollection = turf.lineStrings(lines);
+
+        map.addSource(config.wallLayerId, {
+          type: 'geojson',
+          data: wallFeatureCollection,
+        });
+        map.addLayer({
+          id: config.wallLayerId,
+          type: 'line',
+          source: config.wallLayerId,
+          paint: {
+            'line-color': '#000000',
+            'line-width': 1,
+          },
+        });
+
+        if (config.showRoomLabels && data.text_lines && config.roomLayerId) {
+          const roomLabels = data.text_lines.map((roomno) => ({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: dxfCoordsToLonLat(
+                config.origin,
+                roomno.x - config.offset.x,
+                roomno.y - config.offset.y,
+                0,
+                config.scale.e,
+                config.scale.n
+              ),
+            },
+            properties: { text: roomno.text },
+          }));
+
+          map.addSource(config.roomLayerId, {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: roomLabels,
+            },
+          });
+          map.addLayer({
+            id: config.roomLayerId,
+            type: 'symbol',
+            source: config.roomLayerId,
+            layout: {
+              'text-field': ['get', 'text'],
+            },
+          });
+        }
+
+        return wallFeatureCollection;
+      } catch (e) {
+        console.warn(`Failed to load ${config.id}:`, e);
+        return null;
+      }
+    }
+
+    // Map load
+    map.on('style.load', async () => {
+      const wallCollections = [];
+      for (const config of buildingsConfig) {
+        const fc = await loadBuilding(config);
+        if (fc) {
+          wallCollections.push(fc);
+        }
+      }
+
+      const allFeatures = [];
+      wallCollections.forEach((fc) => {
+        if (fc.features) {
+          allFeatures.push(...fc.features);
+        }
+      });
+      wallsFeatureCollection = turf.featureCollection(allFeatures);
+
+      if (wallsFeatureCollection.features.length > 0) {
+        try {
+          navGraph = buildGraph(wallsFeatureCollection);
+          console.log('Navigation graph built:', navGraph.stats);
+        } catch (err) {
+          console.error('Failed to build navigation graph:', err);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
