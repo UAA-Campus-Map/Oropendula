@@ -1072,6 +1072,7 @@
 
     function showRoute(route) {
       lastRoute = route;
+      lastReroute = null;   // a freshly set route re-anchors the live re-route
       if (!route) {
         statusText.textContent = 'No route found';
         renderRoute();
@@ -1299,6 +1300,40 @@
       filter.seed(seed, { spreadM: 4 });
     }
 
+    // --- live re-routing ----------------------------------------------------
+    // While a route is on screen, each position update re-routes from the
+    // CURRENT estimate to the same destination, so the drawn line always
+    // leads forward instead of pointing back where you came from. Runs for
+    // both GPS and PDR updates (PDR used to leave the line stale indoors) and
+    // passes the locator's bound floor as the start-floor hint. Throttled:
+    // one route costs ~70 ms, so recompute only after REROUTE_MIN_M metres or
+    // REROUTE_MIN_S seconds. Skipped while "Find Path" taps are being picked.
+    const REROUTE_MIN_M = 3;
+    const REROUTE_MIN_S = 5;
+    let lastReroute = null;   // {ll, t}
+
+    function rerouteFromEstimate() {
+      if (!campusRouter || !destinationMarker || !lastRoute) return;
+      if (!currentEstimate || isDefiningPath) return;
+      const ll = [currentEstimate.lon, currentEstimate.lat];
+      const now = performance.now();
+      if (lastReroute) {
+        const mpd = metresPerDegree(ll[1]);
+        const moved = Math.hypot((ll[0] - lastReroute.ll[0]) * mpd.lon,
+                                 (ll[1] - lastReroute.ll[1]) * mpd.lat);
+        if (moved < REROUTE_MIN_M && now - lastReroute.t < REROUTE_MIN_S * 1000) return;
+      }
+      const dest = destinationMarker.getLngLat();
+      const startFloor = locator?.floor?.floorId ?? currentFloorId();
+      const route = campusRouter.route(ll, [dest.lng, dest.lat],
+        {startFloor, endFloor: destinationFloor});
+      lastReroute = {ll, t: now};
+      if (route) {
+        lastRoute = route;
+        renderRoute();
+      }
+    }
+
     function renderEstimate(est) {
       if (!est) return;
       currentEstimate = est;
@@ -1312,6 +1347,7 @@
       statusText.textContent = est.source === 'gps'
         ? `GPS ±${est.accuracyM.toFixed(0)} m`
         : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
+      rerouteFromEstimate();
     }
 
     // Compass display / heading arrow, driven by the SMOOTHED heading from
@@ -1401,12 +1437,7 @@
         locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
         renderEstimate(locator.arbiter.estimate(t));
       }
-
-      const routeFrom = currentEstimate ? [currentEstimate.lon, currentEstimate.lat] : posLonLat;
-      if (destinationMarker && campusRouter) {
-        const destPos = destinationMarker.getLngLat();
-        showRoute(campusRouter.route(routeFrom, [destPos.lng, destPos.lat]));
-      }
+      // (Live re-routing happens inside renderEstimate for every source.)
     }
 
     function errorPosition() {

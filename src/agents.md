@@ -420,6 +420,14 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   picks the smaller uncertainty with hysteresis. Critical: indoor GPS accuracy
   is often optimistically small *and wrong*, so fixes landing in a wall (when
   near a known building) are discarded. GPS acts as a free anchor when good.
+- **Live re-route**: with a route on screen, every position update re-routes
+  from the current estimate to the same destination (`rerouteFromEstimate`,
+  called from `renderEstimate`), so the drawn line always leads forward instead
+  of pointing back where you came from. It passes the locator's bound floor as
+  the start-floor hint and `destinationFloor` as the end-floor hint, and is
+  throttled (3 m moved or 5 s elapsed; one route costs ~70 ms) and skipped
+  while "Find Path" taps are being picked. Before this, only GPS fixes
+  re-routed (with no floor hints) and PDR steps left the line stale indoors.
 - **Anchors** are manual: press "I'm Here", then tap the map to place your
   location (not the map centre); the tap re-seeds the particle cloud and resets
   drift. The **displayed floor is authoritative**: `anchorAt` passes
