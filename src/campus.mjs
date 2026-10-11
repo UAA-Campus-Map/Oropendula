@@ -32,9 +32,11 @@
  * OSM by osm.mjs. The graph is real OSM ways only - edges that would cut
  * through a building (stale ways, tile-buffer stitching) are dropped against
  * the buildings' wall segments - plus very short stitches re-joining halves
- * of a way that a tile edge clipped apart. Each building exit snaps to the
- * nearest node it can actually walk to. Without a path network the router
- * falls back to straight-line outdoor legs.
+ * of a way that a tile edge clipped apart. Exits and outdoor clicks attach at
+ * the nearest point along the network (splitting an edge when it beats the
+ * nearest vertex), and an outdoor-to-outdoor trip also offers the direct
+ * network walk, not just a chain through building entrances. Without a path
+ * network the router falls back to straight-line outdoor legs.
  *
  * All routing costs are time in seconds. Distances are metres.
  */
@@ -42,6 +44,15 @@
 /** Walking speeds, metres per second. */
 const INDOOR_SPEED = 1.3;
 const OUTDOOR_SPEED = 1.4;
+/**
+ * Outdoor legs are heavily penalised for ROUTE SELECTION (never for the
+ * reported time): Fairbanks hits -40C, where an outdoor walk is impractical, so
+ * the router should take a skybridge (or any indoor detour) over going outside
+ * whenever one exists. The multiplier only inflates the Dijkstra cost of
+ * outdoor edges; segment seconds are always recomputed from the real speed, so
+ * ETAs stay honest. Outdoor is still used when it is the only option.
+ */
+const OUTDOOR_COST_MULT = 15;
 /** Elevator cost model. */
 const ELEVATOR_WAIT_S = 15;
 const ELEVATOR_PER_FLOOR_S = 4;
@@ -68,6 +79,13 @@ const FLOOD_LEAD_CELLS = 7;       // ~3.5m allowed from a door to the outdoors
 const OUTLINE_MAX_M = 1.0;
 /** Max distance between same-connector stops on different floors, metres. */
 const CONNECTOR_LINK_M = 3.0;
+/**
+ * Max distance between two skybridge portals that may pair, metres. Bridges
+ * are explicit manual portals, and a real one can be long (an ~80 m enclosed
+ * link exists), so this is only a sanity cap - pairing itself is mutual
+ * nearest, see buildCampusRouter.
+ */
+const SKYBRIDGE_MAX_M = 120.0;
 /** Retry-ring radius when a portal point lands in a wall, metres. */
 const RETRY_RADIUS_M = 1.2;
 
@@ -524,6 +542,47 @@ export function extractPortals(shapes, toLL) {
   return byKind;
 }
 
+/**
+ * Snapshot a portal set to just what is placement-independent: id + DXF
+ * position. This is what the import tool writes into buildings-config.json so
+ * the app can skip extractPortals (doorway clustering + coarse flood fill,
+ * which costs seconds per building). DXF coords are used deliberately: the
+ * extraction runs in DXF space and only touches lon/lat at the very end, so
+ * re-aligning or rotating a plan never invalidates the cache.
+ *
+ * @param {{elevators:object[],stairs:object[],exits:object[]}} portals
+ * @returns {{elevators:object[],stairs:object[],exits:object[]}}
+ */
+export function cachePortals(portals) {
+  const strip = list => (list ?? []).map(({id, dxf}) => ({id, dxf}));
+  return {
+    elevators: strip(portals.elevators),
+    stairs: strip(portals.stairs),
+    exits: strip(portals.exits),
+  };
+}
+
+/**
+ * Rebuild a full portal set (with lon/lat) from a cached one, applying the
+ * floor's current registration. Inverse of cachePortals.
+ *
+ * @param {{elevators:object[],stairs:object[],exits:object[]}} cached - {id,dxf}
+ * @param {(x:number,y:number)=>number[]} toLL - the floor's DXF -> lon/lat
+ * @returns {{elevators:object[],stairs:object[],exits:object[]}}
+ */
+export function portalsFromCache(cached, toLL) {
+  const build = (list, kind) => (list ?? []).map((p, i) => ({
+    id: p.id ?? `${kind}-${i}`,
+    ll: toLL(p.dxf[0], p.dxf[1]),
+    dxf: p.dxf,
+  }));
+  return {
+    elevators: build(cached.elevators, 'elevators'),
+    stairs: build(cached.stairs, 'stairs'),
+    exits: build(cached.exits, 'exits'),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tiered router
 // ---------------------------------------------------------------------------
@@ -751,22 +810,71 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
   };
 
   /**
-   * Nearest graph node reachable from `ll` without cuttting through a
-   * building, within `maxM` metres; null when there is none. Used to attach
-   * exits and outdoor clicks - the connecting stub must stay outdoors too.
+   * Attach a point to the path network at the nearest place whose straight
+   * stub does not cut through a building, within `maxM` metres; null when
+   * there is none. Used to attach exits and outdoor clicks.
+   *
+   * The nearest place is the nearest node OR the nearest point along an edge.
+   * Edges matter: a tap or exit that faces the middle of a long way sees no
+   * vertex for tens of metres, and vertex-only snapping dragged the attachment
+   * out to that far vertex - so a path that visibly runs under the finger was
+   * never used, and the route detoured around it. Projecting onto the edge
+   * instead splits it in place and attaches there, so the stub is a short
+   * straight hop onto the path.
+   *
+   * @returns {{node:number, metres:number, ll:number[]}|null}
    */
   const snapClear = (ll, maxM = OUTDOOR_MAX_SNAP_M) => {
     const x = ll[0] * scale.lon, y = ll[1] * scale.lat;
-    let best = -1, bestD = Infinity;
+    // nearest clear node
+    let nodeBest = -1, nodeBestD = Infinity;
     for (let i = 0; i < nodes.length; i++) {
       const d = distLL(ll, nodes[i], scale);
-      if (d >= bestD || d > maxM) continue;
+      if (d >= nodeBestD || d > maxM) continue;
       const N = nodes[i];
       if (obstacles && obstacles.crosses(x, y, N[0] * scale.lon, N[1] * scale.lat, 2.0)) continue;
-      bestD = d;
-      best = i;
+      nodeBestD = d;
+      nodeBest = i;
     }
-    return best === -1 ? null : {node: best, metres: bestD};
+    // nearest clear point along any edge
+    let eBest = null;
+    for (let i = 0; i < adj.length; i++) {
+      for (const [j] of adj[i]) {
+        if (i > j) continue;
+        const A = nodes[i], B = nodes[j];
+        const ax = A[0] * scale.lon, ay = A[1] * scale.lat;
+        const bx = B[0] * scale.lon, by = B[1] * scale.lat;
+        const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        if (l2 < 1e-9) continue;
+        let t = ((x - ax) * dx + (y - ay) * dy) / l2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const qx = ax + t * dx, qy = ay + t * dy;
+        const d = Math.hypot(x - qx, y - qy);
+        if (d > maxM || (eBest && d >= eBest.d)) continue;
+        if (obstacles && obstacles.crosses(x, y, qx, qy, 2.0)) continue;
+        eBest = {d, i, j, qx, qy, t};
+      }
+    }
+    if (nodeBest !== -1 && (!eBest || nodeBestD <= eBest.d)) {
+      return {node: nodeBest, metres: nodeBestD, ll: nodes[nodeBest]};
+    }
+    if (!eBest) return null;
+    // Reuse an endpoint when the projection lands on it, otherwise split the
+    // edge at the projection and attach to the new node.
+    if (eBest.t <= 0.001) return {node: eBest.i, metres: eBest.d, ll: nodes[eBest.i]};
+    if (eBest.t >= 0.999) return {node: eBest.j, metres: eBest.d, ll: nodes[eBest.j]};
+    const qll = [eBest.qx / scale.lon, eBest.qy / scale.lat];
+    const p = nodeOf(qll);
+    if (p !== eBest.i && p !== eBest.j) {
+      adj[eBest.i] = adj[eBest.i].filter(([v]) => v !== eBest.j);
+      adj[eBest.j] = adj[eBest.j].filter(([v]) => v !== eBest.i);
+      edgeCount--;
+      const mi = distLL(nodes[eBest.i], nodes[p], scale);
+      const mj = distLL(nodes[p], nodes[eBest.j], scale);
+      if (mi >= 0.05) { adj[eBest.i].push([p, mi]); adj[p].push([eBest.i, mi]); edgeCount++; }
+      if (mj >= 0.05) { adj[p].push([eBest.j, mj]); adj[eBest.j].push([p, mj]); edgeCount++; }
+    }
+    return {node: p, metres: eBest.d, ll: qll};
   };
 
   /** True when the straight lon/lat run a -> b stays clear of buildings. */
@@ -858,73 +966,200 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     b._connectors = [...byKind.elevator.values(), ...byKind.stairs.values()];
   }
 
-  // --- global exit list, outdoor path network and macro graph ---------------
-  // Macro node: one building exit. Static edges:
-  //   same building  -> indoor ground-floor path length (seconds)
-  //   other building -> outdoor path-network length (seconds), straight line
-  //                     when no network was supplied
-  const exits = [];
+  // Lon/lat bounding box per floor, so buildingAt can reject a floor without
+  // paying for an attachment scan (the campus has many floors now).
   for (const b of buildings) {
-    const ground = b.floors.find(f => f.floorId === b.groundFloor);
-    for (const e of ground.exits) exits.push({building: b, floor: ground, ll: e.ll, id: e.id});
+    for (const f of b.floors) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [[sx0, sy0], [sx1, sy1]] of f.obstacleLines ?? []) {
+        x0 = Math.min(x0, sx0, sx1); x1 = Math.max(x1, sx0, sx1);
+        y0 = Math.min(y0, sy0, sy1); y1 = Math.max(y1, sy0, sy1);
+      }
+      f._bbox = isFinite(x0) ? {x0, y0, x1, y1} : null;
+    }
   }
-  const scale = metresPerDeg(exits[0]?.ll[1] ?? 61.19);
-  const N = exits.length;
 
-  // Outdoor network: one snap + one Dijkstra run per exit. Every macro
-  // cross-building edge reads its cost off those runs, and the same runs
+  // --- macro graph nodes ---------------------------------------------------
+  // A node is an exterior door, a skybridge portal, OR a connector stop (an
+  // elevator/stairs landing on a floor). Including connector stops lets the
+  // route change floors ANYWHERE - at the start, the destination, or an
+  // intermediate building - instead of only descending at the start and
+  // ascending at the end (which forced bizarre go-outside-and-around routes).
+  // Edges:
+  //   same building, same floor -> indoor walk between any two nodes
+  //   same connector, different floors -> vertical ride (elevator/stairs)
+  //   two bridges, same level, different buildings -> skybridge link
+  //   cross-building ground-floor doors -> outdoor path-network length
+  const nodes = [];
+  for (const b of buildings) {
+    for (const f of b.floors) {
+      for (const e of f.exits) nodes.push({building: b, floor: f, ll: e.ll, kind: 'door', id: e.id});
+      for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id});
+      for (const c of b._connectors ?? []) {
+        const stop = c.stops.get(f.floorId);
+        if (stop) nodes.push({building: b, floor: f, ll: stop, kind: 'connector', connector: c, id: `${c.kind}-${f.floorId}`});
+      }
+    }
+  }
+  const scale = metresPerDeg(nodes[0]?.ll[1] ?? 61.19);
+  const N = nodes.length;
+  const atGround = n => n.floor.floorId === n.building.groundFloor;
+  const floorNum = id => parseInt(id, 10) || 0;
+
+  // Attach every node to its floor's graph once. A manually placed portal often
+  // sits on (or a hair outside) the wall, where the exact point sees no nodes;
+  // fall back to the nearest walkable cell so the floor can still reach it.
+  const attachPortal = (g, ll) => {
+    const a = g.attach(ll);
+    if (a.length) return a;
+    const nw = g.nearestWalkable(ll, 120);
+    return nw ? g.attach(nw) : [];
+  };
+  const nodeAttach = nodes.map(n => attachPortal(n.floor.navGraph, n.ll));
+
+  // Same-floor distance matrix among all nodes on a floor. One attach per node
+  // (above) plus one Dijkstra per node gives every intra-floor edge in O(k),
+  // not the O(k^2) findPaths the macro graph used to run.
+  const sameFloorSec = new Map();   // `${i}:${j}` (i<j) -> seconds
+  {
+    const byFloor = new Map();
+    for (let i = 0; i < N; i++) {
+      let list = byFloor.get(nodes[i].floor);
+      if (!list) byFloor.set(nodes[i].floor, list = []);
+      list.push(i);
+    }
+    for (const [, idxs] of byFloor) {
+      if (idxs.length < 2) continue;
+      const g = nodes[idxs[0]].floor.navGraph;
+      for (const i of idxs) {
+        if (!nodeAttach[i].length) continue;
+        const run = g.dijkstraFromAttach(nodeAttach[i]);
+        for (const j of idxs) {
+          if (j <= i) continue;
+          const {dist} = g.distToAttach(run, nodeAttach[j]);
+          if (isFinite(dist)) sameFloorSec.set(`${i}:${j}`, dist / INDOOR_SPEED);
+        }
+      }
+    }
+  }
+
+  // Outdoor network: one snap + one Dijkstra run per ground-floor door. Every
+  // cross-building outdoor edge reads its cost off those runs, and the same runs
   // reconstruct the polyline for whichever chain the route picks. Snaps use
-  // snapClear so the exit -> node stub cannot cut through a building.
-  // obstacleLines are the ground-floor wall segments (WALLS + Windows +
-  // partitions, in lon/lat) each floor provides.
+  // snapClear so the door -> node stub cannot cut through a building.
   const obstacleSegs = [];
   for (const b of buildings) {
     const ground = b.floors.find(f => f.floorId === b.groundFloor);
     for (const seg of ground?.obstacleLines ?? []) obstacleSegs.push(seg);
   }
   const outdoor = outdoorShapes?.length
-    ? buildOutdoorGraph(outdoorShapes, exits[0]?.ll[1] ?? 61.19, obstacleSegs)
+    ? buildOutdoorGraph(outdoorShapes, nodes[0]?.ll[1] ?? 61.19, obstacleSegs)
     : null;
-  const outdoorRuns = exits.map(e => {
-    if (!outdoor) return null;
-    const s = outdoor.snapClear(e.ll);
-    return s ? {snap: s, run: outdoor.dijkstraFrom(s.node)} : null;
+  const outdoorRuns = nodes.map(n => {
+    if (!outdoor || n.kind !== 'door' || !atGround(n)) return null;
+    const s = outdoor.snapClear(n.ll);
+    return s ? {snap: s, run: null} : null;
   });
+  for (const r of outdoorRuns) if (r) r.run = outdoor.dijkstraFrom(r.snap.node);
 
   const macroAdj = Array.from({length: N}, () => []);
-  let sameBuildingEdges = 0, outdoorEdges = 0, outdoorNetworkEdges = 0;
-  for (let i = 0; i < N; i++) {
-    for (let j = i + 1; j < N; j++) {
-      let sec = null;
-      if (exits[i].building === exits[j].building) {
-        const p = exits[i].floor.navGraph.findPath(exits[i].ll, exits[j].ll);
-        if (p) { sec = polyLength(p, scale) / INDOOR_SPEED; sameBuildingEdges++; }
-      } else {
-        outdoorEdges++;
-        const a = outdoorRuns[i], b = outdoorRuns[j];
-        if (a && b) {
-          const metres = a.run.dist[b.snap.node] + a.snap.metres + b.snap.metres;
-          if (isFinite(metres)) {
-            sec = metres / OUTDOOR_SPEED;
-            outdoorNetworkEdges++;
-          }
-        }
-        if (sec === null) {
-          // straight-line fallback only when it stays clear of buildings
-          if (!outdoor || outdoor.segmentClear(exits[i].ll, exits[j].ll, 2)) {
-            sec = distLL(exits[i].ll, exits[j].ll, scale) / OUTDOOR_SPEED;
-          }
-        }
-      }
-      if (sec !== null) {
-        macroAdj[i].push([j, sec]);
-        macroAdj[j].push([i, sec]);
+  // Descriptor for each macro edge, so route() can rebuild the right geometry.
+  const macroEdge = new Map();
+  const link = (i, j, sec, desc) => {
+    macroAdj[i].push([j, sec]);
+    macroAdj[j].push([i, sec]);
+    macroEdge.set(`${i}:${j}`, desc);
+    macroEdge.set(`${j}:${i}`, desc);
+  };
+
+  let sameFloorEdges = 0, verticalEdges = 0, outdoorEdges = 0, outdoorNetworkEdges = 0, skybridgeEdges = 0;
+
+  // Intra-floor edges (all node pairs on a floor).
+  for (const [key, sec] of sameFloorSec) {
+    const [i, j] = key.split(':').map(Number);
+    link(i, j, sec, {kind: 'indoor'});
+    sameFloorEdges++;
+  }
+
+  // Vertical edges: the stops of one connector, across floors.
+  {
+    const byConn = new Map();
+    for (let i = 0; i < N; i++) {
+      const n = nodes[i];
+      if (n.kind !== 'connector') continue;
+      let l = byConn.get(n.connector);
+      if (!l) byConn.set(n.connector, l = []);
+      l.push(i);
+    }
+    for (const [c, idxs] of byConn) {
+      for (let a = 0; a < idxs.length; a++) for (let b = a + 1; b < idxs.length; b++) {
+        const i = idxs[a], j = idxs[b];
+        const f1 = nodes[i].floor.floorId, f2 = nodes[j].floor.floorId;
+        if (f1 === f2) continue;
+        link(i, j, verticalSeconds(c, f1, f2), {kind: 'vertical', tier: c.kind, fromFloor: f1, toFloor: f2});
+        verticalEdges++;
       }
     }
   }
 
+  // --- skybridge pairing (mutual nearest) --------------------------------
+  // Each skybridge portal pairs with its nearest partner in another building on
+  // the same floor number, but only when the two choose each other - a plain
+  // all-pairs rule would join a bridge to every nearby bridge. Only explicit
+  // bridges participate, so an ordinary (rooftop) exit never connects a
+  // building, and ground-level bridges are allowed (a shared first floor).
+  const bridgeIdx = [];
+  for (let i = 0; i < N; i++) if (nodes[i].kind === 'bridge') bridgeIdx.push(i);
+  const bridgePartner = new Map();   // i -> j (mutual)
+  const nearestBridge = i => {
+    const A = nodes[i];
+    let best = -1, bd = Infinity;
+    for (const j of bridgeIdx) {
+      if (j === i) continue;
+      const B = nodes[j];
+      if (B.building === A.building) continue;
+      if (floorNum(B.floor.floorId) !== floorNum(A.floor.floorId)) continue;
+      const d = distLL(A.ll, B.ll, scale);
+      if (d < bd) { bd = d; best = j; }
+    }
+    return {j: best, d: bd};
+  };
+  for (const i of bridgeIdx) {
+    const {j, d} = nearestBridge(i);
+    if (j < 0 || d > SKYBRIDGE_MAX_M) continue;
+    if (nearestBridge(j).j === i) bridgePartner.set(i, j);
+  }
+  for (const i of bridgeIdx) {
+    const j = bridgePartner.get(i);
+    if (j !== undefined && j > i) {
+      link(i, j, distLL(nodes[i].ll, nodes[j].ll, scale) / INDOOR_SPEED, {kind: 'skybridge'});
+      skybridgeEdges++;
+    }
+  }
+
+  // Cross-building outdoor edges between ground-floor doors.
+  for (let i = 0; i < N; i++) {
+    const A = nodes[i];
+    if (A.kind !== 'door' || !atGround(A)) continue;
+    for (let j = i + 1; j < N; j++) {
+      const B = nodes[j];
+      if (B.building === A.building) continue;
+      if (B.kind !== 'door' || !atGround(B)) continue;
+      outdoorEdges++;
+      let sec = null;
+      const a = outdoorRuns[i], b = outdoorRuns[j];
+      if (a && b) {
+        const metres = a.run.dist[b.snap.node] + a.snap.metres + b.snap.metres;
+        if (isFinite(metres)) { sec = (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT; outdoorNetworkEdges++; }
+      }
+      if (sec === null && (!outdoor || outdoor.segmentClear(A.ll, B.ll, 2))) {
+        sec = (distLL(A.ll, B.ll, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT;
+      }
+      if (sec !== null) link(i, j, sec, {kind: 'outdoor'});
+    }
+  }
+
   // --- helpers -------------------------------------------------------------
-  const floorNum = id => parseInt(id, 10) || 0;
 
   /** findPath with deterministic retry ring when a portal sits in a wall. */
   function indoorPath(graph, a, b) {
@@ -958,146 +1193,100 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
   }
 
   /**
-   * Cost in seconds from `point` on `floor` to every exit of `building`,
-   * going through any connector reachable on that floor. Ground-floor
-   * starts can also walk straight to an exit without a vertical leg.
-   * @returns {Map<exitIndex, {sec, prefix: segment[]}>} | null if none reachable
+   * Attach a point on a floor to every node on that floor (doors, bridges and
+   * connector stops): one attach + one Dijkstra, read off the reusable node
+   * attachments. Returns Map<nodeIndex, {sec}>, or null if none reachable.
+   * Vertical travel to other floors is then just the connector edges in the
+   * macro graph, so the route may ascend or descend anywhere.
    */
-  function originCosts(building, floor, point) {
-    const ground = building.floors.find(f => f.floorId === building.groundFloor);
-    if (!ground) return null;
+  function attachToFloor(floor, point) {
+    const g = floor.navGraph;
+    const pAtt = g.attach(point);
+    if (!pAtt.length) return null;
+    const run = g.dijkstraFromAttach(pAtt);
     const res = new Map();
-    const pushExit = (eIdx, sec, prefix) => {
-      const cur = res.get(eIdx);
-      if (!cur || sec < cur.sec) res.set(eIdx, {sec, prefix});
-    };
-
-    for (let ei = 0; ei < exits.length; ei++) {
-      const e = exits[ei];
-      if (e.building !== building) continue;
-      // direct walk (only when starting on the ground floor)
-      if (floor.floorId === building.groundFloor) {
-        const p = indoorPath(floor.navGraph, point, e.ll);
-        if (p) pushExit(ei, polyLength(p, scale) / INDOOR_SPEED, [
-          {tier: 'indoor', building: building.id, floor: floor.floorId, polyline: p},
-        ]);
-      }
-    }
-
-    for (const c of building._connectors) {
-      const stopHere = c.stops.get(floor.floorId);
-      const stopGround = c.stops.get(building.groundFloor);
-      if (!stopHere || !stopGround) continue;
-      const leg1 = indoorPath(floor.navGraph, point, stopHere);
-      if (!leg1) continue;
-      const sec1 = polyLength(leg1, scale) / INDOOR_SPEED;
-      const vSec = verticalSeconds(c, floor.floorId, building.groundFloor);
-      const prefix = [{tier: 'indoor', building: building.id, floor: floor.floorId, polyline: leg1}];
-      if (floor.floorId !== building.groundFloor) {
-        prefix.push({tier: c.kind, building: building.id, fromFloor: floor.floorId, toFloor: building.groundFloor});
-      }
-      for (let ei = 0; ei < exits.length; ei++) {
-        const e = exits[ei];
-        if (e.building !== building) continue;
-        const leg2 = indoorPath(ground.navGraph, stopGround, e.ll);
-        if (!leg2) continue;
-        const sec2 = polyLength(leg2, scale) / INDOOR_SPEED;
-        pushExit(ei, sec1 + vSec + sec2, [
-          ...prefix,
-          {tier: 'indoor', building: building.id, floor: building.groundFloor, polyline: leg2},
-        ]);
-      }
+    for (let i = 0; i < N; i++) {
+      if (nodes[i].floor !== floor) continue;
+      const {dist} = g.distToAttach(run, nodeAttach[i]);
+      if (isFinite(dist)) res.set(i, {sec: dist / INDOOR_SPEED});
     }
     return res.size ? res : null;
   }
 
   /**
-   * Attachment for a click that lands outside every building: snap to the
-   * nearest outdoor path node, walk the network to each exit, and fall back
-   * to a straight line when there is no network or no connection.
-   * One Dijkstra run serves every exit; results per exit are
-   * {sec, polyline} where polyline runs click -> exit.
+   * Attachment for a click that lands outside every building: walk the network
+   * to each ground-floor door, fall back to a straight line when there is no
+   * network or no connection. Results per door are {sec, polyline} where
+   * polyline runs click -> door.
    * @returns {Map<number, {sec:number, polyline:number[][]}>}
    */
-  function outdoorAttachment(ll) {
+  function outdoorAttachment(ll, clickSnap, from) {
     const res = new Map();
-    const clickSnap = outdoor ? outdoor.snapClear(ll) : null;
-    const from = clickSnap ? outdoor.dijkstraFrom(clickSnap.node) : null;
-    for (let ei = 0; ei < N; ei++) {
-      const r = outdoorRuns[ei];
+    for (let i = 0; i < N; i++) {
+      const n = nodes[i];
+      if (n.kind !== 'door' || !atGround(n)) continue;
+      const r = outdoorRuns[i];
       if (from && r) {
         const p = outdoor.pathOf(from, r.snap.node);
         if (p) {
-          const poly = [ll, ...p, exits[ei].ll];
-          res.set(ei, {sec: polyLength(poly, scale) / OUTDOOR_SPEED, polyline: poly});
+          const poly = [ll, ...p, n.ll];
+          res.set(i, {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
           continue;
         }
       }
-      // straight-line fallback, unless it would cut through a building
-      if (outdoor && !outdoor.segmentClear(ll, exits[ei].ll, 2)) continue;
-      const poly = [ll, exits[ei].ll];
-      res.set(ei, {sec: polyLength(poly, scale) / OUTDOOR_SPEED, polyline: poly});
+      if (outdoor && !outdoor.segmentClear(ll, n.ll, 2)) continue;
+      const poly = [ll, n.ll];
+      res.set(i, {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
     }
     return res;
   }
 
-  /** Mirror of originCosts: exits of `building` -> `point` on `floor`. */
-  function destinationCosts(building, floor, point) {
-    const ground = building.floors.find(f => f.floorId === building.groundFloor);
-    if (!ground) return null;
-    const res = new Map();
-    const pushExit = (eIdx, sec, suffix) => {
-      const cur = res.get(eIdx);
-      if (!cur || sec < cur.sec) res.set(eIdx, {sec, suffix});
-    };
-
-    for (let ei = 0; ei < exits.length; ei++) {
-      const e = exits[ei];
-      if (e.building !== building) continue;
-      if (floor.floorId === building.groundFloor) {
-        const p = indoorPath(floor.navGraph, e.ll, point);
-        if (p) pushExit(ei, polyLength(p, scale) / INDOOR_SPEED, [
-          {tier: 'indoor', building: building.id, floor: floor.floorId, polyline: p},
-        ]);
-      }
-    }
-
-    for (const c of building._connectors) {
-      const stopHere = c.stops.get(floor.floorId);
-      const stopGround = c.stops.get(building.groundFloor);
-      if (!stopHere || !stopGround) continue;
-      const leg2 = indoorPath(floor.navGraph, stopHere, point);
-      if (!leg2) continue;
-      const sec2 = polyLength(leg2, scale) / INDOOR_SPEED;
-      const vSec = verticalSeconds(c, building.groundFloor, floor.floorId);
-      const suffixTail = [];
-      if (floor.floorId !== building.groundFloor) {
-        suffixTail.push({tier: c.kind, building: building.id, fromFloor: building.groundFloor, toFloor: floor.floorId});
-      }
-      suffixTail.push({tier: 'indoor', building: building.id, floor: floor.floorId, polyline: leg2});
-      for (let ei = 0; ei < exits.length; ei++) {
-        const e = exits[ei];
-        if (e.building !== building) continue;
-        const leg1 = indoorPath(ground.navGraph, e.ll, stopGround);
-        if (!leg1) continue;
-        const sec1 = polyLength(leg1, scale) / INDOOR_SPEED;
-        pushExit(ei, sec1 + vSec + sec2, [
-          {tier: 'indoor', building: building.id, floor: building.groundFloor, polyline: leg1},
-          ...suffixTail,
-        ]);
-      }
-    }
-    return res.size ? res : null;
-  }
-
-  /** Which building (if any) contains this point on this floor? */
+  /**
+   * Which building (if any) contains this point, on the given floor. With a
+   * `floorId` hint that floor wins (falling back to the ground floor when the
+   * building lacks it); without one, the ground floor is tried first and any
+   * upper floor after - geometry alone can't tell overlapping footprints
+   * apart, so the hint (the floor the user is viewing) is authoritative.
+   */
   function buildingAt(ll, floorId) {
+    const mpr = metresPerDeg(ll[1]);
+    // A point marginally inside a wall (door jamb, portal point) must still
+    // classify indoors, so fall back to the same retry ring indoorPath uses.
+    const ring = [];
+    for (let k = 0; k < 8; k++) {
+      const th = (k / 8) * 2 * Math.PI;
+      ring.push([ll[0] + (Math.cos(th) * RETRY_RADIUS_M) / mpr.lon,
+                 ll[1] + (Math.sin(th) * RETRY_RADIUS_M) / mpr.lat]);
+    }
+    const hit = (b, f) => {
+      if (!f) return null;
+      // Reject by bounding box first: an attachment scan is O(nodes).
+      if (f._bbox) {
+        const pad = 1.5;
+        if (ll[0] < f._bbox.x0 - pad / mpr.lon || ll[0] > f._bbox.x1 + pad / mpr.lon ||
+            ll[1] < f._bbox.y0 - pad / mpr.lat || ll[1] > f._bbox.y1 + pad / mpr.lat) return null;
+      }
+      if (f.navGraph.attach(ll).length) return {building: b, floor: f};
+      for (const q of ring) {
+        if (f.navGraph.attach(q).length) return {building: b, floor: f};
+      }
+      return null;
+    };
+    if (floorId !== undefined) {
+      for (const b of buildings) {
+        const f = b.floors.find(x => x.floorId === floorId) ??
+                  b.floors.find(x => x.floorId === b.groundFloor);
+        const r = hit(b, f);
+        if (r) return r;
+      }
+      return null;
+    }
     for (const b of buildings) {
-      const f = b.floors.find(x => x.floorId === floorId) ??
-                b.floors.find(x => x.floorId === b.groundFloor);
-      // indoorPath's retry ring lets points that sit marginally inside a
-      // wall (door jambs, portal points) still classify as indoor.
-      if (f && indoorPath(f.navGraph, ll, ll)) return {building: b, floor: f};
+      const r = hit(b, b.floors.find(x => x.floorId === b.groundFloor));
+      if (r) return r;
+    }
+    for (const b of buildings) {
+      for (const f of b.floors) { const r = hit(b, f); if (r) return r; }
     }
     return null;
   }
@@ -1107,14 +1296,16 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
    *
    * @param {number[]} startLL
    * @param {number[]} endLL
-   * @param {{startFloor?:string, endFloor?:string}} [opts] floor hints;
-   *        default to the ground floor of whichever building the point is in.
+   * @param {{startFloor?:string, endFloor?:string}} [opts] floor hints - the
+   *        floor the user is viewing. Omitted, the point's floor is detected
+   *        (ground first). Supplied, it wins (a building without that floor
+   *        uses its ground floor).
    * @returns {{segments:object[], totalSeconds:number, totalMeters:number,
    *            summary:string}|null}
    */
   function route(startLL, endLL, opts = {}) {
-    const startHit = buildingAt(startLL, opts.startFloor ?? buildings[0].groundFloor);
-    const endHit = buildingAt(endLL, opts.endFloor ?? buildings[0].groundFloor);
+    const startHit = buildingAt(startLL, opts.startFloor);
+    const endHit = buildingAt(endLL, opts.endFloor);
 
     // Same building, same floor: a single indoor leg is always at least as
     // good as anything routed through exits.
@@ -1137,20 +1328,41 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     }
 
     // --- origin / destination attachment to macro nodes --------------------
+    // Snap both outdoor ends BEFORE any Dijkstra: a snap may split an edge and
+    // add a node, and a run started earlier would not contain that node.
     let origin = null, dest = null;
-
+    let startSnap = null, endSnap = null, startRun = null, endRun = null;
     if (startHit) {
-      origin = originCosts(startHit.building, startHit.floor, startLL);
+      origin = attachToFloor(startHit.floor, startLL);
     } else {
-      // outdoors: walk the OSM network from the click to every exit
-      origin = outdoorAttachment(startLL);
+      startSnap = outdoor ? outdoor.snapClear(startLL) : null;
     }
     if (endHit) {
-      dest = destinationCosts(endHit.building, endHit.floor, endLL);
+      dest = attachToFloor(endHit.floor, endLL);
     } else {
-      dest = outdoorAttachment(endLL);
+      endSnap = outdoor ? outdoor.snapClear(endLL) : null;
     }
+    if (startSnap) startRun = outdoor.dijkstraFrom(startSnap.node);
+    if (endSnap) endRun = outdoor.dijkstraFrom(endSnap.node);
+    // outdoors: walk the OSM network from the click to every exit
+    if (!startHit) origin = outdoorAttachment(startLL, startSnap, startRun);
+    if (!endHit) dest = outdoorAttachment(endLL, endSnap, endRun);
     if (!origin || !dest) return null;
+
+    // --- direct outdoor walk, when neither end is inside a building --------
+    // The exit-chain model can only express an outdoor trip as exit -> exit,
+    // so a walk straight along a path that passes no entrance was invisible
+    // and the route detoured through the nearest exit. The network path
+    // between the two clicks is a path in the same graph, so offer it too and
+    // take whichever is quicker (cutting through a building can still win).
+    let direct = null;
+    if (!startHit && !endHit && startRun && endRun) {
+      const p = outdoor.pathOf(startRun, endSnap.node);
+      if (p) {
+        const poly = [startLL, ...p, endLL];
+        direct = {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly};
+      }
+    }
 
     // --- Dijkstra over the macro graph with virtual source/sink -----------
     // Node ids 0..N-1 are exits; N = virtual source, N+1 = virtual sink.
@@ -1176,7 +1388,19 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
         if (nd < cost[v]) { cost[v] = nd; prev[v] = u; open.push(v, nd); }
       }
     }
-    if (!done[SNK]) return null;
+    // Prefer the direct outdoor walk when the exit chain is infeasible or no
+    // quicker (the chain can beat it only by cutting through a building).
+    if (!done[SNK] || (direct && direct.sec <= cost[SNK])) {
+      if (!direct) return null;
+      const meters = polyLength(direct.polyline, scale);
+      return {
+        segments: [{tier: 'outdoor', polyline: direct.polyline,
+                    meters, seconds: meters / OUTDOOR_SPEED}],
+        totalSeconds: meters / OUTDOOR_SPEED,
+        totalMeters: meters,
+        summary: 'outside',
+      };
+    }
 
     // --- expand the chain into segments ------------------------------------
     const chain = [];
@@ -1203,40 +1427,50 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
       segments.push({...seg, meters: 0, seconds});
     };
 
-    // prefix: start point -> first exit
-    const firstExitIdx = chain[1];
-    const o = origin.get(firstExitIdx);
+    // prefix: start point -> first node
+    const firstIdx = chain[1];
     if (startHit) {
-      for (const seg of o.prefix) seg.tier === 'elevator' || seg.tier === 'stairs' ? addVertical(seg) : addPoly(seg);
+      const p = indoorPath(startHit.floor.navGraph, startLL, nodes[firstIdx].ll);
+      if (p) addPoly({tier: 'indoor', building: startHit.building.id, floor: startHit.floor.floorId, polyline: p});
     } else {
-      addOutdoorPoly(o.polyline);
+      addOutdoorPoly(origin.get(firstIdx).polyline);
     }
 
     // macro chain legs
     for (let k = 1; k < chain.length - 2; k++) {
       const a = chain[k], b = chain[k + 1];
-      if (exits[a].building === exits[b].building) {
-        const p = exits[a].floor.navGraph.findPath(exits[a].ll, exits[b].ll);
-        addPoly({tier: 'indoor', building: exits[a].building.id, floor: exits[b].floor.floorId, polyline: p});
+      const desc = macroEdge.get(`${a}:${b}`);
+      if (desc?.kind === 'vertical') {
+        addVertical({tier: desc.tier, building: nodes[a].building.id,
+                     fromFloor: desc.fromFloor, toFloor: desc.toFloor,
+                     // The connector landing, so a 3D view can draw the riser.
+                     ll: nodes[a].ll});
+      } else if (desc?.kind === 'skybridge') {
+        addPoly({tier: 'skybridge', building: nodes[b].building.id,
+                 floor: nodes[a].floor.floorId,
+                 polyline: [nodes[a].ll, nodes[b].ll]});
+      } else if (desc?.kind === 'indoor') {
+        const p = indoorPath(nodes[a].floor.navGraph, nodes[a].ll, nodes[b].ll);
+        if (p) addPoly({tier: 'indoor', building: nodes[a].building.id, floor: nodes[a].floor.floorId, polyline: p});
       } else {
-        // outdoor: exit stub -> path network -> exit stub
+        // outdoor: door stub -> path network -> door stub
         const ra = outdoorRuns[a], rb = outdoorRuns[b];
-        let poly = [exits[a].ll, exits[b].ll];
+        let poly = [nodes[a].ll, nodes[b].ll];
         if (ra && rb) {
           const p = outdoor.pathOf(ra.run, rb.snap.node);
-          if (p) poly = [exits[a].ll, ...p, exits[b].ll];
+          if (p) poly = [nodes[a].ll, ...p, nodes[b].ll];
         }
         addOutdoorPoly(poly);
       }
     }
 
-    // suffix: last exit -> end point
-    const lastExitIdx = chain[chain.length - 2];
-    const d = dest.get(lastExitIdx);
+    // suffix: last node -> end point
+    const lastIdx = chain[chain.length - 2];
     if (endHit) {
-      for (const seg of d.suffix) seg.tier === 'elevator' || seg.tier === 'stairs' ? addVertical(seg) : addPoly(seg);
+      const p = indoorPath(endHit.floor.navGraph, nodes[lastIdx].ll, endLL);
+      if (p) addPoly({tier: 'indoor', building: endHit.building.id, floor: endHit.floor.floorId, polyline: p});
     } else {
-      addOutdoorPoly(d.polyline);
+      addOutdoorPoly(dest.get(lastIdx).polyline);
     }
 
     const totalSeconds = segments.reduce((a, s) => a + (s.seconds || 0), 0);
@@ -1252,6 +1486,9 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
         lastBuilding = null;
       } else if (s.tier === 'elevator' || s.tier === 'stairs') {
         parts.push(s.tier);
+      } else if (s.tier === 'skybridge') {
+        parts.push('skybridge');
+        lastBuilding = s.building ?? lastBuilding;
       } else if (s.tier === 'indoor' && s.building && s.building !== lastBuilding) {
         parts.push(s.building);
         lastBuilding = s.building;
@@ -1267,14 +1504,17 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     };
   }
 
+  const doorCount = nodes.reduce((a, n) => a + (n.kind === 'door' ? 1 : 0), 0);
   const stats = {
     buildings: buildings.length,
-    exits: N,
-    macroEdges: sameBuildingEdges + outdoorEdges,
+    nodes: N,
+    exits: doorCount,
+    macroEdges: sameFloorEdges + verticalEdges + outdoorEdges + skybridgeEdges,
+    skybridgeEdges,
     outdoor: outdoor
       ? {nodes: outdoor.nodeCount, edges: outdoor.edgeCount,
-         networkEdges: outdoorNetworkEdges, sameBuildingEdges}
-      : {nodes: 0, edges: 0, networkEdges: 0, sameBuildingEdges},
+         networkEdges: outdoorNetworkEdges, sameBuildingEdges: sameFloorEdges}
+      : {nodes: 0, edges: 0, networkEdges: 0, sameBuildingEdges: sameFloorEdges},
     buildMs: +(performance.now() - t0).toFixed(0),
   };
   return {route, buildingAt, stats};

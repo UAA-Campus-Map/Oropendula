@@ -78,6 +78,41 @@
       color: #ffffff;
     }
 
+    .floor-control {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      background: #ffffff;
+      border: 2px solid #333333;
+      border-radius: 999px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .floor-btn {
+      border: none;
+      background: #ffffff;
+      color: #333333;
+      min-height: 44px;
+      min-width: 44px;
+      font-size: 1.3rem;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .floor-btn:active { background: #eeeeee; }
+    .floor-btn:disabled { opacity: 0.3; cursor: default; }
+
+    .floor-label {
+      min-width: 4.5rem;
+      text-align: center;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #333333;
+      user-select: none;
+    }
+
     #sidebar {
       position: absolute;
       bottom: 0;
@@ -143,6 +178,43 @@
       font-weight: 600;
     }
 
+    .hint {
+      font-size: 0.8rem;
+      color: #666666;
+      margin: 0 0 0.5rem 0;
+      line-height: 1.3;
+    }
+
+    .cal-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0.4rem 0;
+    }
+
+    .cal-val {
+      font-variant-numeric: tabular-nums;
+      color: #333333;
+      font-size: 0.85rem;
+    }
+
+    .cal-btn {
+      background: #ffffff;
+      border: 2px solid #333333;
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #333333;
+      cursor: pointer;
+    }
+
+    .cal-btn:active { transform: scale(0.97); }
+    .cal-btn:disabled { opacity: 0.4; cursor: default; }
+    .cal-btn.active { background: #4a90e2; border-color: #4a90e2; color: #ffffff; }
+    .cal-primary { background: #4a90e2; border-color: #4a90e2; color: #ffffff; }
+
     @media (min-width: 768px) {
       #controls {
         top: 1.5rem;
@@ -154,6 +226,16 @@
         min-height: 52px;
         font-size: 1.1rem;
         padding: 0.75rem 1.5rem;
+      }
+
+      .floor-btn {
+        min-height: 52px;
+        min-width: 52px;
+        font-size: 1.5rem;
+      }
+
+      .floor-label {
+        font-size: 1.1rem;
       }
 
       #sidebar {
@@ -184,52 +266,94 @@
   <div id="map"></div>
   
   <div id="controls">
-    <button id="menu-btn" class="control-btn">Menu</button>
+    <button id="menu-btn" class="control-btn">Calibrate</button>
     <button id="location-btn" class="control-btn">My Location</button>
+    <button id="anchor-btn" class="control-btn">I'm Here</button>
     <button id="path-btn" class="control-btn">Find Path</button>
+    <button id="view-btn" class="control-btn" title="Toggle 2D / 3D">2D</button>
+    <div class="floor-control" aria-label="Displayed floor">
+      <button id="floor-down" class="floor-btn" title="Floor below">&minus;</button>
+      <span id="floor-label" class="floor-label">Floor 1</span>
+      <button id="floor-up" class="floor-btn" title="Floor above">+</button>
+    </div>
   </div>
   
   <div id="sidebar">
     <div id="sidebar-handle"></div>
-    <h2>Navigation</h2>
-    
+    <h2>Step calibration</h2>
+
     <div class="info-section">
       <div class="info-label">Status</div>
       <div id="status-text" class="info-value">Ready</div>
     </div>
-    
+
+    <div class="info-section">
+      <div class="info-label">1 &middot; Mark the line</div>
+      <p class="hint">Place the start and end of a straight line you'll walk.</p>
+      <div class="cal-row">
+        <button id="cal-start-pt" class="cal-btn">Place start</button>
+        <span id="cal-start-label" class="cal-val">not set</span>
+      </div>
+      <div class="cal-row">
+        <button id="cal-end-pt" class="cal-btn">Place end</button>
+        <span id="cal-end-label" class="cal-val">not set</span>
+      </div>
+      <div class="cal-row">
+        <span>Distance</span><span id="cal-distance" class="cal-val">&mdash;</span>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <div class="info-label">2 &middot; Walk it</div>
+      <p class="hint">Press Start, walk the line to the end point, then press End.</p>
+      <div class="cal-row">
+        <button id="cal-run-start" class="cal-btn">Start</button>
+        <button id="cal-run-end" class="cal-btn">End</button>
+      </div>
+      <div class="cal-row"><span>Steps</span><span id="cal-steps" class="cal-val">0</span></div>
+      <div class="cal-row"><span>Your step length</span><span id="cal-result" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Heading offset</span><span id="cal-heading" class="cal-val">&mdash;</span></div>
+      <button id="cal-apply" class="cal-btn cal-primary" style="width:100%" disabled>Apply</button>
+    </div>
+
     <div class="info-section">
       <div class="info-label">Heading</div>
       <div id="compass" class="info-value">0°</div>
     </div>
-    
-    <div class="info-section">
-      <div class="info-label">Graph Stats</div>
-      <div id="graph-stats" class="info-value">Not built</div>
-    </div>
+
+    <button id="cal-hide" class="cal-btn cal-primary" style="width:100%">Done &middot; Hide</button>
+    <div class="info-label" style="margin-top:10px">Graph</div>
+    <div id="graph-stats" class="info-value" style="color:#999;font-size:0.75rem">Not built</div>
   </div>
 
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { buildGraph } from './navgraph.mjs';
-    import { extractPortals, buildCampusRouter, shapeSegments } from './campus.mjs';
+    import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments } from './campus.mjs';
     import { loadOsmShapes } from './osm.mjs';
+    import { metresPerDegree, makeToLL } from './geo.mjs';
+    import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
+    import { ParticleFilter } from './locate.mjs';
+    import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
     // Protocol registration
     const protocol = new pmtiles.Protocol({ metadata: true });
     maplibregl.addProtocol('pmtiles', protocol.tile);
 
-    // Map initialization
+    // Map initialization. Starts in 2D (flat, north-up); the 2D/3D toggle
+    // enables pitch/rotation and the extruded campus.
     const map = new maplibregl.Map({
       container: 'map',
       zoom: 17,
       center: [-149.832240, 61.189856],
+      pitch: 0,
       style: 'https://navigator.cheeseverse.net/style.json',
       touchZoomRotate: true,
       dragPan: true,
-      dragRotate: true,
+      dragRotate: false,
       pitchWithRotate: false,
+      maxPitch: 75,
     });
 
     // State
@@ -237,17 +361,48 @@
     let buildings = [];
     let destinationMarker = null;
     let isDefiningPath = false;
+    let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
+    let is3D = false;            // starts in 2D; toggled by the view button
     let firstPathPoint = null;
+    let firstPathFloor = null;   // floor shown when the start was tapped
+
+    // PDR step-length calibration: mark a line, walk it, divide distance by
+    // steps counted.
+    const calibration = {
+      placing: null,   // 'start' | 'end' | null (next map tap sets that point)
+      startLL: null, endLL: null, distance: null,
+      active: false, steps: 0, result: null,
+      // heading accumulation during the walk (circular sums)
+      headingSin: 0, headingCos: 0, headingSamples: 0, headingBias: null,
+    };
+    let calStartMarker = null, calEndMarker = null;
 
     // UI Elements
     const menuBtn = document.getElementById('menu-btn');
     const locationBtn = document.getElementById('location-btn');
+    const anchorBtn = document.getElementById('anchor-btn');
     const pathBtn = document.getElementById('path-btn');
+    const viewBtn = document.getElementById('view-btn');
+    const floorDown = document.getElementById('floor-down');
+    const floorUp = document.getElementById('floor-up');
+    const floorLabel = document.getElementById('floor-label');
     const sidebar = document.getElementById('sidebar');
     const sidebarHandle = document.getElementById('sidebar-handle');
     const compassDisplay = document.getElementById('compass');
     const statusText = document.getElementById('status-text');
     const graphStats = document.getElementById('graph-stats');
+    const calStartPtBtn = document.getElementById('cal-start-pt');
+    const calEndPtBtn = document.getElementById('cal-end-pt');
+    const calRunStartBtn = document.getElementById('cal-run-start');
+    const calRunEndBtn = document.getElementById('cal-run-end');
+    const calApplyBtn = document.getElementById('cal-apply');
+    const calHideBtn = document.getElementById('cal-hide');
+    const calDistanceEl = document.getElementById('cal-distance');
+    const calStepsEl = document.getElementById('cal-steps');
+    const calResultEl = document.getElementById('cal-result');
+    const calHeadingEl = document.getElementById('cal-heading');
+    const calStartLabel = document.getElementById('cal-start-label');
+    const calEndLabel = document.getElementById('cal-end-label');
 
     // Event listeners
     menuBtn.addEventListener('click', toggleSidebar);
@@ -256,66 +411,399 @@
     pathBtn.addEventListener('click', () => {
       isDefiningPath = !isDefiningPath;
       pathBtn.classList.toggle('active', isDefiningPath);
-      statusText.textContent = isDefiningPath ? 'Tap two points on map' : 'Ready';
+      statusText.textContent = isDefiningPath ? 'Tap the start point' : 'Ready';
       if (!isDefiningPath) {
         firstPathPoint = null;
+        firstPathFloor = null;
       }
+      // While picking points, show a solid-black plan of the selected floor
+      // with room numbers so rooms are easy to identify.
+      findPathMode = isDefiningPath;
+      applyFloorFilter(currentFloorId());
     });
     
     locationBtn.addEventListener('click', startLiveLocate);
+    viewBtn.addEventListener('click', () => { is3D = !is3D; applyViewMode(); });
+
+    /** Switch between the flat 2D plan and the extruded 3D stack. */
+    function applyViewMode() {
+      viewBtn.textContent = is3D ? '3D' : '2D';
+      viewBtn.classList.toggle('active', is3D);
+      if (is3D) {
+        map.easeTo({ pitch: 50, bearing: map.getBearing(), duration: 500 });
+        map.dragRotate?.enable?.();
+        map.touchZoomRotate?.enableRotation?.();
+      } else {
+        map.easeTo({ pitch: 0, bearing: 0, duration: 500 });
+        map.dragRotate?.disable?.();
+        map.touchZoomRotate?.disableRotation?.();
+      }
+      applyFloorFilter(currentFloorId());
+      renderRoute();
+    }
+    floorDown.addEventListener('click', () => setFloor(floorLevel - 1));
+    floorUp.addEventListener('click', () => setFloor(floorLevel + 1));
+
+    // The floor a tap is read on: whatever the picker currently shows.
+    const floorOfView = () => currentFloorId();
+
+    // Manual anchor: press "I'm Here", then tap the map to place your
+    // location. Re-seeds the particle cloud and resets PDR drift - the
+    // zero-hardware calibration point.
+    let placingAnchor = false;
+    anchorBtn.addEventListener('click', () => {
+      if (!livePosMarker) startLiveLocate();
+      placingAnchor = true;
+      anchorBtn.classList.add('active');
+      statusText.textContent = 'Tap the map where you are';
+    });
+
+    function anchorAt(ll) {
+      ensureLocator(ll);
+      if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
+      locator.arbiter.anchor(ll, { spreadM: 3 });
+      renderEstimate(locator.arbiter.estimate(performance.now()));
+      statusText.textContent = 'Anchored here';
+    }
+
+    // --- step-length calibration -------------------------------------------
+    calStartPtBtn.addEventListener('click', () => beginPlacement('start'));
+    calEndPtBtn.addEventListener('click', () => beginPlacement('end'));
+    calRunStartBtn.addEventListener('click', startCalibrationWalk);
+    calRunEndBtn.addEventListener('click', endCalibrationWalk);
+    calApplyBtn.addEventListener('click', applyCalibration);
+    calHideBtn.addEventListener('click', () => sidebar.classList.remove('visible'));
+
+    function beginPlacement(which) {
+      calibration.placing = which;
+      calStartPtBtn.classList.toggle('active', which === 'start');
+      calEndPtBtn.classList.toggle('active', which === 'end');
+      statusText.textContent = `Tap the map to place the ${which} point`;
+    }
+
+    function setCalPoint(which, ll) {
+      if (which === 'start') {
+        calibration.startLL = ll;
+        calStartLabel.textContent = `${ll[1].toFixed(5)}, ${ll[0].toFixed(5)}`;
+        if (calStartMarker) calStartMarker.setLngLat(ll);
+        else calStartMarker = new maplibregl.Marker({ color: '#2ecc71' }).setLngLat(ll).addTo(map);
+      } else {
+        calibration.endLL = ll;
+        calEndLabel.textContent = `${ll[1].toFixed(5)}, ${ll[0].toFixed(5)}`;
+        if (calEndMarker) calEndMarker.setLngLat(ll);
+        else calEndMarker = new maplibregl.Marker({ color: '#e74c3c' }).setLngLat(ll).addTo(map);
+      }
+      calibration.placing = null;
+      calStartPtBtn.classList.remove('active');
+      calEndPtBtn.classList.remove('active');
+      // Straight-line distance between the two marks (metres).
+      if (calibration.startLL && calibration.endLL) {
+        calibration.distance = turf.distance(calibration.startLL, calibration.endLL, { units: 'meters' });
+        calDistanceEl.textContent = `${calibration.distance.toFixed(1)} m`;
+      }
+      statusText.textContent = `${which === 'start' ? 'Start' : 'End'} point set`;
+    }
+
+    function startCalibrationWalk() {
+      if (!calibration.startLL || !calibration.endLL) {
+        statusText.textContent = 'Place both points first';
+        return;
+      }
+      // Sensors must be running to count steps (this also requests permission).
+      if (motion) motion.start(); else startMotion();
+      // Walk the known line in the RELATIVE heading frame: its offset from
+      // true north is measurable here and every later heading inherits it.
+      motion.setHeadingMode('relative');
+      motion.heading.reset();
+      calibration.active = true;
+      calibration.steps = 0;
+      calibration.result = null;
+      calibration.headingSin = 0;
+      calibration.headingCos = 0;
+      calibration.headingSamples = 0;
+      calibration.headingBias = null;
+      calStepsEl.textContent = '0';
+      calResultEl.textContent = '—';
+      calHeadingEl.textContent = '—';
+      calApplyBtn.disabled = true;
+      statusText.textContent = 'Walk to the end point, then press End';
+    }
+
+    function endCalibrationWalk() {
+      calibration.active = false;
+      if (calibration.steps > 0 && calibration.distance > 0) {
+        calibration.result = calibration.distance / calibration.steps;
+        calResultEl.textContent = `${calibration.result.toFixed(3)} m/step`;
+
+        // The line's true bearing is the device orientation during the walk, so
+        // the offset between it and the measured mean heading calibrates the
+        // relative frame to north.
+        if (calibration.headingSamples > 0) {
+          const meanHeading = Math.atan2(calibration.headingSin, calibration.headingCos);
+          const trueBearing = wrapAngle(turf.bearing(calibration.startLL, calibration.endLL) * Math.PI / 180);
+          const delta = wrapAngle(trueBearing - meanHeading);
+          calibration.headingBias = wrapAngle(motion.heading.bias + delta);
+          motion.heading.calibrate(calibration.headingBias);
+          calHeadingEl.textContent = `${(calibration.headingBias * 180 / Math.PI).toFixed(1)}°`;
+        }
+
+        calApplyBtn.disabled = false;
+        statusText.textContent =
+          `${calibration.result.toFixed(3)} m/step over ${calibration.steps} steps · ${calibration.distance.toFixed(1)} m`;
+      } else {
+        statusText.textContent = 'No steps recorded - press Start, then walk';
+      }
+    }
+
+    function applyCalibration() {
+      if (!calibration.result) return;
+      stepModel.base = calibration.result;
+      try {
+        localStorage.setItem('pdr-step-base', String(calibration.result));
+        if (calibration.headingBias != null) {
+          localStorage.setItem('pdr-heading-bias', String(calibration.headingBias));
+          localStorage.setItem('pdr-heading-mode', 'relative');
+        }
+      } catch (e) { /* ignore */ }
+      statusText.textContent = `Step length set to ${calibration.result.toFixed(3)} m` +
+        (calibration.headingBias != null ? ', heading calibrated' : '');
+      calApplyBtn.disabled = true;
+    }
 
     function toggleSidebar() {
       sidebar.classList.toggle('visible');
     }
 
-    // Utility functions
-    function metresPerDegree(lat) {
-      const p = (lat * Math.PI) / 180;
-      const c = (k) => Math.cos(k * p);
-      return {
-        lat: 111132.92 - 559.82 * c(2) + 1.175 * c(4) - 0.0023 * c(6),
-        lon: 111412.84 * c(1) - 93.5 * c(3) + 0.118 * c(5),
-      };
-    }
+    // Registration math (metresPerDegree, dxfCoordsToLonLat, DXF_SCALE,
+    // makeToLL) lives in geo.mjs - shared with smoke.mjs and import.html.
 
-    // DXF units are inches; 0.0254 m per inch.
-    const DXF_SCALE = 0.0254;
-
-    function dxfCoordsToLonLat(origin, x, y, rot, scale = DXF_SCALE) {
-      const mPerDeg = metresPerDegree(origin.lat);
-      const east = x * scale * Math.cos(rot) - y * scale * Math.sin(rot);
-      const north = x * scale * Math.sin(rot) + y * scale * Math.cos(rot);
-      const lat = origin.lat + north / mPerDeg.lat;
-      const lon = origin.lon + east / mPerDeg.lon;
-      return [lon, lat];
-    }
-
-    // Colours per route tier; vertical segments have no geometry (they are
-    // stairs/elevator rides) and are reported in the status summary instead.
+    // Colours per route tier.
     const TIER_COLORS = {
       indoor: '#e74c3c',
       outdoor: '#2980b9',
       elevator: '#8e44ad',
       stairs: '#e67e22',
+      skybridge: '#16a085',
     };
 
-    function showRoute(route) {
-      if (!route) {
-        statusText.textContent = 'No route found';
-        return;
+    // --- 3D rendering -------------------------------------------------------
+    // The campus is always drawn in 3D with fill-extrusion. Floors stack at
+    // FLOOR_HEIGHT_M per level; walls + floor plates form the structure (built
+    // once) and the route is a raised ribbon rebuilt per route. This build has
+    // no line-z-offset, so extrusions are the only way to lift geometry.
+    const FLOOR_HEIGHT_M = 5.5;   // metres between floor levels
+    const WALL_TOP_M = 5.3;       // wall height above a floor's base
+    const WALL_WIDTH_M = 0.25;    // extruded wall thickness
+    const ROUTE_WIDTH_M = 0.35;   // route ribbon width
+    const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
+    const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
+
+    /** Closed lon/lat ring of a thin rectangle around segment a->b. */
+    function segmentQuad(a, b, widthM) {
+      const m = metresPerDegree((a[1] + b[1]) / 2);
+      const ax = a[0] * m.lon, ay = a[1] * m.lat;
+      const bx = b[0] * m.lon, by = b[1] * m.lat;
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) return null;
+      const nx = (-dy / len) * (widthM / 2), ny = (dx / len) * (widthM / 2);
+      const ll = (x, y) => [x / m.lon, y / m.lat];
+      return [ll(ax + nx, ay + ny), ll(bx + nx, by + ny),
+              ll(bx - nx, by - ny), ll(ax - nx, ay - ny), ll(ax + nx, ay + ny)];
+    }
+
+    /** Closed lon/lat square of side `sizeM` around a point. */
+    function squareRing(ll, sizeM) {
+      const m = metresPerDegree(ll[1]);
+      const hx = (sizeM / 2) / m.lon, hy = (sizeM / 2) / m.lat;
+      return [[ll[0] - hx, ll[1] - hy], [ll[0] + hx, ll[1] - hy],
+              [ll[0] + hx, ll[1] + hy], [ll[0] - hx, ll[1] + hy], [ll[0] - hx, ll[1] - hy]];
+    }
+
+    /**
+     * Convex hull of lon/lat points (monotone chain), closed. Used for the
+     * floor plate: a wall-bbox slab is axis-aligned and overhangs badly on a
+     * rotated building (AS117 is ~19 deg), while the hull hugs the outline.
+     */
+    function convexHull(points) {
+      if (points.length < 3) return null;
+      const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lower = [];
+      for (const p of pts) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+        lower.push(p);
       }
-      const data = {
-        type: 'FeatureCollection',
-        features: route.segments
-          .filter((s) => s.polyline)
-          .map((s) => ({
+      const upper = [];
+      for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+        upper.push(p);
+      }
+      const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+      if (hull.length < 3) return null;
+      hull.push(hull[0]);
+      return hull;
+    }
+
+    // Floors are drawn as ONE translucent extrusion layer per level, added in
+    // ascending order AFTER the (opaque) route. Transparent fill-extrusions
+    // still write depth in this build, so a single combined structure layer
+    // would depth-reject everything behind it and read as solid; splitting by
+    // level lets each upper floor blend over the lower ones (true x-ray).
+    let structureLevels = [];
+    // Walls darker than the floor plate; the selected level is blue-tinted.
+    const structureColorFor = (level) => {
+      const sel = level === floorLevelOf(currentFloorId());
+      const wall = sel ? '#1f5f9e' : '#2b3036';
+      const floor = sel ? '#7fb3e0' : '#6b7683';
+      return ['case', ['==', ['get', 'kind'], 'floor'], floor, wall];
+    };
+
+    /** Build the static structure: extruded walls + floor plates, once. */
+    function buildStructure3D() {
+      if (map.getSource('campus-3d')) return;
+      const features = [];
+      const levels = new Set();
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          const base = floorBase(f.floorId);
+          const level = floorLevelOf(f.floorId);
+          levels.add(level);
+          const segs = f.obstacleLines ?? [];
+          const pts = [];
+          for (const [a, c] of segs) {
+            const ring = segmentQuad(a, c, WALL_WIDTH_M);
+            if (ring) features.push({
+              type: 'Feature',
+              properties: { floor: f.floorId, level, kind: 'wall', base, top: base + WALL_TOP_M },
+              geometry: { type: 'Polygon', coordinates: [ring] },
+            });
+            pts.push(a, c);
+          }
+          // Floor plate: convex hull of the walls, not their axis-aligned bbox.
+          const hull = convexHull(pts);
+          if (hull) features.push({
             type: 'Feature',
-            properties: { tier: s.tier },
+            properties: { floor: f.floorId, level, kind: 'floor', base: base - 0.15, top: base },
+            geometry: { type: 'Polygon', coordinates: [hull] },
+          });
+        }
+      }
+      structureLevels = [...levels].sort((a, c) => a - c);
+      map.addSource('campus-3d', { type: 'geojson', data: { type: 'FeatureCollection', features } });
+      for (const level of structureLevels) {
+        map.addLayer({
+          id: `campus-3d-level-${level}`,
+          type: 'fill-extrusion',
+          source: 'campus-3d',
+          filter: ['==', ['get', 'level'], level],
+          paint: {
+            'fill-extrusion-color': structureColorFor(level),
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 0.15,
+            'fill-extrusion-vertical-gradient': true,
+          },
+        });
+      }
+      applyStructureStyle();
+    }
+
+    /**
+     * Style the structure for the current floor and mode. In "Find Path" mode
+     * the selected floor's walls are drawn SOLID BLACK (opaque) with the floor
+     * plates hidden, so the room layout reads clearly while picking taps;
+     * afterwards everything returns to the translucent x-ray stack.
+     */
+    function applyStructureStyle() {
+      const n = floorLevelOf(currentFloorId());
+      for (const level of structureLevels) {
+        const id = `campus-3d-level-${level}`;
+        if (!map.getLayer(id)) continue;
+        map.setLayoutProperty(id, 'visibility', (is3D && level <= n) ? 'visible' : 'none');
+        const sel = level === n;
+        if (findPathMode) {
+          // Walls only (plates hidden), selected level solid black.
+          map.setFilter(id, ['all', ['==', ['get', 'level'], level], ['==', ['get', 'kind'], 'wall']]);
+          map.setPaintProperty(id, 'fill-extrusion-color', sel ? '#000000' : '#2b3036');
+          map.setPaintProperty(id, 'fill-extrusion-opacity', sel ? 1 : 0.15);
+        } else {
+          map.setFilter(id, ['==', ['get', 'level'], level]);
+          map.setPaintProperty(id, 'fill-extrusion-color', structureColorFor(level));
+          map.setPaintProperty(id, 'fill-extrusion-opacity', 0.15);
+        }
+      }
+      if (map.getLayer('campus-3d-route')) {
+        map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    // The last computed route.
+    let lastRoute = null;
+
+    /** Does this route segment lie on the given floor? (2D line filtering.) */
+    function segmentOnFloor(s, floorId) {
+      if (s.tier === 'indoor' || s.tier === 'skybridge') return s.floor === floorId;
+      if (s.tier === 'outdoor') return buildings.some((b) => b.groundFloor === floorId);
+      return false;
+    }
+
+    /** (Re)draw the route: 3D raised ribbons + a filtered 2D line. */
+    function renderRoute() {
+      // --- 3D: raised ribbons + vertical risers (whole route) ---
+      const features = [];
+      for (const s of lastRoute?.segments ?? []) {
+        const color = TIER_COLORS[s.tier] ?? TIER_COLORS.indoor;
+        if (s.polyline) {
+          const base = (s.tier === 'outdoor' ? 0 : floorBase(s.floor)) + 0.1;
+          for (let i = 1; i < s.polyline.length; i++) {
+            const ring = segmentQuad(s.polyline[i - 1], s.polyline[i], ROUTE_WIDTH_M);
+            if (ring) features.push({
+              type: 'Feature', properties: { color, base, top: base + 0.5 },
+              geometry: { type: 'Polygon', coordinates: [ring] },
+            });
+          }
+        } else if ((s.tier === 'elevator' || s.tier === 'stairs') && s.ll) {
+          const b0 = floorBase(s.fromFloor), b1 = floorBase(s.toFloor);
+          features.push({
+            type: 'Feature',
+            properties: { color, base: Math.min(b0, b1), top: Math.max(b0, b1) },
+            geometry: { type: 'Polygon', coordinates: [squareRing(s.ll, 0.6)] },
+          });
+        }
+      }
+      const data = { type: 'FeatureCollection', features };
+      if (!map.getSource('campus-3d-route')) {
+        map.addSource('campus-3d-route', { type: 'geojson', data });
+        map.addLayer({
+          id: 'campus-3d-route',
+          type: 'fill-extrusion',
+          source: 'campus-3d-route',
+          paint: {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 1,
+          },
+        });
+      } else {
+        map.getSource('campus-3d-route').setData(data);
+      }
+
+      // --- 2D: flat line, only the part on the selected floor ---
+      const sel = currentFloorId();
+      const lineData = {
+        type: 'FeatureCollection',
+        features: (lastRoute?.segments ?? [])
+          .filter((s) => s.polyline && segmentOnFloor(s, sel))
+          .map((s) => ({
+            type: 'Feature', properties: { tier: s.tier },
             geometry: { type: 'LineString', coordinates: s.polyline },
           })),
       };
       if (!map.getSource('navigation-route')) {
-        map.addSource('navigation-route', { type: 'geojson', data });
+        map.addSource('navigation-route', { type: 'geojson', data: lineData });
         map.addLayer({
           id: 'navigation-route',
           type: 'line',
@@ -328,14 +816,31 @@
               'outdoor', TIER_COLORS.outdoor,
               'elevator', TIER_COLORS.elevator,
               'stairs', TIER_COLORS.stairs,
+              'skybridge', TIER_COLORS.skybridge,
               TIER_COLORS.indoor,
             ],
             'line-width': 4,
           },
         });
       } else {
-        map.getSource('navigation-route').setData(data);
+        map.getSource('navigation-route').setData(lineData);
       }
+      if (map.getLayer('navigation-route')) {
+        map.setLayoutProperty('navigation-route', 'visibility', is3D ? 'none' : 'visible');
+      }
+      if (map.getLayer('campus-3d-route')) {
+        map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    function showRoute(route) {
+      lastRoute = route;
+      if (!route) {
+        statusText.textContent = 'No route found';
+        renderRoute();
+        return;
+      }
+      renderRoute();
       const mins = Math.floor(route.totalSeconds / 60);
       const secs = Math.round(route.totalSeconds % 60);
       const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
@@ -347,26 +852,45 @@
       const coords = e.lngLat;
       const coordArray = [coords.lng, coords.lat];
 
+      if (placingAnchor) {
+        placingAnchor = false;
+        anchorBtn.classList.remove('active');
+        anchorAt(coordArray);
+        return;
+      }
+
+      if (calibration.placing) {
+        setCalPoint(calibration.placing, coordArray);
+        return;
+      }
+
       if (isDefiningPath && campusRouter) {
         if (firstPathPoint === null) {
           firstPathPoint = coordArray;
-          statusText.textContent = 'Tap destination point';
+          // Freeze the floor for the start here: the user may switch floors
+          // before tapping the destination (e.g. start on 01, end on 02).
+          firstPathFloor = floorOfView();
+          statusText.textContent = 'Tap the destination point';
         } else {
           statusText.textContent = 'Calculating route...';
-          const route = campusRouter.route(firstPathPoint, coordArray);
+          // Each tap is read on the floor that was displayed when it was made,
+          // so a single route can start and end on different floors.
+          const route = campusRouter.route(firstPathPoint, coordArray,
+            {startFloor: firstPathFloor, endFloor: floorOfView()});
           showRoute(route);
+          // Mark the destination so the route re-computes as you move.
+          if (destinationMarker) destinationMarker.setLngLat(coords);
+          else destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
           firstPathPoint = null;
+          firstPathFloor = null;
           isDefiningPath = false;
+          findPathMode = false;      // route computed: black plan + numbers go away
           pathBtn.classList.remove('active');
+          applyFloorFilter(currentFloorId());
         }
-      } else {
-        if (destinationMarker) {
-          destinationMarker.setLngLat(coords);
-        } else {
-          destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
-        }
-        statusText.textContent = `Destination set at ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
       }
+      // A plain tap does nothing - it used to silently move a destination
+      // marker, which was confusing.
     });
 
     // Live location
@@ -375,10 +899,157 @@
     let headingIndicator = null;
     let lastAccuracyMeters = 0;
     let geoWatchId = null;
+    let didAutoCenter = false;   // fly to the first fix after "My Location"
+
+    // PDR + GPS locator (motion.mjs -> locate.mjs -> arbiter.mjs). GPS and
+    // dead reckoning run at the same time; the arbiter picks whichever is
+    // more accurate, so the app transitions in and out of buildings on its own.
+    const stepModel = new StepLengthModel();
+    // Restore a previously calibrated step length and heading calibration.
+    let savedHeadingBias = null;
+    let savedHeadingMode = 'absolute';
+    try {
+      const savedBase = parseFloat(localStorage.getItem('pdr-step-base'));
+      if (savedBase > 0) stepModel.base = savedBase;
+      const savedBias = parseFloat(localStorage.getItem('pdr-heading-bias'));
+      if (Number.isFinite(savedBias)) savedHeadingBias = savedBias;
+      const savedMode = localStorage.getItem('pdr-heading-mode');
+      if (savedMode === 'relative') savedHeadingMode = 'relative';
+    } catch (e) { /* ignore */ }
+    let motion = null;
+    let locator = null;    // { building, floor, filter, arbiter }
+    let currentEstimate = null;
+
+    function floorCentroid(floor) {
+      let x = 0, y = 0, n = 0;
+      for (const seg of floor.obstacleLines) for (const [lon, lat] of seg) { x += lon; y += lat; n++; }
+      return n ? [x / n, y / n] : null;
+    }
+
+    function nearestFloor([lon, lat]) {
+      let best = null, bestD = Infinity;
+      const mpd = metresPerDegree(lat);
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          const c = floorCentroid(f);
+          if (!c) continue;
+          const d = Math.hypot((c[0] - lon) * mpd.lon, (c[1] - lat) * mpd.lat);
+          if (d < bestD) { bestD = d; best = { building: b, floor: f }; }
+        }
+      }
+      return best;
+    }
+
+    // Bind the locator to the building/floor nearest the user. Re-built only
+    // when the nearest floor changes (e.g. GPS walks the user to another
+    // building), so the particle cloud is preserved otherwise.
+    function ensureLocator([lon, lat]) {
+      const pick = nearestFloor([lon, lat]);
+      if (!pick) return;
+      if (locator && locator.floor === pick.floor) return;
+      const g = pick.floor.navGraph;
+      const filter = new ParticleFilter({
+        isWalkable: g.isWalkable,
+        nearestWalkable: g.nearestWalkable,
+      });
+      locator = {
+        building: pick.building, floor: pick.floor, filter,
+        arbiter: new PositionArbiter({
+          filter,
+          isWalkable: g.isWalkable,
+          nearestWalkable: g.nearestWalkable,
+        }),
+      };
+      // Seed the cloud so PDR is live immediately. The particle filter does
+      // nothing until seeded, and indoors GPS is usually too poor to re-seed
+      // it - without this, steps are counted but never move the marker.
+      const centroid = floorCentroid(pick.floor);
+      const seed = g.nearestWalkable([lon, lat], 500)
+        || (centroid && g.nearestWalkable(centroid))
+        || [lon, lat];
+      filter.seed(seed, { spreadM: 4 });
+    }
+
+    function renderEstimate(est) {
+      if (!est) return;
+      currentEstimate = est;
+      const ll = [est.lon, est.lat];
+      if (livePosMarker) livePosMarker.setLngLat(ll);
+      lastAccuracyMeters = est.accuracyM;
+      if (map.getSource('location-radius')) {
+        map.getSource('location-radius').setData(
+          turf.circle(ll, Math.max(1, est.accuracyM), { steps: 64, units: 'meters' }));
+      }
+      statusText.textContent = est.source === 'gps'
+        ? `GPS ±${est.accuracyM.toFixed(0)} m`
+        : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
+    }
+
+    // Compass display / heading arrow, driven by the SMOOTHED heading from
+    // motion.mjs (time-based low-pass), not the raw sensor event - the raw
+    // magnetometer flickers. The map stays north-up: only the arrow turns.
+    function updateHeadingDisplay(headingRad) {
+      const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
+      compassDisplay.textContent = `${Math.round(deg)}°`;
+      if (livePosMarker && map.getSource('location-heading')) {
+        const markerPos = livePosMarker.getLngLat();
+        const outsidePoint = turf.destination(
+          [markerPos.lng, markerPos.lat], Math.max(1, lastAccuracyMeters), deg, { units: 'meters' });
+        map.getSource('location-heading').setData(
+          turf.lineString([[markerPos.lng, markerPos.lat], outsidePoint.geometry.coordinates]));
+      }
+    }
+
+    // Step/heading input to the arbiter. Sensor permission is requested here
+    // (a user gesture started the flow).
+    function startMotion() {
+      if (motion) { motion.start(); return; }
+      motion = createMotion({
+        onStep: ({ t, cadenceHz }) => {
+          // Calibration counts steps regardless of location.
+          if (calibration.active) {
+            calibration.steps++;
+            calStepsEl.textContent = String(calibration.steps);
+          }
+          if (!locator || !motion.heading.hasHeading) return;
+          locator.arbiter.setHeading(motion.heading.heading);
+          locator.arbiter.step({
+            stepLengthM: stepModel.lengthFor(cadenceHz),
+            headingRad: motion.heading.heading,
+          });
+          renderEstimate(locator.arbiter.estimate(t));
+        },
+        onHeading: ({ heading }) => {
+          // During the calibration walk, accumulate the heading so we can
+          // measure the offset against the line's true bearing.
+          if (calibration.active) {
+            calibration.headingSin += Math.sin(heading);
+            calibration.headingCos += Math.cos(heading);
+            calibration.headingSamples++;
+          }
+          if (locator) locator.arbiter.setHeading(heading);
+          updateHeadingDisplay(heading);
+        },
+        onStatus: ({ type }) => {
+          if (type === 'permission-denied') statusText.textContent = 'Motion sensor access denied';
+        },
+      });
+      // Restore a heading calibration done earlier (relative frame + offset).
+      if (savedHeadingMode === 'relative') {
+        motion.setHeadingMode('relative');
+        if (savedHeadingBias != null) motion.heading.calibrate(savedHeadingBias);
+      }
+      motion.start();
+    }
 
     function successPosition(position) {
       const { latitude, longitude, accuracy } = position.coords;
       const posLonLat = [longitude, latitude];
+
+      if (!didAutoCenter) {
+        didAutoCenter = true;
+        map.flyTo({ center: [longitude, latitude], zoom: 18, duration: 1200 });
+      }
 
       if (livePosMarker) {
         livePosMarker.setLngLat([longitude, latitude]);
@@ -393,9 +1064,19 @@
         map.getSource('location-radius').setData(accuracyCircle);
       }
 
+      // Feed GPS to the arbiter too; if PDR is currently more accurate the
+      // marker will be re-rendered from the filter instead.
+      const t = performance.now();
+      ensureLocator(posLonLat);
+      if (locator) {
+        locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
+        renderEstimate(locator.arbiter.estimate(t));
+      }
+
+      const routeFrom = currentEstimate ? [currentEstimate.lon, currentEstimate.lat] : posLonLat;
       if (destinationMarker && campusRouter) {
         const destPos = destinationMarker.getLngLat();
-        showRoute(campusRouter.route(posLonLat, [destPos.lng, destPos.lat]));
+        showRoute(campusRouter.route(routeFrom, [destPos.lng, destPos.lat]));
       }
     }
 
@@ -406,6 +1087,7 @@
     function startLiveLocate() {
       locationBtn.classList.add('active');
       statusText.textContent = 'Locating...';
+      didAutoCenter = false;   // fly to the next fix again
 
       if (livePosMarker) {
         livePosMarker.remove();
@@ -477,45 +1159,11 @@
         enableHighAccuracy: true,
       });
 
-      if (window.DeviceOrientationEvent) {
-        window.DeviceOrientationEvent.requestPermission?.();
-        window.addEventListener(
-          'deviceorientationabsolute',
-          (event) => {
-            const rotateDegrees = 360 - event.alpha;
-            if (!isNaN(rotateDegrees)) {
-              compassDisplay.textContent = `${Math.round(rotateDegrees)}°`;
-              map.setBearing(rotateDegrees);
-            }
-
-            if (livePosMarker) {
-              const markerPos = livePosMarker.getLngLat();
-              const outsidePoint = turf.destination([markerPos.lng, markerPos.lat], lastAccuracyMeters, rotateDegrees, {
-                units: 'meters',
-              });
-              const headingFeature = {
-                type: 'FeatureCollection',
-                features: [
-                  {
-                    type: 'Feature',
-                    geometry: {
-                      type: 'LineString',
-                      coordinates: [
-                        [markerPos.lng, markerPos.lat],
-                        outsidePoint.geometry.coordinates,
-                      ],
-                    },
-                  },
-                ],
-              };
-              if (map.getSource('location-heading')) {
-                map.getSource('location-heading').setData(headingFeature);
-              }
-            }
-          },
-          true
-        );
-      }
+      // Start dead reckoning alongside GPS; the arbiter chooses between them.
+      // motion.mjs owns the orientation listener (absolute-only, smoothed) and
+      // requests iOS permission in its start().
+      ensureLocator([map.getCenter().lng, map.getCenter().lat]);
+      startMotion();
     }
 
     // One entry per building; floors listed underneath (all buildings are
@@ -526,69 +1174,13 @@
     // Extra metres of road network fetched past the outermost building portal.
     const OSM_BBOX_PAD_M = 200;
 
-    const buildingsConfig = [
-      {
-        id: 'AS103',
-        groundFloor: '01',
-        origin: { lon: -149.83392948231224, lat: 61.1894702373051 },
-        offset: { x: 0, y: 0, rot: 0 },
-        floors: [{ floorId: '01', url: '/AS103-01.json', showRoomLabels: true }],
-      },
-      {
-        id: 'AS101',
-        groundFloor: '01',
-        origin: { lon: -149.83258657016332, lat: 61.18860052108826 },
-        offset: { x: 2880, y: 390, rot: 0.005 },
-        floors: [{ floorId: '01', url: '/AS101-01.json', showRoomLabels: true }],
-      },
-      {
-        id: 'AS102',
-        groundFloor: '01',
-        origin: { lon: -149.83345376471846, lat: 61.1890024920514 },
-        offset: { x: 1392, y: 1144, rot: 0 },
-        floors: [{ floorId: '01', url: '/AS102-01.json', showRoomLabels: true }],
-      },
-      // AS112 has no geo-registration yet - uncomment once offsets are tuned:
-      // { id: 'AS112', groundFloor: '01', origin: {...}, offset: {..., rot: ...},
-      //   floors: [{ floorId: '01', url: '/AS112-01.json' }] },
-      {
-        id: 'AS105',
-        groundFloor: '01',
-        origin: { lon: -149.83151758160494, lat: 61.189320207472804 },
-        offset: { x: 267, y: 0, rot: 119.39 },
-        floors: [{ floorId: '01', url: '/AS105-01.json', showRoomLabels: true }],
-      },
-      {
-        id: 'AS106',
-        groundFloor: '01',
-        floors: [{
-          floorId: '01',
-          url: '/AS106-01.json',
-          origin: { lon: -149.83263956536967, lat: 61.18970332221574 },
-          offset: { x: 475, y: 400, rot: 0 },
-          showRoomLabels: true,
-          wallLayerId: 'as106-01-walls',
-          roomLayerId: 'as106-01-roomnumbers',
-        }],
-      },
-    ];
+    // Building registrations live in buildings-config.json (repo root),
+    // produced by import.html. Edit registrations there, not here.
+    const buildingsConfig = await (await fetch('/buildings-config.json')).json();
 
     // Geo registration for one building+floor: a floor may carry its own
-    // origin/offset (AS106 does), otherwise the building-level ones apply.
-    // All plans are in inches (DXF_SCALE metres per unit), so the scale is
-    // uniform. MUST be used for walls, room labels and portals alike so
-    // everything lands in the same place.
-    function makeToLL(buildingConfig, floor) {
-      const origin = floor.origin ?? buildingConfig.origin;
-      const offset = floor.offset ?? buildingConfig.offset;
-      return (x, y) =>
-        dxfCoordsToLonLat(
-          origin,
-          x - offset.x,
-          y - offset.y,
-          offset.rot
-        );
-    }
+    // origin/offset (AS106 does), otherwise the building-level ones apply —
+    // makeToLL lives in geo.mjs, shared with smoke.mjs and import.html.
 
     // Lon/lat bbox covering every building portal, padded for room to walk.
     function outdoorBBox(buildings, padM = 200) {
@@ -614,6 +1206,27 @@
       };
     }
 
+    // The precomputed OSM paths (gen-osm.mjs), used only when its bbox still
+    // covers the campus; otherwise the caller decodes pmtiles live.
+    async function loadCachedOsm(bbox) {
+      if (!bbox) return null;
+      try {
+        const res = await fetch('/osm-paths.json');
+        if (!res.ok) return null;
+        const cache = await res.json();
+        const c = cache.bbox;
+        const covers = c &&
+          bbox.minLon >= c.minLon && bbox.maxLon <= c.maxLon &&
+          bbox.minLat >= c.minLat && bbox.maxLat <= c.maxLat;
+        if (!covers) {
+          console.warn('osm-paths.json does not cover the campus; decoding pmtiles live');
+          return null;
+        }
+        console.log(`OSM paths: ${cache.shapes.length} ways from osm-paths.json`);
+        return cache.shapes;
+      } catch { return null; }
+    }
+
     async function loadFloor(buildingConfig, floor) {
       const res = await fetch(floor.url);
       const data = await res.json();
@@ -621,6 +1234,7 @@
       const base = `${buildingConfig.id}-${floor.floorId}`.toLowerCase();
       const wallLayerId = floor.wallLayerId ?? `${base}-walls`;
       const roomLayerId = floor.roomLayerId ?? `${base}-roomnumbers`;
+      const layerIds = [wallLayerId];   // toggled by the global floor picker
 
       // Case-insensitive: most buildings write "Windows", AS106 writes
       // "WINDOWS".
@@ -670,25 +1284,52 @@
           layout: {
             'text-field': ['get', 'text'],
             'text-size': 12,
-            'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+            // The basemap glyph server only serves the Noto Sans family;
+            // Open Sans/Arial 404 and the labels render blank.
+            'text-font': ['Noto Sans Medium'],
           },
           paint: {
             'text-color': '#2c3e50',
+            'text-halo-color': '#ffffff',
+            'text-halo-width': 1.2,
           },
         });
+        layerIds.push(roomLayerId);
       }
 
       const navGraph = buildGraph(wallFeatureCollection);
-      const portals = extractPortals(data.shapes, toLL);
+      // Portals (elevators/stairs) and doors are expensive to extract (doorway
+      // clustering + flood fill). buildings-config.json caches them as DXF
+      // points, so prefer that; fall back to extracting when absent.
+      const portals = floor.portals
+        ? portalsFromCache(floor.portals, toLL)
+        : extractPortals(data.shapes, toLL);
+      // Exterior doors are placed by hand in the import tool (floor.exits);
+      // fall back to the algorithm's exits when a floor has none registered.
+      const doorList = floor.exits?.length ? floor.exits : portals.exits;
+      const exits = doorList.map((e, i) => ({
+        id: e.id ?? `exits-${i}`,
+        ll: toLL(e.dxf[0], e.dxf[1]),
+        dxf: e.dxf,
+      }));
+      // Skybridges are explicit manual portals (floor.skybridges). Only these
+      // link a floor to another building, so rooftop exits stay isolated.
+      const skybridges = (floor.skybridges ?? []).map((e, i) => ({
+        id: e.id ?? `bridge-${i}`,
+        ll: toLL(e.dxf[0], e.dxf[1]),
+        dxf: e.dxf,
+      }));
       return {
         floorId: floor.floorId,
+        layerIds,
         navGraph,
         // lon/lat wall segments: the router keeps outdoor path edges out of
         // the building footprint with these.
         obstacleLines: lines,
         elevators: portals.elevators,
         stairs: portals.stairs,
-        exits: portals.exits,
+        exits,
+        skybridges,
       };
     }
 
@@ -764,6 +1405,66 @@
       map.on('mouseleave', 'portals', () => { map.getCanvas().style.cursor = ''; });
     }
 
+    // Global floor display: a single level across every building, stepped
+    // with the +/- buttons. Wall/room-label layers are toggled per floor and
+    // the portal dots are filtered by their `floor` property.
+    let floorLevels = [];   // distinct floorIds, lowest first
+    let floorLevel = 1;     // 1-based index into floorLevels
+
+    const currentFloorId = () => floorLevels[floorLevel - 1] ?? buildingGroundFloor();
+
+    function buildingGroundFloor() {
+      return buildings[0]?.groundFloor;
+    }
+
+    function populateFloorPicker(buildingList) {
+      const levels = new Set();
+      for (const b of buildingList) for (const f of b.floors) levels.add(f.floorId);
+      floorLevels = [...levels].sort((a, c) =>
+        String(a).localeCompare(String(c), undefined, { numeric: true }));
+      setFloor(1);
+    }
+
+    /** Move the display to a floor level (clamped), re-filtering and redrawing. */
+    function setFloor(level) {
+      floorLevel = Math.max(1, Math.min(floorLevels.length, level));
+      floorLabel.textContent = `Floor ${floorLevel}`;
+      floorDown.disabled = floorLevel <= 1;
+      floorUp.disabled = floorLevel >= floorLevels.length;
+      applyFloorFilter(currentFloorId());
+      renderRoute();
+    }
+
+    function applyFloorFilter(floorId) {
+      if (!floorId) return;
+      // 2D: show the selected floor's flat walls + labels + portals (the
+      // original plan view). 3D: those are hidden; the extruded structure
+      // carries the geometry, and room labels appear only while picking a
+      // route (they cannot be elevated in this build).
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          for (const id of f.layerIds ?? []) {
+            if (!map.getLayer(id)) continue;
+            const isLabel = /roomnumbers/.test(id);
+            const visible = is3D
+              ? (findPathMode && isLabel && f.floorId === floorId)
+              : f.floorId === floorId;
+            map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+            if (isLabel) {
+              const hot = is3D && findPathMode;
+              map.setPaintProperty(id, 'text-color', hot ? '#ffe14a' : '#2c3e50');
+              map.setPaintProperty(id, 'text-halo-color', hot ? '#000000' : '#ffffff');
+            }
+          }
+        }
+      }
+      if (map.getLayer('portals')) {
+        map.setLayoutProperty('portals', 'visibility', is3D ? 'none' : 'visible');
+        if (!is3D) map.setFilter('portals', ['==', ['get', 'floor'], floorId]);
+      }
+      applyStructureStyle();
+    }
+
     // Map load
     map.on('style.load', async () => {
       statusText.textContent = 'Loading buildings...';
@@ -792,22 +1493,29 @@
         // osm.mjs) so outdoor legs follow real paths. Optional: if the
         // archive is unreachable the router falls back to straight-line
         // outdoor legs and the demo works unchanged.
-        let osmShapes = null;
-        try {
-          const osm = await loadOsmShapes({
-            url: OSM_ARCHIVE_URL,
-            bbox: outdoorBBox(buildings, OSM_BBOX_PAD_M),
-          });
-          osmShapes = osm.shapes;
-          console.log(`OSM paths: ${osm.stats.ways} ways over ` +
-            `${osm.stats.tiles} tiles (${osm.stats.duplicateWays} duplicates dropped)`);
-        } catch (e) {
-          console.warn('OSM road layer unavailable, using straight-line outdoor legs:', e);
+        // Prefer the precomputed osm-paths.json (see gen-osm.mjs): fetching
+        // and decoding the pmtiles archive costs several seconds. Fall back to
+        // live decode when the cache is missing or no longer covers the campus.
+        const osmBBox = outdoorBBox(buildings, OSM_BBOX_PAD_M);
+        let osmShapes = await loadCachedOsm(osmBBox);
+        if (!osmShapes) {
+          try {
+            const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox: osmBBox });
+            osmShapes = osm.shapes;
+            console.log(`OSM paths: ${osm.stats.ways} ways over ` +
+              `${osm.stats.tiles} tiles (${osm.stats.duplicateWays} duplicates dropped)`);
+          } catch (e) {
+            console.warn('OSM road layer unavailable, using straight-line outdoor legs:', e);
+          }
         }
 
         campusRouter = buildCampusRouter(buildings, osmShapes);
         window.campusRouter = campusRouter;   // handy for console debugging
         addPortalMarkers(buildings);
+        populateFloorPicker(buildings);
+        buildStructure3D();                  // extruded walls + floor plates
+        // Bind the locator to the floor nearest the view now that graphs exist.
+        ensureLocator([map.getCenter().lng, map.getCenter().lat]);
 
         const totalNodes = buildings.reduce(
           (a, b) => a + b.floors.reduce((x, f) => x + f.navGraph.stats.nodes, 0),
