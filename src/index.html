@@ -360,6 +360,7 @@
     let campusRouter = null;
     let buildings = [];
     let destinationMarker = null;
+    let destinationFloor = null;   // floor the destination lands on (null = outdoors)
     let isDefiningPath = false;
     let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
     let is3D = false;            // starts in 2D; toggled by the view button
@@ -773,6 +774,16 @@
           });
         }
       }
+      // Destination pin: a raised block at the destination floor's base (0
+      // outdoors) so the marker sits on the correct floor, not the basemap.
+      if (destinationMarker) {
+        const {lng, lat} = destinationMarker.getLngLat();
+        const base = (destinationFloor ? floorBase(destinationFloor) : 0) + 0.1;
+        features.push({
+          type: 'Feature', properties: { color: '#3FB1CE', base, top: base + 1.6 },
+          geometry: { type: 'Polygon', coordinates: [squareRing([lng, lat], 0.5)] },
+        });
+      }
       const data = { type: 'FeatureCollection', features };
       if (!map.getSource('campus-3d-route')) {
         map.addSource('campus-3d-route', { type: 'geojson', data });
@@ -791,17 +802,22 @@
         map.getSource('campus-3d-route').setData(data);
       }
 
-      // --- 2D: flat line, only the part on the selected floor ---
+      // --- 2D: flat line. The selected floor's part is solid; segments on
+      // other floors stay visible but faded, so a route that changes floors
+      // clearly continues instead of ending at a stairwell.
       const sel = currentFloorId();
-      const lineData = {
+      const onSelectedFloor = (s) => segmentOnFloor(s, sel);
+      const routeLineData = (onFloor) => ({
         type: 'FeatureCollection',
         features: (lastRoute?.segments ?? [])
-          .filter((s) => s.polyline && segmentOnFloor(s, sel))
+          .filter((s) => s.polyline && onSelectedFloor(s) === onFloor)
           .map((s) => ({
             type: 'Feature', properties: { tier: s.tier },
             geometry: { type: 'LineString', coordinates: s.polyline },
           })),
-      };
+      });
+      const lineData = routeLineData(true);
+      const ghostData = routeLineData(false);
       if (!map.getSource('navigation-route')) {
         map.addSource('navigation-route', { type: 'geojson', data: lineData });
         map.addLayer({
@@ -825,11 +841,46 @@
       } else {
         map.getSource('navigation-route').setData(lineData);
       }
+      if (!map.getSource('navigation-route-ghost')) {
+        map.addSource('navigation-route-ghost', { type: 'geojson', data: ghostData });
+        map.addLayer({
+          id: 'navigation-route-ghost',
+          type: 'line',
+          source: 'navigation-route-ghost',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': [
+              'match', ['get', 'tier'],
+              'indoor', TIER_COLORS.indoor,
+              'outdoor', TIER_COLORS.outdoor,
+              'elevator', TIER_COLORS.elevator,
+              'stairs', TIER_COLORS.stairs,
+              'skybridge', TIER_COLORS.skybridge,
+              TIER_COLORS.indoor,
+            ],
+            'line-width': 3,
+            'line-opacity': 0.25,
+          },
+        });
+      } else {
+        map.getSource('navigation-route-ghost').setData(ghostData);
+      }
       if (map.getLayer('navigation-route')) {
         map.setLayoutProperty('navigation-route', 'visibility', is3D ? 'none' : 'visible');
       }
+      if (map.getLayer('navigation-route-ghost')) {
+        map.setLayoutProperty('navigation-route-ghost', 'visibility', is3D ? 'none' : 'visible');
+      }
       if (map.getLayer('campus-3d-route')) {
         map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
+      }
+      // The DOM marker only shows in 2D, and only while the floor it belongs
+      // to is the one displayed (outdoor destinations show on a ground floor).
+      if (destinationMarker) {
+        const onView = destinationFloor === null
+          ? buildings.some((b) => b.groundFloor === sel)
+          : destinationFloor === sel;
+        destinationMarker.getElement().style.display = (is3D || !onView) ? 'none' : '';
       }
     }
 
@@ -875,12 +926,16 @@
           statusText.textContent = 'Calculating route...';
           // Each tap is read on the floor that was displayed when it was made,
           // so a single route can start and end on different floors.
+          const endFloor = floorOfView();
           const route = campusRouter.route(firstPathPoint, coordArray,
-            {startFloor: firstPathFloor, endFloor: floorOfView()});
-          showRoute(route);
-          // Mark the destination so the route re-computes as you move.
+            {startFloor: firstPathFloor, endFloor});
+          // Mark the destination on the floor it actually lands on (null when
+          // outdoors), before rendering so the 3D pin is placed correctly.
+          const destHit = campusRouter.buildingAt(coordArray, endFloor);
+          destinationFloor = destHit ? destHit.floor.floorId : null;
           if (destinationMarker) destinationMarker.setLngLat(coords);
           else destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
+          showRoute(route);
           firstPathPoint = null;
           firstPathFloor = null;
           isDefiningPath = false;
@@ -1333,10 +1388,10 @@
       };
     }
 
-    // Elevator (purple), stair (orange) and exit (green) markers, one shared
-    // source/layer. A double door is drawn as two leaf clusters ~1.8m apart,
-    // which would show two dots at one entrance - collapse markers that sit
-    // within 1.5m (the router still has both nodes).
+    // Stair (orange) and elevator (purple) markers, one shared source/layer.
+    // They are the cue that a route continues vertically; doors are not drawn.
+    // A connector drawn as several clusters shows several dots within metres,
+    // so collapse same-kind dots within 1.5m (the router still has all nodes).
     function addPortalMarkers(buildingList) {
       const accepted = [];   // {kind, building, floor, ll}
       const seen = new Set();
@@ -1345,7 +1400,6 @@
           const lists = [
             ['elevator', f.elevators],
             ['stairs', f.stairs],
-            ['exit', f.exits],
           ];
           for (const [kind, list] of lists) {
             for (const p of list) {
@@ -1358,7 +1412,7 @@
         }
       }
       const features = [];
-      // collapse same-kind markers within ~1.5m (double doors)
+      // collapse same-kind markers within ~1.5m
       const mPerDeg = metresPerDegree(accepted[0]?.ll[1] ?? map.getCenter().lat);
       for (const p of accepted) {
         const near = features.find(f =>
@@ -1386,7 +1440,6 @@
             'match', ['get', 'kind'],
             'elevator', TIER_COLORS.elevator,
             'stairs', TIER_COLORS.stairs,
-            'exit', '#27ae60',
             '#333333',
           ],
           'circle-stroke-color': '#ffffff',
@@ -1407,7 +1460,7 @@
 
     // Global floor display: a single level across every building, stepped
     // with the +/- buttons. Wall/room-label layers are toggled per floor and
-    // the portal dots are filtered by their `floor` property.
+    // the connector dots are filtered by their `floor` property.
     let floorLevels = [];   // distinct floorIds, lowest first
     let floorLevel = 1;     // 1-based index into floorLevels
 
@@ -1437,8 +1490,8 @@
 
     function applyFloorFilter(floorId) {
       if (!floorId) return;
-      // 2D: show the selected floor's flat walls + labels + portals (the
-      // original plan view). 3D: those are hidden; the extruded structure
+      // 2D: show the selected floor's flat walls + labels + connector dots
+      // (the original plan view). 3D: those are hidden; the extruded structure
       // carries the geometry, and room labels appear only while picking a
       // route (they cannot be elevated in this build).
       for (const b of buildings) {

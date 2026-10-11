@@ -452,10 +452,12 @@ nothing extra is sent. The large static assets (floor JSONs, PMTiles, MapLibre
 The app **starts in 2D** (flat, north-up) and a **2D/3D button** toggles the
 extruded view. `is3D` drives everything: camera (3D eases to pitch 50 and
 enables drag-rotate/two-finger pitch; 2D eases pitch/bearing to 0 and disables
-rotation), the per-floor flat wall/label lines and portal markers (2D only), and
-the extrusion layers. `renderRoute` draws both a 2D line (filtered to the
-selected floor) and the 3D ribbon (whole route) and shows whichever matches the
-mode.
+rotation), the per-floor flat wall/label lines and connector dots (2D only), and
+the extrusion layers. `renderRoute` draws the 3D ribbon (whole route) and, for
+2D, a solid line filtered to the selected floor plus a faded (25% opacity)
+ghost of the route's other-floor segments — so a route that changes floors
+reads as continuing instead of ending at a stairwell. Whichever matches the
+mode is shown.
 
 ### The 3D model (fill-extrusion)
 
@@ -490,18 +492,20 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   `symbol` layer is shown (yellow, Noto Sans Medium — the basemap glyph server
   404s Open Sans/Arial). Both revert when the route is computed. Room labels
   can't be elevated in this build, so they sit on the ground plane.
-- The old 2D wall `line` / room-label `symbol` layers and portal markers are
-  created but forced `visibility: none` — symbols can't be elevated in this
-  build, so they would sit at ground under the stack. Markers (My Location,
-  destination) remain DOM markers at ground.
+- The old 2D wall `line` / room-label `symbol` layers and connector dots are
+  hidden in 3D — symbols can't be elevated in this build, so they would sit at
+  ground under the stack. The destination marker is a DOM marker in 2D and a
+  raised pin extrusion on the destination's floor in 3D (DOM markers cannot be
+  lifted).
 - Camera: constructed with `dragRotate/pitchWithRotate`, `pitch: 50`,
   `maxPitch: 75`; the user pitches/rotates freely.
 
 ## Browser demo notes
 
-- Portals are drawn from one `portals` source; markers of the same kind within
-  1.5 m collapse (double doors are two leaf clusters ~1.8 m apart) — routing
-  still uses both nodes.
+- Connector dots are drawn from one `portals` source in 2D, filtered to the
+  displayed floor: stairs orange, elevators purple. Same-kind dots within
+  1.5 m collapse (one connector drawn as several clusters) — routing still
+  uses all nodes. Doors are not drawn.
 - Route tiers are coloured indoor red / outdoor blue / elevator purple /
   stairs orange / skybridge teal.
 - If the OSM fetch fails the router still builds and works with straight-line
