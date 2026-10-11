@@ -113,6 +113,40 @@
       user-select: none;
     }
 
+    .search-control {
+      display: flex;
+      align-items: center;
+      background: #ffffff;
+      border: 2px solid #333333;
+      border-radius: 999px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .search-control input {
+      border: none;
+      outline: none;
+      background: transparent;
+      color: #333333;
+      font-size: 1rem;
+      min-height: 44px;
+      width: 10rem;
+      padding: 0 0.4rem 0 0.9rem;
+    }
+
+    .search-control button {
+      border: none;
+      background: #4a90e2;
+      color: #ffffff;
+      font-size: 1rem;
+      font-weight: 600;
+      min-height: 44px;
+      padding: 0 1.1rem;
+      cursor: pointer;
+    }
+
+    .search-control button:active { background: #3a7bc8; }
+
     #sidebar {
       position: absolute;
       bottom: 0;
@@ -238,6 +272,17 @@
         font-size: 1.1rem;
       }
 
+      .search-control input {
+        width: 12rem;
+        min-height: 52px;
+        font-size: 1.05rem;
+      }
+
+      .search-control button {
+        min-height: 52px;
+        font-size: 1.05rem;
+      }
+
       #sidebar {
         left: 1.5rem;
         right: auto;
@@ -266,6 +311,11 @@
   <div id="map"></div>
   
   <div id="controls">
+    <div class="search-control">
+      <input id="search-input" type="search" placeholder="BMH 114A" autocomplete="off"
+             aria-label="Building code and room number" />
+      <button id="search-go" title="Route to room">Go</button>
+    </div>
     <button id="menu-btn" class="control-btn">Calibrate</button>
     <button id="location-btn" class="control-btn">My Location</button>
     <button id="anchor-btn" class="control-btn">I'm Here</button>
@@ -387,6 +437,8 @@
     const floorDown = document.getElementById('floor-down');
     const floorUp = document.getElementById('floor-up');
     const floorLabel = document.getElementById('floor-label');
+    const searchInput = document.getElementById('search-input');
+    const searchGo = document.getElementById('search-go');
     const sidebar = document.getElementById('sidebar');
     const sidebarHandle = document.getElementById('sidebar-handle');
     const compassDisplay = document.getElementById('compass');
@@ -425,6 +477,8 @@
     
     locationBtn.addEventListener('click', startLiveLocate);
     viewBtn.addEventListener('click', () => { is3D = !is3D; applyViewMode(); });
+    searchGo.addEventListener('click', runSearch);
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
 
     /** Switch between the flat 2D plan and the extruded 3D stack. */
     function applyViewMode() {
@@ -745,7 +799,12 @@
 
     /** Does this route segment lie on the given floor? (2D line filtering.) */
     function segmentOnFloor(s, floorId) {
-      if (s.tier === 'indoor' || s.tier === 'skybridge') return s.floor === floorId;
+      if (s.tier === 'indoor') return s.floor === floorId;
+      // An explicit skybridge may join different floors (a grade change); it
+      // belongs to both of its ends.
+      if (s.tier === 'skybridge') {
+        return s.floor === floorId || s.fromFloor === floorId || s.toFloor === floorId;
+      }
       if (s.tier === 'outdoor') return buildings.some((b) => b.groundFloor === floorId);
       return false;
     }
@@ -757,7 +816,12 @@
       for (const s of lastRoute?.segments ?? []) {
         const color = TIER_COLORS[s.tier] ?? TIER_COLORS.indoor;
         if (s.polyline) {
-          const base = (s.tier === 'outdoor' ? 0 : floorBase(s.floor)) + 0.1;
+          // A cross-floor skybridge is drawn at the higher of its two ends so
+          // it does not cut through the lower floor's stack.
+          const base = (s.tier === 'outdoor' ? 0
+            : s.tier === 'skybridge'
+              ? Math.max(floorBase(s.fromFloor ?? s.floor), floorBase(s.toFloor ?? s.floor))
+              : floorBase(s.floor)) + 0.1;
           for (let i = 1; i < s.polyline.length; i++) {
             const ring = segmentQuad(s.polyline[i - 1], s.polyline[i], ROUTE_WIDTH_M);
             if (ring) features.push({
@@ -896,6 +960,86 @@
       const secs = Math.round(route.totalSeconds % 60);
       const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
       statusText.textContent = `${route.summary} · ${Math.round(route.totalMeters)} m · ${time}`;
+    }
+
+    // --- building / room search --------------------------------------------
+    // A query carries the UAA building code from the floor JSON's `ID` field
+    // (BMH) or the app's registration id (AS103), plus a room number. Rooms
+    // are the roomLabels built in loadFloor - the exact same array the
+    // displayed room-numbers layer uses.
+    function findRoom(building, roomText) {
+      const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
+      const want = norm(roomText);
+      if (!want) return null;
+      // Room numbering usually starts with the floor (114A is on 1), so an
+      // exact hit on that floor beats an exact hit elsewhere.
+      const wantLevel = parseInt(want[0], 10);
+      let exact = null, prefixed = null;
+      for (const f of building.floors) {
+        for (const label of f.roomLabels ?? []) {
+          const text = norm(label.properties.text);
+          if (text === want) {
+            const hit = {ll: label.geometry.coordinates, floorId: f.floorId};
+            if (!isNaN(wantLevel) && floorLevelOf(f.floorId) === wantLevel) return hit;
+            exact ??= hit;
+          } else if (!prefixed && text.startsWith(want)) {
+            prefixed = {ll: label.geometry.coordinates, floorId: f.floorId};
+          }
+        }
+      }
+      return exact ?? prefixed;
+    }
+
+    function runSearch() {
+      const q = searchInput.value.trim();
+      if (!campusRouter) { statusText.textContent = 'Buildings still loading'; return; }
+      if (!q) { statusText.textContent = 'Type a building and room, e.g. BMH 114A'; return; }
+      // The longest known building code at the start of the query wins, so
+      // "BMH 114A", "BMH114A" and "AS103114" all split correctly. Codes are
+      // the UAA `ID` (BMH) or the registration id (AS103).
+      const ql = q.toLowerCase();
+      const candidates = [];
+      for (const b of buildings) {
+        if (b.sourceId) candidates.push({b, key: b.sourceId.toLowerCase()});
+        candidates.push({b, key: b.id.toLowerCase()});
+      }
+      candidates.sort((a, c) => c.key.length - a.key.length);
+      const hit = candidates.find((c) => ql.startsWith(c.key));
+      if (!hit) {
+        const codes = buildings.map((b) => b.sourceId ?? b.id).join(', ');
+        statusText.textContent = `Unknown building in "${q}" - try ${codes}`;
+        return;
+      }
+      const building = hit.b;
+      const roomText = q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim();
+      const room = roomText ? findRoom(building, roomText) : null;
+      if (!room) {
+        statusText.textContent = roomText
+          ? `No room "${roomText}" in ${building.sourceId ?? building.id}`
+          : 'Include a room number, e.g. BMH 114A';
+        return;
+      }
+      // Start from the live estimate ("My Location") when there is one, else
+      // from wherever the map is centred.
+      const startLL = currentEstimate
+        ? [currentEstimate.lon, currentEstimate.lat]
+        : [map.getCenter().lng, map.getCenter().lat];
+      const startFloor = (currentEstimate && locator) ? locator.floor.floorId : currentFloorId();
+      const route = campusRouter.route(startLL, room.ll,
+        {startFloor, endFloor: room.floorId});
+      // The room becomes the destination: marker + 3D pin on its floor.
+      destinationFloor = room.floorId;
+      if (destinationMarker) destinationMarker.setLngLat(room.ll);
+      else destinationMarker = new maplibregl.Marker().setLngLat(room.ll).addTo(map);
+      // A search supersedes "Find Path" tap-picking.
+      isDefiningPath = false;
+      findPathMode = false;
+      pathBtn.classList.remove('active');
+      const level = floorLevels.indexOf(room.floorId) + 1;
+      if (level > 0) setFloor(level);
+      showRoute(route);
+      map.flyTo({center: room.ll, zoom: Math.max(map.getZoom(), 18.5), duration: 700});
+      searchInput.blur();
     }
 
     // Map click handler
@@ -1318,16 +1462,19 @@
         },
       });
 
-      if (floor.showRoomLabels && data.text_lines) {
-        const roomLabels = data.text_lines.map((roomno) => ({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: toLL(roomno.x, roomno.y),
-          },
-          properties: { text: roomno.text },
-        }));
+      // Room-number labels: ONE array feeds both the displayed symbol layer
+      // (when the floor shows labels) and the search index, so the two can
+      // never disagree. Search resolves "BMH 114A" against this same data.
+      const roomLabels = (data.text_lines ?? []).map((roomno) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: toLL(roomno.x, roomno.y),
+        },
+        properties: { text: String(roomno.text ?? '').trim() },
+      })).filter((f) => f.properties.text);
 
+      if (floor.showRoomLabels && roomLabels.length) {
         map.addSource(`${base}-roomnumbers`, {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: roomLabels },
@@ -1369,10 +1516,12 @@
       }));
       // Skybridges are explicit manual portals (floor.skybridges). Only these
       // link a floor to another building, so rooftop exits stay isolated.
+      // `to` is the import tool's explicit destination building.
       const skybridges = (floor.skybridges ?? []).map((e, i) => ({
         id: e.id ?? `bridge-${i}`,
         ll: toLL(e.dxf[0], e.dxf[1]),
         dxf: e.dxf,
+        to: e.to ?? null,
       }));
       return {
         floorId: floor.floorId,
@@ -1385,6 +1534,12 @@
         stairs: portals.stairs,
         exits,
         skybridges,
+        // Room-number points, shared with the displayed room-numbers layer
+        // (see above) - the destination for a "BMH 114A" search.
+        roomLabels,
+        // Extractor metadata: UAA short code (BMH) + full building name.
+        sourceId: data.ID ?? null,
+        sourceName: data.building_name ?? null,
       };
     }
 
@@ -1525,9 +1680,13 @@
       try {
         for (const config of buildingsConfig) {
           try {
-            const building = { id: config.id, groundFloor: config.groundFloor, floors: [] };
+            const building = { id: config.id, groundFloor: config.groundFloor, floors: [],
+                               sourceId: null, sourceName: null };
             for (const floor of config.floors) {
-              building.floors.push(await loadFloor(config, floor));
+              const loaded = await loadFloor(config, floor);
+              building.sourceId ??= loaded.sourceId;
+              building.sourceName ??= loaded.sourceName;
+              building.floors.push(loaded);
             }
             buildings.push(building);
           } catch (e) {

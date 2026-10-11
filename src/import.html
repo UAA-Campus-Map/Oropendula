@@ -105,6 +105,11 @@
         <button id="bridgePlaceBtn" title="Taps add a skybridge portal">Place bridge</button>
         <button id="bridgeRemoveBtn" title="Taps remove the nearest skybridge portal">Remove bridge</button>
       </div>
+      <label>destination <select id="bridgeTo"
+        title="Applied to newly placed bridges; use Set destination to change an existing one"></select></label>
+      <div class="row">
+        <button id="bridgeDestBtn" title="Tap a bridge portal to give it the selected destination">Set destination</button>
+      </div>
       <div id="bridge-note" class="hint"></div>
     </div>
 
@@ -231,16 +236,30 @@
           'circle-stroke-width': 2,
         },
       });
+      // Destination text next to each bridge dot (auto / -> ASxxx).
+      if (!map.getSource('imp-skybridge-labels')) map.addSource('imp-skybridge-labels', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-skybridge-labels', type: 'symbol', source: 'imp-skybridge-labels',
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-size': 11,
+          'text-offset': [0, 1.1],
+          'text-anchor': 'top',
+        },
+        paint: { 'text-color': '#8e44ad', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+      });
       $('#showLabels').addEventListener('change', refresh);
       map.on('keydown', onKey);
       map.getContainer().setAttribute('tabindex', '0');
       refresh();                     // re-draw now that the sources exist
     });
 
-    // Door / skybridge editing: taps place or remove a portal on the floor.
+    // Door / skybridge editing: taps place or remove a portal on the floor,
+    // or set the destination of the nearest bridge.
     map.on('click', (e) => {
       const b = building(), f = floor();
       if (!b || !f || !editMode) return;
+      if (editMode === 'dest-bridge') { setBridgeDest(b, f, e.lngLat); return; }
       const [action, kind] = editMode.split('-');
       const key = kind === 'door' ? 'exits' : 'skybridges';
       if (action === 'place') placePortal(b, f, key, e.lngLat);
@@ -307,6 +326,13 @@
       fSel.innerHTML = (b?.floors ?? []).map((ff, i) =>
         `<option value="${i}">${ff.floorId}</option>`).join('');
       fSel.value = String(selected.floor);
+      // Bridge destination options: auto plus every OTHER building.
+      const bTo = $('bridgeTo');
+      const curTo = bTo.value;
+      bTo.innerHTML = '<option value="">auto (nearest)</option>' +
+        config.filter((_, i) => i !== selected.building).map(bb =>
+          `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
+      if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
 
       if (!b || !f) { setData('imp-walls', empty); return; }
       const toLL = makeToLL(b, f);
@@ -361,13 +387,19 @@
       }));
       setData('imp-exits', { type: 'FeatureCollection', features: doorFeats });
 
-      // skybridge portals (manual, purple)
+      // skybridge portals (manual, purple; explicit destination shown)
       const bridgeFeats = (data ? (f.skybridges ?? []) : []).map((d) => ({
         type: 'Feature',
-        properties: { color: '#8e44ad' },
+        properties: { color: d.to ? '#8e44ad' : '#b07cc6' },
         geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
       }));
       setData('imp-skybridges', { type: 'FeatureCollection', features: bridgeFeats });
+      const bridgeLabels = (data ? (f.skybridges ?? []) : []).map((d) => ({
+        type: 'Feature',
+        properties: { text: d.to ? `→ ${d.to}` : 'auto' },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-skybridge-labels', { type: 'FeatureCollection', features: bridgeLabels });
 
       syncMarkers();
       syncPanel();
@@ -395,7 +427,9 @@
     function setEditMode(mode) {
       editMode = editMode === mode ? null : mode;
       const label = mode.includes('bridge') ? 'skybridge' : 'door';
-      status(editMode ? `Tap the map to ${mode.startsWith('place') ? 'place' : 'remove'} a ${label}` : 'Editing off');
+      const verb = mode === 'dest-bridge' ? 'set the destination of the nearest'
+        : mode.startsWith('place') ? 'place' : 'remove';
+      status(editMode ? `Tap the map to ${verb} ${label}` : 'Editing off');
       syncPortalPanel();
     }
 
@@ -404,9 +438,29 @@
     function placePortal(b, f, key, lngLat) {
       const dxf = toDxfAt(b, f, lngLat);
       if (!f[key]) f[key] = [];   // first manual edit starts a fresh list
-      f[key].push({id: `${key === 'exits' ? 'door' : 'bridge'}-${Date.now().toString(36)}`, dxf});
+      const portal = {id: `${key === 'exits' ? 'door' : 'bridge'}-${Date.now().toString(36)}`, dxf};
+      // Bridges take the destination currently selected in the panel.
+      if (key === 'skybridges' && $('bridgeTo').value) portal.to = $('bridgeTo').value;
+      f[key].push(portal);
       persist(); refresh();
-      status(`placed ${portalLabel(key)} (${f[key].length} on ${b.id} ${f.floorId})`);
+      status(`placed ${portalLabel(key)}${portal.to ? ` → ${portal.to}` : ''} (${f[key].length} on ${b.id} ${f.floorId})`);
+    }
+
+    /** Give the nearest bridge portal on this floor the selected destination. */
+    function setBridgeDest(b, f, lngLat) {
+      const list = f.skybridges;
+      if (!list || !list.length) { status('no skybridge portals on this floor'); return; }
+      const [dx, dy] = toDxfAt(b, f, lngLat);
+      let best = -1, bestD = Infinity;
+      for (let i = 0; i < list.length; i++) {
+        const d = Math.hypot(list[i].dxf[0] - dx, list[i].dxf[1] - dy);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD * DXF_SCALE > 3) { status(`nearest is ${(bestD * DXF_SCALE).toFixed(1)} m - tap closer`); return; }
+      const to = $('bridgeTo').value;
+      if (to) list[best].to = to; else delete list[best].to;
+      persist(); refresh();
+      status(`skybridge destination → ${to || 'auto (nearest)'}`);
     }
 
     function removePortal(b, f, key, lngLat) {
@@ -442,13 +496,15 @@
       $('bridge-count').textContent = String(bridges.length);
       $('bridge-note').innerHTML = !f ? ''
         : bridges.length
-          ? `Manual: ${bridges.length} skybridge portal${bridges.length === 1 ? '' : 's'}.`
+          ? `Manual: ${bridges.length} skybridge portal${bridges.length === 1 ? '' : 's'} — ` +
+            bridges.map((d, i) => `${i + 1}: ${d.to ? d.to : 'auto'}`).join(', ') + '.'
           : 'None. Mark each side of a bridge on the two floors it joins.';
 
       setActive('doorPlaceBtn', editMode === 'place-door');
       setActive('doorRemoveBtn', editMode === 'remove-door');
       setActive('bridgePlaceBtn', editMode === 'place-bridge');
       setActive('bridgeRemoveBtn', editMode === 'remove-bridge');
+      setActive('bridgeDestBtn', editMode === 'dest-bridge');
     }
 
     // --- markers: datum (drag to move) + rotation handle --------------------
@@ -620,6 +676,7 @@
     wire('doorRemoveBtn', 'click', () => setEditMode('remove-door'));
     wire('bridgePlaceBtn', 'click', () => setEditMode('place-bridge'));
     wire('bridgeRemoveBtn', 'click', () => setEditMode('remove-bridge'));
+    wire('bridgeDestBtn', 'click', () => setEditMode('dest-bridge'));
     wire('doorSeedBtn', 'click', () => {
       const b = building(), f = floor();
       if (!b || !f) return;

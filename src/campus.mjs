@@ -994,7 +994,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
   for (const b of buildings) {
     for (const f of b.floors) {
       for (const e of f.exits) nodes.push({building: b, floor: f, ll: e.ll, kind: 'door', id: e.id});
-      for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id});
+      for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id, to: s.to ?? null});
       for (const c of b._connectors ?? []) {
         const stop = c.stops.get(f.floorId);
         if (stop) nodes.push({building: b, floor: f, ll: stop, kind: 'connector', connector: c, id: `${c.kind}-${f.floorId}`});
@@ -1102,39 +1102,46 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     }
   }
 
-  // --- skybridge pairing (mutual nearest) --------------------------------
-  // Each skybridge portal pairs with its nearest partner in another building on
-  // the same floor number, but only when the two choose each other - a plain
-  // all-pairs rule would join a bridge to every nearby bridge. Only explicit
-  // bridges participate, so an ordinary (rooftop) exit never connects a
-  // building, and ground-level bridges are allowed (a shared first floor).
+  // --- skybridge pairing --------------------------------------------------
+  // A skybridge portal may carry an explicit destination (`to`, the other
+  // building's id - set in the import tool). Explicit pairs win: mutual marks
+  // first, then one-sided, both shortest-first; they ignore both
+  // SKYBRIDGE_MAX_M and the floor number, because the marks say exactly which
+  // bridge goes where (ECB-01 <-> SU-02 crosses a grade change; ECB-02 <->
+  // SU-02 was ~125 m, over the old cap). Unmarked bridges then fall back to
+  // greedy min-distance matching: same floor *number* ("2" vs "02" still
+  // link) and within the cap. A bridge with an explicit destination never
+  // auto-pairs elsewhere, so a wrong auto-link cannot happen to it. Only
+  // explicit bridges participate - an ordinary (rooftop) exit never connects a
+  // building - and ground-level bridges are allowed (a shared first floor).
   const bridgeIdx = [];
   for (let i = 0; i < N; i++) if (nodes[i].kind === 'bridge') bridgeIdx.push(i);
-  const bridgePartner = new Map();   // i -> j (mutual)
-  const nearestBridge = i => {
-    const A = nodes[i];
-    let best = -1, bd = Infinity;
-    for (const j of bridgeIdx) {
-      if (j === i) continue;
-      const B = nodes[j];
-      if (B.building === A.building) continue;
-      if (floorNum(B.floor.floorId) !== floorNum(A.floor.floorId)) continue;
-      const d = distLL(A.ll, B.ll, scale);
-      if (d < bd) { bd = d; best = j; }
+  const bridgeCandidates = [];
+  for (let a = 0; a < bridgeIdx.length; a++) {
+    for (let b = a + 1; b < bridgeIdx.length; b++) {
+      const i = bridgeIdx[a], j = bridgeIdx[b];
+      const A = nodes[i], B = nodes[j];
+      if (A.building === B.building) continue;
+      const aWants = A.to === B.building.id, bWants = B.to === A.building.id;
+      if (!aWants && !bWants) {
+        // Auto fallback: both unmarked, same floor number, within the cap.
+        if (A.to || B.to) continue;
+        if (floorNum(B.floor.floorId) !== floorNum(A.floor.floorId)) continue;
+        const d = distLL(A.ll, B.ll, scale);
+        if (d > SKYBRIDGE_MAX_M) continue;
+        bridgeCandidates.push({i, j, d, rank: 2});
+      } else {
+        bridgeCandidates.push({i, j, d: distLL(A.ll, B.ll, scale), rank: aWants && bWants ? 0 : 1});
+      }
     }
-    return {j: best, d: bd};
-  };
-  for (const i of bridgeIdx) {
-    const {j, d} = nearestBridge(i);
-    if (j < 0 || d > SKYBRIDGE_MAX_M) continue;
-    if (nearestBridge(j).j === i) bridgePartner.set(i, j);
   }
-  for (const i of bridgeIdx) {
-    const j = bridgePartner.get(i);
-    if (j !== undefined && j > i) {
-      link(i, j, distLL(nodes[i].ll, nodes[j].ll, scale) / INDOOR_SPEED, {kind: 'skybridge'});
-      skybridgeEdges++;
-    }
+  bridgeCandidates.sort((x, y) => x.rank - y.rank || x.d - y.d);
+  const bridgeUsed = new Set();
+  for (const {i, j, d} of bridgeCandidates) {
+    if (bridgeUsed.has(i) || bridgeUsed.has(j)) continue;
+    bridgeUsed.add(i); bridgeUsed.add(j);
+    link(i, j, d / INDOOR_SPEED, {kind: 'skybridge'});
+    skybridgeEdges++;
   }
 
   // Cross-building outdoor edges between ground-floor doors.
@@ -1448,6 +1455,9 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
       } else if (desc?.kind === 'skybridge') {
         addPoly({tier: 'skybridge', building: nodes[b].building.id,
                  floor: nodes[a].floor.floorId,
+                 // Explicit bridges may join different floors (a grade
+                 // change); carry both ends so the view can place the line.
+                 fromFloor: nodes[a].floor.floorId, toFloor: nodes[b].floor.floorId,
                  polyline: [nodes[a].ll, nodes[b].ll]});
       } else if (desc?.kind === 'indoor') {
         const p = indoorPath(nodes[a].floor.navGraph, nodes[a].ll, nodes[b].ll);

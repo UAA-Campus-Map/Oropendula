@@ -102,7 +102,7 @@ Edges:
 - same building, same floor: indoor walk between any two nodes (one Dijkstra per
   node builds the whole floor);
 - same connector, different floors: vertical ride (elevator/stairs);
-- two bridges, same level, different buildings: skybridge (mutual nearest);
+- two bridges, same level, different buildings: skybridge (explicit `to` destination, else greedy min-distance matching);
 - cross-building ground-floor doors: outdoor path-network length.
 
 `route()` attaches the start/end point to the nodes on its own floor (doors,
@@ -132,15 +132,26 @@ other, then mark a **skybridge** portal on each side (see below).
 
 A skybridge is its own manually-placed portal type, **not** an exit. The import
 tool's **Place bridge / Remove bridge** modes write
-`floor.skybridges: [{id, dxf}]`. The router pairs bridges by **mutual nearest**:
-each bridge links to the nearest bridge in another building on the same floor
-*number* (so DXFs labelling the storey "2" vs "02" still link), but only when
-the two choose each other — a plain all-pairs rule would join a bridge to every
-nearby bridge. `SKYBRIDGE_MAX_M` (120 m) is only a sanity cap; a real enclosed
-link can be long (AS105-02 ↔ AS117-02 is ~80 m). Ground-floor bridges are
-allowed too (AS117-01 ↔ AS119-01 share a first floor across two DXFs). Because
-only bridges pair, an ordinary rooftop door facing a neighbour cannot connect a
-building. Mark **both** sides of the bridge.
+`floor.skybridges: [{id, dxf, to?}]`; the **destination** select marks `to`
+(another building's id) on newly placed bridges and **Set destination**
+re-marks an existing dot (with "auto (nearest)" selected it clears the mark).
+The map labels each dot with its destination.
+
+Pairing (`buildCampusRouter`): **explicit destinations first** — candidate
+pairs where either side's `to` names the other's building: mutual marks, then
+one-sided, each shortest-first, one partner per portal. Explicit links ignore
+both `SKYBRIDGE_MAX_M` and the floor number — the marks say exactly which
+bridge goes where (AS121-01 ↔ AS119-02 is ~126 m and crosses a grade change;
+the earlier same-floor rule and the 120 m cap both blocked it). Unmarked
+bridges then fall back to greedy min-distance matching: same floor *number*
+(so DXFs labelling the storey "2" vs "02" still link) and within the cap, and
+a bridge with a destination never auto-pairs elsewhere (no accidental link to
+a nearer neighbour). Strict mutual-nearest was the original bug source:
+AS119's ECB-side bridge had AS117 closer, so AS117 took it and ECB linked to
+nothing. Only bridges pair, so an ordinary rooftop door facing a neighbour
+cannot connect a building; ground-level bridges are allowed too (AS117-01 ↔
+AS119-01 share a first floor across two DXFs). Mark **both** sides and set
+the destination on each.
 
 The algorithm below is what `extractPortals` still computes (cached as the
 seed/fallback for doors):
@@ -499,6 +510,21 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   lifted).
 - Camera: constructed with `dragRotate/pitchWithRotate`, `pitch: 50`,
   `maxPitch: 75`; the user pitches/rotates freely.
+
+## Building / room search (index.html)
+
+The search box takes "<building code> <room>", e.g. `BMH 114A`. The building
+code is the floor JSON's `ID` field (BMH, ESH, SMH, RH, CUDY, AASC, SU); the
+registration id (`AS103`) also works, and the longest known code prefix wins so
+`BMH213` and `AS103213` split correctly. Rooms come from the **same
+`roomLabels` array that feeds the displayed room-numbers `symbol` layer**
+(built from the DXF `text_lines`, see `loadFloor`), so search and labels can
+never disagree. Matching is case/space-insensitive, exact first then prefix;
+an exact hit on the floor whose level equals the room's first digit wins
+(`114A` -> floor `01`). `runSearch` routes from the live GPS/PDR estimate when
+"My Location" is running, else the map centre, makes the hit the destination
+marker/pin, jumps the floor picker to its floor and flies there. AS112 (WWA)
+is not registered in `buildings-config.json`, so it is not searchable.
 
 ## Browser demo notes
 

@@ -752,6 +752,7 @@ console.log('\nMulti-floor routing (all real floors):');
       }));
       const skybridges = (floor.skybridges ?? []).map((e, i) => ({
         id: e.id ?? `bridge-${i}`, ll: toLL(e.dxf[0], e.dxf[1]), dxf: e.dxf,
+        to: e.to ?? null,
       }));
       b.floors.push({
         floorId: floor.floorId, navGraph: buildGraph(lines), obstacleLines: lines,
@@ -855,6 +856,28 @@ console.log('\nMulti-floor routing (all real floors):');
       rUp.segments.some(s => s.tier === 'elevator' || s.tier === 'stairs') &&
       !rUp.segments.some(s => s.tier === 'outdoor'));
   }
+
+  // ECB (AS121) <-> SU (AS119): the mutual explicit pair (~125 m, and it has
+  // lived on different floors while being placed). Explicit marks must link it
+  // regardless of floor number and the SKYBRIDGE_MAX_M cap, so find the pair
+  // from the config rather than hard-coding a floor.
+  {
+    const e121 = CONFIG.find(c => c.id === 'AS121')?.floors.find(f =>
+      f.skybridges?.some(s => s.to === 'AS119'));
+    const e119 = CONFIG.find(c => c.id === 'AS119')?.floors.find(f =>
+      f.skybridges?.some(s => s.to === 'AS121'));
+    if (e121 && e119) {
+      const s121 = walkableRoom('AS121', e121.floorId);
+      const s119 = walkableRoom('AS119', e119.floorId);
+      const rE = s121 && s119
+        ? routerAll.route(s121, s119, { startFloor: e121.floorId, endFloor: e119.floorId })
+        : null;
+      showRoute(`AS121 f${e121.floorId} -> AS119 f${e119.floorId} (explicit skybridge)`, rE);
+      check('explicit bridge links AS121 to AS119 (no outdoor)',
+        !!rE && rE.segments.some(s => s.tier === 'skybridge') &&
+        !rE.segments.some(s => s.tier === 'outdoor'));
+    }
+  }
 }
 
 console.log('\nAuto-detected skybridge (synthetic):');
@@ -900,6 +923,74 @@ console.log('\nAuto-detected skybridge (synthetic):');
     !rS.segments.some(s => s.tier === 'elevator' || s.tier === 'stairs'));
   check('skybridge segment carries its floor',
     rS && rS.segments.find(s => s.tier === 'skybridge')?.floor === '02');
+}
+
+console.log('\nExplicit skybridge destination (synthetic):');
+{
+  // X and Z are 40 m apart (auto-matchable), Y is 170 m away (over the cap).
+  // Without a destination X auto-pairs with Z; marking X's bridge `to: 'Y'`
+  // (the ECB case) must link X-Y instead and never auto-pair X with Z.
+  const lat0 = 61.18, lon0 = -149.85;
+  const mpd = metresPerDegree(lat0);
+  const half = 6;
+  const dx = half / mpd.lon, dy = half / mpd.lat;
+  const square = (cx, cy) => {
+    const c = [[cx - dx, cy - dy], [cx + dx, cy - dy], [cx + dx, cy + dy], [cx - dx, cy + dy]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const mkStack = (id, cx, bridge, bridgeFloor = '02') => {
+    const f1 = { floorId: '01', ...square(cx, lat0), elevators: [],
+      stairs: [{ id: 'gs', ll: [cx, lat0] }],
+      exits: [{ id: 'g', ll: [cx + dx * 0.9, lat0] }] };
+    const f2 = { floorId: '02', ...square(cx, lat0), elevators: [],
+      stairs: [{ id: 's2', ll: [cx, lat0] }],
+      exits: [] };
+    const floors = [f1, f2];
+    if (bridge) floors.find(f => f.floorId === bridgeFloor).skybridges = [bridge];
+    return { id, groundFloor: '01', floors };
+  };
+  const xBridge = to => [{ id: 'bx', ll: [lon0 + dx * 0.9, lat0], ...(to ? { to } : {}) }];
+  const zBridge = [{ id: 'bz', ll: [lon0 + 40 / mpd.lon - dx * 0.9, lat0] }];
+  const yBridge = [{ id: 'by', ll: [lon0 + 170 / mpd.lon - dx * 0.9, lat0] }];
+  const mkWorld = xTo => [
+    mkStack('X', lon0, xBridge(xTo)[0]),
+    mkStack('Z', lon0 + 40 / mpd.lon, zBridge[0]),
+    mkStack('Y', lon0 + 170 / mpd.lon, yBridge[0]),
+  ];
+
+  const routerAuto = buildCampusRouter(mkWorld(null));
+  check('no destination: X auto-pairs with the nearer Z',
+    routerAuto.stats.skybridgeEdges === 1 &&
+    !!routerAuto.route([lon0, lat0], [lon0 + 40 / mpd.lon, lat0], { startFloor: '02', endFloor: '02' })
+      ?.segments.some(s => s.tier === 'skybridge'));
+
+  const routerExp = buildCampusRouter(mkWorld('Y'));
+  const rXY = routerExp.route([lon0, lat0], [lon0 + 170 / mpd.lon, lat0],
+    { startFloor: '02', endFloor: '02' });
+  showRoute('X f02 -> Y f02 (explicit destination)', rXY);
+  const bridgeSeg = rXY?.segments.find(s => s.tier === 'skybridge');
+  check('explicit destination links X-Y despite the 170 m gap and cap',
+    routerExp.stats.skybridgeEdges === 1 && !!bridgeSeg && bridgeSeg.meters > 100);
+  const rXZ = routerExp.route([lon0, lat0], [lon0 + 40 / mpd.lon, lat0],
+    { startFloor: '02', endFloor: '02' });
+  check('an explicit bridge never auto-pairs elsewhere (X-Z has no bridge)',
+    !rXZ?.segments.some(s => s.tier === 'skybridge'));
+
+  // Cross-floor mutual marks (a grade change, the ECB-01 <-> SU-02 case):
+  // X floor 01 <-> Y floor 02 must link even though the numbers differ.
+  const routerXF = buildCampusRouter([
+    mkStack('X', lon0, { id: 'bx', ll: [lon0 + dx * 0.9, lat0], to: 'Y' }, '01'),
+    mkStack('Y', lon0 + 40 / mpd.lon,
+      { id: 'by', ll: [lon0 + 40 / mpd.lon - dx * 0.9, lat0], to: 'X' }, '02'),
+  ]);
+  const rXF = routerXF.route([lon0, lat0], [lon0 + 40 / mpd.lon, lat0],
+    { startFloor: '01', endFloor: '02' });
+  showRoute('X f01 -> Y f02 (cross-floor explicit)', rXF);
+  check('mutual marks link across floor numbers (X-01 <-> Y-02)',
+    routerXF.stats.skybridgeEdges === 1 &&
+    !!rXF && rXF.segments.some(s => s.tier === 'skybridge') &&
+    !rXF.segments.some(s => s.tier === 'outdoor'));
 }
 
 // ---------------------------------------------------------------------------
