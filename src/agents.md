@@ -618,8 +618,12 @@ is not registered in `buildings-config.json`, so it is not searchable.
   clutter the map. 2D shows a dot on either floor the leg joins (`fromFloor`/
   `toFloor` filter); 3D hides them (the riser carries the vertical leg).
   Doors are not drawn.
-- Route tiers are coloured indoor red / outdoor blue / elevator purple /
-  stairs orange / skybridge teal.
+- Route colour encodes the floor: indoor and skybridge geometry ramps **red
+  (level 1) → green (top level)** by hue interpolation (`routeColorFor`/
+  `floorLevelColor`), so each floor reads distinctly. Outdoor legs run at
+  ground level and take level 1's colour, matching a normal line on that
+  level. Vertical connectors keep their tier colours (purple elevator / orange
+  stairs) so the stair/elevator cue survives.
 - **"Find Path"** (tap a start and destination) is a **dev tool** now: the
   button is hidden unless the page is opened with `?dev=1`, or shown from the
   console (`pathBtn.click()`); the mode's code is unchanged.

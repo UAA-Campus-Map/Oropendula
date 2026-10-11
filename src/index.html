@@ -677,7 +677,9 @@
     // Registration math (metresPerDegree, dxfCoordsToLonLat, DXF_SCALE,
     // makeToLL) lives in geo.mjs - shared with smoke.mjs and import.html.
 
-    // Colours per route tier.
+    // Colours per route tier (vertical connectors, outdoor legs, and the 2D
+    // connector dots keep these; indoor/skybridge route geometry uses the
+    // floor ramp below).
     const TIER_COLORS = {
       indoor: '#e74c3c',
       outdoor: '#2980b9',
@@ -685,6 +687,35 @@
       stairs: '#e67e22',
       skybridge: '#16a085',
     };
+
+    // Route colour encodes the floor: red at level 1 -> green at the top
+    // level, interpolated by hue (red -> orange -> yellow -> green), so the
+    // change between floors is unmistakable. Levels are absolute, so a 4th
+    // floor reads green in every building.
+    function maxFloorLevel() {
+      let m = 1;
+      for (const b of buildings) for (const f of b.floors) m = Math.max(m, floorLevelOf(f.floorId));
+      return m;
+    }
+    function floorLevelColor(level) {
+      const max = maxFloorLevel();
+      const t = max > 1 ? (level - 1) / (max - 1) : 0;
+      return `hsl(${Math.round(120 * t)}, 72%, 50%)`;
+    }
+    function floorColorFor(floorId) {
+      return floorLevelColor(floorLevelOf(floorId));
+    }
+    /**
+     * Route geometry colour. Indoor + skybridge use their floor's ramp
+     * colour; outdoor legs run at ground level, so they take level 1's colour
+     * (the same as a normal line on that level). Vertical connectors keep
+     * their tier colours so the stair/elevator cue survives.
+     */
+    function routeColorFor(seg) {
+      if (seg.tier === 'indoor' || seg.tier === 'skybridge') return floorColorFor(seg.floor);
+      if (seg.tier === 'outdoor') return floorLevelColor(1);
+      return TIER_COLORS[seg.tier] ?? TIER_COLORS.indoor;
+    }
 
     // --- 3D rendering -------------------------------------------------------
     // The campus is always drawn in 3D with fill-extrusion. Floors stack at
@@ -904,7 +935,7 @@
       // --- 3D: raised ribbons + vertical risers (whole route) ---
       const features = [];
       for (const s of lastRoute?.segments ?? []) {
-        const color = TIER_COLORS[s.tier] ?? TIER_COLORS.indoor;
+        const color = routeColorFor(s);
         if (s.polyline) {
           // A cross-floor skybridge is drawn at the higher of its two ends so
           // it does not cut through the lower floor's stack.
@@ -921,6 +952,7 @@
           }
         } else if ((s.tier === 'elevator' || s.tier === 'stairs') && s.ll) {
           const b0 = floorBase(s.fromFloor), b1 = floorBase(s.toFloor);
+          // Connector-coloured riser between the landings.
           features.push({
             type: 'Feature',
             properties: { color, base: Math.min(b0, b1), top: Math.max(b0, b1) },
@@ -980,7 +1012,7 @@
         features: (lastRoute?.segments ?? [])
           .filter((s) => s.polyline && onSelectedFloor(s) === onFloor)
           .map((s) => ({
-            type: 'Feature', properties: { tier: s.tier },
+            type: 'Feature', properties: { tier: s.tier, color: routeColorFor(s) },
             geometry: { type: 'LineString', coordinates: s.polyline },
           })),
       });
@@ -994,15 +1026,7 @@
           source: 'navigation-route',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': [
-              'match', ['get', 'tier'],
-              'indoor', TIER_COLORS.indoor,
-              'outdoor', TIER_COLORS.outdoor,
-              'elevator', TIER_COLORS.elevator,
-              'stairs', TIER_COLORS.stairs,
-              'skybridge', TIER_COLORS.skybridge,
-              TIER_COLORS.indoor,
-            ],
+            'line-color': ['get', 'color'],
             'line-width': 4,
           },
         });
@@ -1017,15 +1041,7 @@
           source: 'navigation-route-ghost',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': [
-              'match', ['get', 'tier'],
-              'indoor', TIER_COLORS.indoor,
-              'outdoor', TIER_COLORS.outdoor,
-              'elevator', TIER_COLORS.elevator,
-              'stairs', TIER_COLORS.stairs,
-              'skybridge', TIER_COLORS.skybridge,
-              TIER_COLORS.indoor,
-            ],
+            'line-color': ['get', 'color'],
             'line-width': 3,
             'line-opacity': 0.25,
           },
