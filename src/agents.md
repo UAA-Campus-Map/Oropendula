@@ -418,7 +418,13 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   near a known building) are discarded. GPS acts as a free anchor when good.
 - **Anchors** are manual: press "I'm Here", then tap the map to place your
   location (not the map centre); the tap re-seeds the particle cloud and resets
-  drift. Floor changes are manual today (all buildings are single-floor).
+  drift. The **displayed floor is authoritative**: `anchorAt` passes
+  `floorOfView()` into `ensureLocator`, which uses
+  `campusRouter.buildingAt(ll, hint)` to bind building+floor. Floor picks by
+  wall centroid cannot tell stacked floors apart (01/02/03 share a footprint),
+  so before this an upper-floor anchor bound to the ground floor and the PDR
+  stayed on the wrong plan. GPS fixes and boot still use the centroid pick
+  (they carry no floor). The status line reports the bound `ASxxx NN`.
 - **Step-length calibration** is in the index.html "Calibrate" panel (it
   replaced the old nav sidebar): place a start and end point on the map (green/
   red markers, straight-line distance via turf), press Start, walk the line,

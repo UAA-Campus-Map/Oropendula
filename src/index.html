@@ -523,11 +523,14 @@
     });
 
     function anchorAt(ll) {
-      ensureLocator(ll);
+      // The floor currently displayed is authoritative ("I'm Here" on the 3rd
+      // floor must bind to the 3rd floor, not whichever floor's centroid is
+      // marginally nearest - stacked floors share a footprint).
+      ensureLocator(ll, floorOfView());
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
       locator.arbiter.anchor(ll, { spreadM: 3 });
       renderEstimate(locator.arbiter.estimate(performance.now()));
-      statusText.textContent = 'Anchored here';
+      statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
     }
 
     // --- step-length calibration -------------------------------------------
@@ -1148,11 +1151,19 @@
       return best;
     }
 
-    // Bind the locator to the building/floor nearest the user. Re-built only
-    // when the nearest floor changes (e.g. GPS walks the user to another
-    // building), so the particle cloud is preserved otherwise.
-    function ensureLocator([lon, lat]) {
-      const pick = nearestFloor([lon, lat]);
+    // Bind the locator to a building/floor. The DISPLAYED floor wins when it
+    // is known ("I'm Here" passes `floorOfView()`): stacked floors share a
+    // footprint, so the centroid-nearest pick cannot tell "03" from "01" and
+    // an upper-floor anchor used to bind to the ground floor. Falls back to
+    // the centroid pick for GPS fixes / boot, which carry no floor. Re-built
+    // only when the floor changes, so the particle cloud is preserved.
+    function ensureLocator([lon, lat], floorHint) {
+      let pick = null;
+      if (floorHint && campusRouter) {
+        const hit = campusRouter.buildingAt([lon, lat], floorHint);
+        if (hit) pick = { building: hit.building, floor: hit.floor };
+      }
+      if (!pick) pick = nearestFloor([lon, lat]);
       if (!pick) return;
       if (locator && locator.floor === pick.floor) return;
       const g = pick.floor.navGraph;
