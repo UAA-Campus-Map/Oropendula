@@ -81,6 +81,12 @@
       box-shadow: 0 2px 3px rgba(0, 0, 0, 0.3);
     }
 
+    /* Icon-only buttons (GPS crosshair) stay a near-circle. */
+    .control-btn.icon-btn {
+      padding: 0.5rem;
+      min-width: 44px;
+    }
+
     .control-btn.active {
       background: #4a90e2;
       border-color: #4a90e2;
@@ -122,6 +128,13 @@
       user-select: none;
     }
 
+    .top-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      max-width: calc(100vw - 2rem);
+    }
+
     .search-control {
       display: flex;
       align-items: center;
@@ -130,6 +143,7 @@
       border-radius: 999px;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
       overflow: hidden;
+      min-width: 0;
     }
 
     .search-control input {
@@ -139,7 +153,8 @@
       color: #333333;
       font-size: 1rem;
       min-height: 44px;
-      width: 10rem;
+      min-width: 0;
+      width: clamp(6rem, 26vw, 12rem);
       padding: 0 0.4rem 0 0.9rem;
     }
 
@@ -271,6 +286,11 @@
         padding: 0.75rem 1.5rem;
       }
 
+      .control-btn.icon-btn {
+        padding: 0.75rem;
+        min-width: 52px;
+      }
+
       .floor-btn {
         min-height: 52px;
         min-width: 52px;
@@ -282,7 +302,6 @@
       }
 
       .search-control input {
-        width: 12rem;
         min-height: 52px;
         font-size: 1.05rem;
       }
@@ -320,21 +339,31 @@
   <div id="map"></div>
   
   <div id="controls">
-    <div class="search-control">
-      <input id="search-input" type="search" placeholder="BMH 114A" autocomplete="off"
-             aria-label="Building code and room number" />
-      <button id="search-go" title="Route to room">Go</button>
+    <div class="top-controls">
+      <div class="floor-control" aria-label="Displayed floor">
+        <button id="floor-down" class="floor-btn" title="Floor below">&minus;</button>
+        <span id="floor-label" class="floor-label">Floor 1</span>
+        <button id="floor-up" class="floor-btn" title="Floor above">+</button>
+      </div>
+      <div class="search-control">
+        <input id="search-input" type="search" placeholder="BMH 114A" autocomplete="off"
+               aria-label="Building code and room number" />
+        <button id="search-go" title="Route to room">Go</button>
+      </div>
     </div>
-    <button id="menu-btn" class="control-btn">Calibrate</button>
-    <button id="location-btn" class="control-btn">My Location</button>
+    <button id="menu-btn" class="control-btn">Calibrate walking model</button>
     <button id="anchor-btn" class="control-btn">I'm Here</button>
-    <button id="path-btn" class="control-btn">Find Path</button>
+    <!-- "Find Path" is a dev tool now: hidden unless the page is opened with
+         ?dev=1 (or via the console: pathBtn.click()). -->
+    <button id="path-btn" class="control-btn" style="display: none">Find Path</button>
     <button id="view-btn" class="control-btn" title="Toggle 2D / 3D">2D</button>
-    <div class="floor-control" aria-label="Displayed floor">
-      <button id="floor-down" class="floor-btn" title="Floor below">&minus;</button>
-      <span id="floor-label" class="floor-label">Floor 1</span>
-      <button id="floor-up" class="floor-btn" title="Floor above">+</button>
-    </div>
+    <button id="location-btn" class="control-btn icon-btn" title="My Location (GPS)"
+            aria-label="My Location">
+      <!-- Crosshair with a centre dot: the universal "locate me" symbol. -->
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+      </svg>
+    </button>
   </div>
   
   <div id="sidebar">
@@ -448,6 +477,10 @@
     const floorLabel = document.getElementById('floor-label');
     const searchInput = document.getElementById('search-input');
     const searchGo = document.getElementById('search-go');
+
+    // "Find Path" (tap start + destination) is kept as a dev tool: the button
+    // is hidden in normal use, re-shown by ?dev=1 or the console.
+    if (new URLSearchParams(location.search).has('dev')) pathBtn.style.display = '';
     const sidebar = document.getElementById('sidebar');
     const sidebarHandle = document.getElementById('sidebar-handle');
     const compassDisplay = document.getElementById('compass');

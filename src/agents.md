@@ -425,8 +425,9 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   so before this an upper-floor anchor bound to the ground floor and the PDR
   stayed on the wrong plan. GPS fixes and boot still use the centroid pick
   (they carry no floor). The status line reports the bound `ASxxx NN`.
-- **Step-length calibration** is in the index.html "Calibrate" panel (it
-  replaced the old nav sidebar): place a start and end point on the map (green/
+- **Step-length calibration** is in the index.html "Calibrate walking model"
+  panel (it replaced the old nav sidebar): place a start and end point on the
+  map (green/
   red markers, straight-line distance via turf), press Start, walk the line,
   press End → step length = distance / steps counted. Apply stores it to
   `StepLengthModel.base` and `localStorage['pdr-step-base']` (restored on load).
@@ -462,6 +463,18 @@ across cadence/amplitude/noise, heading smoothing/gyro/bias, the particle
 filter's kinematics and map constraint, and the GPS/PDR arbiter's validity
 gate, drift growth, re-seed and hysteresis. Debug scripts live in
 `/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
+
+Runtime ~42-50 s wall / ~45 s CPU (8 buildings / 17 floors; varies with machine
+load and the live OSM fetch). `node --cpu-prof` breakdown (inclusive):
+`buildCampusRouter` ~19 s (it is built three times: ground-floor router, then
+full-campus fresh and cached portal routers), `dijkstraFromAttach` ~16 s (the
+per-node same-floor matrix inside those), `buildGraph` ~9.5 s, `extractPortals`
+~6 s (the cache-integrity check re-extracts every floor fresh), GC ~5 s.
+The suite used to rebuild every navGraph a second time for the cached router;
+`floorBasis` now computes parse/walls/`buildGraph` once and both routers share
+it. The remaining duplicate is the second full-campus router — it exists only
+to compare cached vs fresh portal extraction, which the portal-equality check
+already asserts.
 
 For registration changes, open `import.html` (serve the dir the same way) and
 eyeball the plan over the basemap before trusting `buildings-config.json`.
@@ -589,6 +602,9 @@ is not registered in `buildings-config.json`, so it is not searchable.
   uses all nodes. Doors are not drawn.
 - Route tiers are coloured indoor red / outdoor blue / elevator purple /
   stairs orange / skybridge teal.
+- **"Find Path"** (tap a start and destination) is a **dev tool** now: the
+  button is hidden unless the page is opened with `?dev=1`, or shown from the
+  console (`pathBtn.click()`); the mode's code is unchanged.
 - If the OSM fetch fails the router still builds and works with straight-line
   outdoor legs — that path must keep working.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.

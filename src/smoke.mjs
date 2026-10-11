@@ -733,15 +733,23 @@ console.log('\nOSM paths cache:');
 console.log('\nMulti-floor routing (all real floors):');
 {
   // A second full campus, this time with every registered floor (the `buildings`
-  // above deliberately keep only the ground floor for the older tests).
-  const mkBuilding = (cfg, useCache = false) => {
+  // above deliberately keep only the ground floor for the older tests). The
+  // expensive per-floor work - JSON parse, wall segments, buildGraph - happens
+  // ONCE here; the two routers below differ only in where their portals come
+  // from (fresh extraction vs the shipped cache). Building it twice cost the
+  // suite a second full navGraph pass (~6 s).
+  const floorBasis = CONFIG.map(cfg => cfg.floors.map(floor => {
+    const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
+    const toLL = makeToLL(cfg, floor);
+    const walls = data.shapes.filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()));
+    const lines = walls.flatMap(s =>
+      shapeSegments(s).map(([a, c]) => [toLL(a[0], a[1]), toLL(c[0], c[1])]));
+    return { floor, data, toLL, lines, navGraph: buildGraph(lines) };
+  }));
+
+  const mkBuilding = (cfg, basics, useCache) => {
     const b = { id: cfg.id, groundFloor: cfg.groundFloor, floors: [] };
-    for (const floor of cfg.floors) {
-      const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
-      const toLL = makeToLL(cfg, floor);
-      const walls = data.shapes.filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()));
-      const lines = walls.flatMap(s =>
-        shapeSegments(s).map(([a, c]) => [toLL(a[0], a[1]), toLL(c[0], c[1])]));
+    for (const { floor, data, toLL, lines, navGraph } of basics) {
       const portals = useCache && floor.portals
         ? portalsFromCache(floor.portals, toLL)
         : extractPortals(data.shapes, toLL);
@@ -755,15 +763,15 @@ console.log('\nMulti-floor routing (all real floors):');
         to: e.to ?? null,
       }));
       b.floors.push({
-        floorId: floor.floorId, navGraph: buildGraph(lines), obstacleLines: lines,
+        floorId: floor.floorId, navGraph, obstacleLines: lines,
         elevators: portals.elevators, stairs: portals.stairs, exits, skybridges,
       });
     }
     return b;
   };
-  const allBuildings = CONFIG.map(c => mkBuilding(c));
+  const allBuildings = CONFIG.map((c, i) => mkBuilding(c, floorBasis[i], false));
   const routerAll = buildCampusRouter(allBuildings);
-  const routerCached = buildCampusRouter(CONFIG.map(c => mkBuilding(c, true)));
+  const routerCached = buildCampusRouter(CONFIG.map((c, i) => mkBuilding(c, floorBasis[i], true)));
 
   const A103 = allBuildings.find(b => b.id === 'AS103');
   const A102 = allBuildings.find(b => b.id === 'AS102');
