@@ -956,6 +956,20 @@
         map.getSource('campus-3d-route').setData(data);
       }
 
+      // Connector dots: one per vertical leg of the CURRENT route, so stairs/
+      // elevators appear only where the path uses them. Empty without a route.
+      if (map.getSource('portals')) {
+        const portalFeatures = (lastRoute?.segments ?? [])
+          .filter((s) => (s.tier === 'elevator' || s.tier === 'stairs') && s.ll)
+          .map((s) => ({
+            type: 'Feature',
+            properties: { kind: s.tier, building: s.building ?? '',
+                          fromFloor: s.fromFloor, toFloor: s.toFloor },
+            geometry: { type: 'Point', coordinates: s.ll },
+          }));
+        map.getSource('portals').setData({ type: 'FeatureCollection', features: portalFeatures });
+      }
+
       // --- 2D: flat line. The selected floor's part is solid; segments on
       // other floors stay visible but faded, so a route that changes floors
       // clearly continues instead of ending at a stairwell.
@@ -1665,46 +1679,14 @@
     }
 
     // Stair (orange) and elevator (purple) markers, one shared source/layer.
-    // They are the cue that a route continues vertically; doors are not drawn.
-    // A connector drawn as several clusters shows several dots within metres,
-    // so collapse same-kind dots within 1.5m (the router still has all nodes).
-    function addPortalMarkers(buildingList) {
-      const accepted = [];   // {kind, building, floor, ll}
-      const seen = new Set();
-      for (const b of buildingList) {
-        for (const f of b.floors) {
-          const lists = [
-            ['elevator', f.elevators],
-            ['stairs', f.stairs],
-          ];
-          for (const [kind, list] of lists) {
-            for (const p of list) {
-              const key = `${b.id}:${kind}:${p.ll[0]},${p.ll[1]}`;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              accepted.push({kind, building: b.id, floor: f.floorId, ll: p.ll});
-            }
-          }
-        }
-      }
-      const features = [];
-      // collapse same-kind markers within ~1.5m
-      const mPerDeg = metresPerDegree(accepted[0]?.ll[1] ?? map.getCenter().lat);
-      for (const p of accepted) {
-        const near = features.find(f =>
-          f.properties.kind === p.kind &&
-          Math.hypot((f.geometry.coordinates[0] - p.ll[0]) * mPerDeg.lon,
-                     (f.geometry.coordinates[1] - p.ll[1]) * mPerDeg.lat) < 1.5);
-        if (near) continue;
-        features.push({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: p.ll },
-          properties: { kind: p.kind, building: p.building, floor: p.floor },
-        });
-      }
+    // The source stays EMPTY at boot: an unrelated stairwell dot is noise.
+    // renderRoute fills it with one dot per vertical leg of the current route,
+    // so markers appear only for the connectors the path actually uses (in 2D,
+    // on either floor the leg joins).
+    function createPortalLayer() {
       map.addSource('portals', {
         type: 'geojson',
-        data: { type: 'FeatureCollection', features },
+        data: { type: 'FeatureCollection', features: [] },
       });
       map.addLayer({
         id: 'portals',
@@ -1727,7 +1709,8 @@
         if (!f) return;
         new maplibregl.Popup()
           .setLngLat(f.geometry.coordinates)
-          .setHTML(`<strong>${f.properties.kind}</strong> · ${f.properties.building} ${f.properties.floor}`)
+          .setHTML(`<strong>${f.properties.kind}</strong> · ` +
+            `${f.properties.building} ${f.properties.fromFloor}→${f.properties.toFloor}`)
           .addTo(map);
       });
       map.on('mouseenter', 'portals', () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -1736,7 +1719,7 @@
 
     // Global floor display: a single level across every building, stepped
     // with the +/- buttons. Wall/room-label layers are toggled per floor and
-    // the connector dots are filtered by their `floor` property.
+    // the route's connector dots are filtered by their end floors.
     let floorLevels = [];   // distinct floorIds, lowest first
     let floorLevel = 1;     // 1-based index into floorLevels
 
@@ -1838,7 +1821,10 @@
       }
       if (map.getLayer('portals')) {
         map.setLayoutProperty('portals', 'visibility', is3D ? 'none' : 'visible');
-        if (!is3D) map.setFilter('portals', ['==', ['get', 'floor'], floorId]);
+        // Points carry the vertical leg's end floors; show the dot on either.
+        if (!is3D) map.setFilter('portals', ['any',
+          ['==', ['get', 'fromFloor'], floorId],
+          ['==', ['get', 'toFloor'], floorId]]);
       }
       applyStructureStyle();
     }
@@ -1896,7 +1882,7 @@
 
         campusRouter = buildCampusRouter(buildings, osmShapes);
         window.campusRouter = campusRouter;   // handy for console debugging
-        addPortalMarkers(buildings);
+        createPortalLayer();
         populateFloorPicker(buildings);
         buildStructure3D();                  // extruded walls + floor plates
         // Bind the locator to the floor nearest the view now that graphs exist.

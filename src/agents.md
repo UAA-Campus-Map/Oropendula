@@ -72,9 +72,9 @@ build step, no npm dependencies in the app itself.
   to place a manual anchor or replay a synthetic walk. Plus sensor/step/heading
   metrics and calibration. Never referenced by prod.
 - `index.html` — the demo: loads buildings, asks osm.mjs for the road network,
-  builds the router, draws portals and tiered routes, and drives the live marker
-  from the arbiter (GPS + PDR). "I'm Here" taps a manual anchor at the map
-  centre.
+  builds the router, draws the route's connector dots and tiered routes, and
+  drives the live marker from the arbiter (GPS + PDR). "I'm Here" taps a manual
+  anchor at the map centre.
 - `smoke.mjs` — the test gate (`node smoke.mjs`). Check count scales with
   exit count (~96 currently); **all must pass**, zero failures tolerated. It
   reads its registrations from `buildings-config.json` — the same file
@@ -612,10 +612,12 @@ is not registered in `buildings-config.json`, so it is not searchable.
 
 ## Browser demo notes
 
-- Connector dots are drawn from one `portals` source in 2D, filtered to the
-  displayed floor: stairs orange, elevators purple. Same-kind dots within
-  1.5 m collapse (one connector drawn as several clusters) — routing still
-  uses all nodes. Doors are not drawn.
+- Connector dots are **route-only**: the `portals` source is empty at boot and
+  `renderRoute` fills it with one dot per stair/elevator leg of the current
+  route (stairs orange, elevators purple), so unrelated stairwells never
+  clutter the map. 2D shows a dot on either floor the leg joins (`fromFloor`/
+  `toFloor` filter); 3D hides them (the riser carries the vertical leg).
+  Doors are not drawn.
 - Route tiers are coloured indoor red / outdoor blue / elevator purple /
   stairs orange / skybridge teal.
 - **"Find Path"** (tap a start and destination) is a **dev tool** now: the
