@@ -230,7 +230,7 @@ stores the result on each floor entry of `buildings-config.json` as
 
 ## Performance
 
-The campus grew to ~11 floors / 115 exits and load was ~40 s. Three fixes:
+The campus grew to ~11 floors / 115 exits and load was ~40 s. Fixes so far:
 
 1. **Portal cache** (above) — skips `extractPortals` (~4 s).
 2. **Exit distance matrix, O(k) not O(k²)** — the macro graph used to call
@@ -251,11 +251,42 @@ The campus grew to ~11 floors / 115 exits and load was ~40 s. Three fixes:
    covers the campus, else decodes live. Removes ~6 s. **Re-run
    `gen-osm.mjs` and deploy `osm-paths.json` whenever the building set changes**
    (the campus bbox grows and the cache stops covering).
+4. **Selective floor drawing** — floor plans used to be added to the map for
+   every floor at boot (visible), then hidden once the picker was ready, so all
+   plans flashed during load and map time went to floors nobody viewed.
+   `loadFloor` now only returns the plan data (walls FC, room-label FC);
+   `ensureFloorLayers` creates a floor's sources/layers the first time that
+   floor is actually drawn, and `applyFloorFilter` keeps only the selected
+   floor visible. Loading is still **eager** — JSON, navGraph, portals and the
+   room index are all built for every floor at boot; only the map layers are
+   on demand. Layers are inserted before `portals` so dots/route stay on top.
+5. **Server compression + HTTP/2** — nginx was serving every text asset raw
+   over HTTP/1.1. `gzip on` + explicit `gzip_types` (json/js/mjs/…) in the
+   http block cuts the first load from ~13 MB to ~1 MB (floor JSONs ~20x:
+   AS119-01 1.13 MB → 53 KB; style.json 603 KB → 24 KB), and `http2 on`
+   multiplexes the parallel floor fetches over one connection. Config lives in
+   `/etc/nginx/nginx.conf` (the server block itself; `default.d/cache.conf`
+   keeps `expires -1` → cheap 304 revalidation, so deploys are never stale).
+6. **Parallel boot** — index.html used to `await` each floor fetch in a
+   `for` loop (network serialized with CPU) and only then fetched OSM.
+   It now prefetches **every** floor JSON concurrently at module load
+   (`floorPrefetch`, storing `{data}|{error}` so a failure cannot surface as
+   an unhandled rejection) and starts the OSM cache fetch using a
+   config-derived bbox (`outdoorBBoxFromConfig`, mirroring gen-osm.mjs), so
+   neither waits for navGraphs. `style.load` awaits the prefetches and builds
+   floors sequentially (CPU-bound), yielding per floor so the status line
+   paints. `<link rel=modulepreload>` for the three maplibre modules and
+   `preload as=fetch` for buildings-config/osm-paths start those downloads
+   during HTML parse. Measured from the live site: floor network 12.6 s serial
+   raw → 1.3 s parallel gzipped.
 
-Remaining cost is `buildGraph` (~7 s, ~670 ms/floor) — rebuilding the navGraph
-visibility graph is inherent; caching it (IndexedDB, keyed by a wall hash) is
-the next lever if needed. Lazy/background navGraph build would improve
-perceived startup.
+Remaining first-load cost is **CPU on the main thread**: with 8 buildings /
+17 floors, `buildGraph` measures ~6.7 s and `buildCampusRouter` ~2.5 s
+(JSON.parse is only ~100 ms). Rebuilding the navGraph visibility graph is
+inherent; the next levers are a Web Worker build (needs serialising the graph
+data, since the returned object carries closures) or an IndexedDB cache keyed
+by a wall hash. Lazy/background navGraph build would improve perceived
+startup.
 
 ## The OSM layer (osm.mjs)
 
@@ -464,7 +495,9 @@ The app **starts in 2D** (flat, north-up) and a **2D/3D button** toggles the
 extruded view. `is3D` drives everything: camera (3D eases to pitch 50 and
 enables drag-rotate/two-finger pitch; 2D eases pitch/bearing to 0 and disables
 rotation), the per-floor flat wall/label lines and connector dots (2D only), and
-the extrusion layers. `renderRoute` draws the 3D ribbon (whole route) and, for
+the extrusion layers. A floor's wall/label layers are created on first display
+(`ensureFloorLayers`) and only the selected floor is ever visible (see
+Performance). `renderRoute` draws the 3D ribbon (whole route) and, for
 2D, a solid line filtered to the selected floor plus a faded (25% opacity)
 ghost of the route's other-floor segments — so a route that changes floors
 reads as continuing instead of ending at a stairwell. Whichever matches the

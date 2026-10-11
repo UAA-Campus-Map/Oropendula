@@ -10,6 +10,15 @@
   
   <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+
+  <!-- Start the critical downloads while the HTML is still parsing: the
+       MapLibre bundle is the module graph's first import, and both JSONs are
+       fetched at boot. Floor JSONs are prefetched in parallel by the script. -->
+  <link rel="modulepreload" href="/maplibre-gl.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-shared.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-worker.mjs" />
+  <link rel="preload" as="fetch" href="/buildings-config.json" crossorigin />
+  <link rel="preload" as="fetch" href="/osm-paths.json" crossorigin />
   
   <style>
     * {
@@ -1377,21 +1386,53 @@
     // produced by import.html. Edit registrations there, not here.
     const buildingsConfig = await (await fetch('/buildings-config.json')).json();
 
+    // Kick off all boot downloads NOW (before the MapLibre style finishes
+    // loading) so network time overlaps map setup:
+    //  - every floor JSON in parallel (HTTP/2 multiplexing; ~1 MB gzipped),
+    //  - the OSM path network, whose bbox comes from the config's cached
+    //    portals (no navGraph needed).
+    // style.load below consumes these promises.
+    const floorPrefetch = new Map();
+    for (const config of buildingsConfig) {
+      for (const floor of config.floors) {
+        // Resolves to {data} or {error} so a failure never surfaces as an
+        // unhandled rejection while the promise waits for its await.
+        floorPrefetch.set(floor, fetch(floor.url)
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status} for ${floor.url}`);
+            return res.json();
+          })
+          .then((data) => ({ data }), (error) => ({ error })));
+      }
+    }
+    const bootOsmPromise = loadCampusOsm(outdoorBBoxFromConfig());
+
     // Geo registration for one building+floor: a floor may carry its own
     // origin/offset (AS106 does), otherwise the building-level ones apply —
     // makeToLL lives in geo.mjs, shared with smoke.mjs and import.html.
 
     // Lon/lat bbox covering every building portal, padded for room to walk.
-    function outdoorBBox(buildings, padM = 200) {
+    // Computed from the CONFIG (cached portals + manual doors) exactly like
+    // gen-osm.mjs, so the OSM fetch can start before any floor JSON is parsed
+    // or navGraph built - it no longer waits for the floor load loop.
+    function outdoorBBoxFromConfig(padM = OSM_BBOX_PAD_M) {
       let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-      for (const b of buildings) {
+      const bump = ([lon, lat]) => {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      };
+      for (const b of buildingsConfig) {
         for (const f of b.floors) {
-          for (const p of [...f.elevators, ...f.stairs, ...f.exits]) {
-            const [lon, lat] = p.ll;
-            if (lon < minLon) minLon = lon;
-            if (lon > maxLon) maxLon = lon;
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
+          const toLL = makeToLL(b, f);
+          const p = f.portals ? portalsFromCache(f.portals, toLL)
+                              : {elevators: [], stairs: [], exits: []};
+          const exits = f.exits?.length
+            ? f.exits.map((e) => toLL(e.dxf[0], e.dxf[1]))
+            : p.exits.map((e) => e.ll);
+          for (const q of [...p.elevators.map((e) => e.ll), ...p.stairs.map((e) => e.ll), ...exits]) {
+            bump(q);
           }
         }
       }
@@ -1426,14 +1467,35 @@
       } catch { return null; }
     }
 
-    async function loadFloor(buildingConfig, floor) {
-      const res = await fetch(floor.url);
-      const data = await res.json();
+    /**
+     * The campus walk network: the precomputed cache when it covers the
+     * bbox, else a live PMTiles decode; straight-line outdoor legs are used
+     * when both fail. Called as a promise at boot so it runs alongside the
+     * floor fetches/navGraph builds.
+     */
+    async function loadCampusOsm(bbox) {
+      let shapes = await loadCachedOsm(bbox);
+      if (!shapes) {
+        try {
+          const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox });
+          shapes = osm.shapes;
+          console.log(`OSM paths: ${osm.stats.ways} ways over ` +
+            `${osm.stats.tiles} tiles (${osm.stats.duplicateWays} duplicates dropped)`);
+        } catch (e) {
+          console.warn('OSM road layer unavailable, using straight-line outdoor legs:', e);
+        }
+      }
+      return shapes;
+    }
+
+    async function loadFloor(buildingConfig, floor, preloadedData) {
+      // The boot prefetches every floor JSON in parallel and passes it in;
+      // the fallback keeps the function usable standalone.
+      const data = preloadedData ?? await (await fetch(floor.url)).json();
       const toLL = makeToLL(buildingConfig, floor);
       const base = `${buildingConfig.id}-${floor.floorId}`.toLowerCase();
       const wallLayerId = floor.wallLayerId ?? `${base}-walls`;
       const roomLayerId = floor.roomLayerId ?? `${base}-roomnumbers`;
-      const layerIds = [wallLayerId];   // toggled by the global floor picker
 
       // Case-insensitive: most buildings write "Windows", AS106 writes
       // "WINDOWS".
@@ -1448,23 +1510,9 @@
         shapeSegments(wall).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
       const wallFeatureCollection = turf.lineStrings(lines);
 
-      map.addSource(`${base}-walls`, {
-        type: 'geojson',
-        data: wallFeatureCollection,
-      });
-      map.addLayer({
-        id: wallLayerId,
-        type: 'line',
-        source: `${base}-walls`,
-        paint: {
-          'line-color': '#333333',
-          'line-width': 2,
-        },
-      });
-
       // Room-number labels: ONE array feeds both the displayed symbol layer
-      // (when the floor shows labels) and the search index, so the two can
-      // never disagree. Search resolves "BMH 114A" against this same data.
+      // (created when the floor is first shown) and the search index, so the
+      // two can never disagree. Search resolves "BMH 114A" against this data.
       const roomLabels = (data.text_lines ?? []).map((roomno) => ({
         type: 'Feature',
         geometry: {
@@ -1473,31 +1521,6 @@
         },
         properties: { text: String(roomno.text ?? '').trim() },
       })).filter((f) => f.properties.text);
-
-      if (floor.showRoomLabels && roomLabels.length) {
-        map.addSource(`${base}-roomnumbers`, {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: roomLabels },
-        });
-        map.addLayer({
-          id: roomLayerId,
-          type: 'symbol',
-          source: `${base}-roomnumbers`,
-          layout: {
-            'text-field': ['get', 'text'],
-            'text-size': 12,
-            // The basemap glyph server only serves the Noto Sans family;
-            // Open Sans/Arial 404 and the labels render blank.
-            'text-font': ['Noto Sans Medium'],
-          },
-          paint: {
-            'text-color': '#2c3e50',
-            'text-halo-color': '#ffffff',
-            'text-halo-width': 1.2,
-          },
-        });
-        layerIds.push(roomLayerId);
-      }
 
       const navGraph = buildGraph(wallFeatureCollection);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
@@ -1525,7 +1548,16 @@
       }));
       return {
         floorId: floor.floorId,
-        layerIds,
+        // Map-layer inputs. The plan's map layers are created the first time
+        // the floor is displayed (ensureFloorLayers), so loading stays eager
+        // but unselected floors are never added to the map, let alone shown.
+        wallLayerId,
+        roomLayerId,
+        wallSourceId: `${base}-walls`,
+        roomSourceId: `${base}-roomnumbers`,
+        showRoomLabels: !!floor.showRoomLabels,
+        wallFC: wallFeatureCollection,
+        labelFC: { type: 'FeatureCollection', features: roomLabels },
         navGraph,
         // lon/lat wall segments: the router keeps outdoor path edges out of
         // the building footprint with these.
@@ -1643,26 +1675,75 @@
       renderRoute();
     }
 
+    /**
+     * Create a floor's plan layers the FIRST time that floor is displayed.
+     * loadFloor no longer adds sources/layers for every floor at boot, so an
+     * unselected floor is never on the map (no all-floors flash during load,
+     * no map work for plans nobody has looked at). Layer creation only - the
+     * floor JSON, navGraph and portals are all loaded eagerly. Inserted below
+     * 'portals' so dots and the route stay on top.
+     */
+    function ensureFloorLayers(f) {
+      if (f._layersAdded) return;
+      const before = map.getLayer('portals') ? 'portals'
+        : map.getLayer('navigation-route') ? 'navigation-route' : undefined;
+      if (!map.getSource(f.wallSourceId)) {
+        map.addSource(f.wallSourceId, { type: 'geojson', data: f.wallFC });
+        map.addLayer({
+          id: f.wallLayerId,
+          type: 'line',
+          source: f.wallSourceId,
+          paint: {
+            'line-color': '#333333',
+            'line-width': 2,
+          },
+        }, before);
+      }
+      if (f.showRoomLabels && f.labelFC.features.length) {
+        map.addSource(f.roomSourceId, { type: 'geojson', data: f.labelFC });
+        map.addLayer({
+          id: f.roomLayerId,
+          type: 'symbol',
+          source: f.roomSourceId,
+          layout: {
+            'text-field': ['get', 'text'],
+            'text-size': 12,
+            // The basemap glyph server only serves the Noto Sans family;
+            // Open Sans/Arial 404 and the labels render blank.
+            'text-font': ['Noto Sans Medium'],
+          },
+          paint: {
+            'text-color': '#2c3e50',
+            'text-halo-color': '#ffffff',
+            'text-halo-width': 1.2,
+          },
+        }, before);
+      }
+      f._layersAdded = true;
+    }
+
     function applyFloorFilter(floorId) {
       if (!floorId) return;
       // 2D: show the selected floor's flat walls + labels + connector dots
       // (the original plan view). 3D: those are hidden; the extruded structure
       // carries the geometry, and room labels appear only while picking a
-      // route (they cannot be elevated in this build).
+      // route (they cannot be elevated in this build). Only the selected
+      // floor's layers are ever visible.
       for (const b of buildings) {
         for (const f of b.floors) {
-          for (const id of f.layerIds ?? []) {
-            if (!map.getLayer(id)) continue;
-            const isLabel = /roomnumbers/.test(id);
-            const visible = is3D
-              ? (findPathMode && isLabel && f.floorId === floorId)
-              : f.floorId === floorId;
-            map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
-            if (isLabel) {
-              const hot = is3D && findPathMode;
-              map.setPaintProperty(id, 'text-color', hot ? '#ffe14a' : '#2c3e50');
-              map.setPaintProperty(id, 'text-halo-color', hot ? '#000000' : '#ffffff');
-            }
+          const selected = f.floorId === floorId;
+          // Only add the plan when it will actually be drawn (2D, or 3D while
+          // picking a route for its labels).
+          if (selected && (!is3D || findPathMode)) ensureFloorLayers(f);
+          if (!f._layersAdded) continue;
+          const wallsVisible = !is3D && selected;
+          map.setLayoutProperty(f.wallLayerId, 'visibility', wallsVisible ? 'visible' : 'none');
+          if (map.getLayer(f.roomLayerId)) {
+            const labelsVisible = is3D ? (findPathMode && selected) : selected;
+            map.setLayoutProperty(f.roomLayerId, 'visibility', labelsVisible ? 'visible' : 'none');
+            const hot = is3D && findPathMode;
+            map.setPaintProperty(f.roomLayerId, 'text-color', hot ? '#ffe14a' : '#2c3e50');
+            map.setPaintProperty(f.roomLayerId, 'text-halo-color', hot ? '#000000' : '#ffffff');
           }
         }
       }
@@ -1678,12 +1759,31 @@
       statusText.textContent = 'Loading buildings...';
       buildings = [];
       try {
+        // Floor JSONs and OSM shapes were already kicked off at module load
+        // (see floorPrefetch / bootOsmPromise) - overlapping map setup. The
+        // CPU work below runs sequentially, yielding between floors so the
+        // status line can paint.
+        const prefetched = floorPrefetch;
+        const totalFloors = buildingsConfig.reduce((n, c) => n + c.floors.length, 0);
+        const osmPromise = bootOsmPromise;
+
+        let built = 0;
         for (const config of buildingsConfig) {
           try {
             const building = { id: config.id, groundFloor: config.groundFloor, floors: [],
                                sourceId: null, sourceName: null };
             for (const floor of config.floors) {
-              const loaded = await loadFloor(config, floor);
+              const result = await prefetched.get(floor);
+              if (result.error) {
+                console.warn(`Failed to load ${config.id} ${floor.floorId}:`, result.error);
+                continue;
+              }
+              const data = result.data;
+              statusText.textContent =
+                `Building graph ${config.id} ${floor.floorId} (${++built}/${totalFloors})...`;
+              // Let the browser paint the status before the CPU-bound build.
+              await new Promise((r) => setTimeout(r));
+              const loaded = await loadFloor(config, floor, data);
               building.sourceId ??= loaded.sourceId;
               building.sourceName ??= loaded.sourceName;
               building.floors.push(loaded);
@@ -1700,26 +1800,10 @@
         }
 
         statusText.textContent = 'Building campus router...';
+        await new Promise((r) => setTimeout(r));
 
-        // OpenStreetMap walkways/roads (translated to our PATHS layer by
-        // osm.mjs) so outdoor legs follow real paths. Optional: if the
-        // archive is unreachable the router falls back to straight-line
-        // outdoor legs and the demo works unchanged.
-        // Prefer the precomputed osm-paths.json (see gen-osm.mjs): fetching
-        // and decoding the pmtiles archive costs several seconds. Fall back to
-        // live decode when the cache is missing or no longer covers the campus.
-        const osmBBox = outdoorBBox(buildings, OSM_BBOX_PAD_M);
-        let osmShapes = await loadCachedOsm(osmBBox);
-        if (!osmShapes) {
-          try {
-            const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox: osmBBox });
-            osmShapes = osm.shapes;
-            console.log(`OSM paths: ${osm.stats.ways} ways over ` +
-              `${osm.stats.tiles} tiles (${osm.stats.duplicateWays} duplicates dropped)`);
-          } catch (e) {
-            console.warn('OSM road layer unavailable, using straight-line outdoor legs:', e);
-          }
-        }
+        // 3. OSM shapes (started in parallel above; likely already resolved).
+        const osmShapes = await osmPromise;
 
         campusRouter = buildCampusRouter(buildings, osmShapes);
         window.campusRouter = campusRouter;   // handy for console debugging
