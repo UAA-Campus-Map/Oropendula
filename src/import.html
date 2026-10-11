@@ -125,9 +125,13 @@
     </div>
     <label><input type="checkbox" id="showLabels" /> draw room labels</label>
 
-    <h2>Save</h2>
+    <h2>Deploy</h2>
     <div class="row">
       <button id="downloadBtn">Download buildings-config.json</button>
+      <button id="downloadOsmBtn" title="Decode the campus OSM tiles into osm-paths.json">Download osm-paths.json</button>
+    </div>
+    <div id="osm-status" class="hint"></div>
+    <div class="row">
       <button id="resetBtn" title="Discard edits and reload the server config">reset</button>
     </div>
     <div id="status"></div>
@@ -137,7 +141,8 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { makeToLL, lonLatToDxf, metresPerDegree, DXF_SCALE } from './geo.mjs';
-    import { shapeSegments, extractPortals, cachePortals } from './campus.mjs';
+    import { shapeSegments, extractPortals, cachePortals, portalsFromCache } from './campus.mjs';
+    import { loadOsmShapes } from './osm.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
 
     const protocol = new pmtiles.Protocol({ metadata: true });
@@ -147,6 +152,10 @@
     // Keep the plan clear of the 300px side panel when fitting.
     const FIT_PADDING = { left: 340, top: 60, right: 60, bottom: 60 };
     const LS_KEY = 'import-tool-config';
+    // OSM path cache inputs - must match index.html / gen-osm.mjs.
+    const OSM_ARCHIVE_URL = 'https://navigator.cheeseverse.net/scak.pmtiles';
+    const OSM_PAD_M = 200;
+    const OSM_ZOOM = 15;
 
     const $ = id => document.getElementById(id);
     const map = new maplibregl.Map({
@@ -164,6 +173,7 @@
     let didInitialFit = false;      // first load: fit the plan clear of the panel
     let portalsDirty = false;       // a portal cache was computed since last persist
     let editMode = null;            // 'place-door' | 'remove-door' | 'place-bridge' | 'remove-bridge'
+    let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
 
     const status = msg => { $('status').textContent = msg; };
 
@@ -189,6 +199,68 @@
       const origin = f.origin ?? b.origin ?? { lon: 0, lat: 0 };
       const offset = f.offset ?? b.offset ?? { x: 0, y: 0, rot: 0 };
       return { origin, offset };
+    }
+
+    // --- OSM path cache (deploy artifact) ----------------------------------
+    // The campus bbox the app computes: effective exits (manual doors win)
+    // plus cached stairs/elevators, padded by OSM_PAD_M. Mirrors
+    // gen-osm.mjs / index.html's outdoorBBoxFromConfig exactly, so the file
+    // this tool downloads covers the app's bbox check.
+    function campusBBox(padM = OSM_PAD_M) {
+      let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      const bump = ([lon, lat]) => {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      };
+      for (const b of config) {
+        for (const f of b.floors) {
+          const toLL = makeToLL(b, f);
+          const p = f.portals ? portalsFromCache(f.portals, toLL)
+                              : { elevators: [], stairs: [], exits: [] };
+          const exits = f.exits?.length
+            ? f.exits.map(e => toLL(e.dxf[0], e.dxf[1]))
+            : p.exits.map(e => e.ll);
+          for (const q of [...p.elevators.map(e => e.ll), ...p.stairs.map(e => e.ll), ...exits]) {
+            bump(q);
+          }
+        }
+      }
+      if (!isFinite(minLon)) return null;
+      const m = metresPerDegree((minLat + maxLat) / 2);
+      return {
+        minLon: minLon - padM / m.lon, maxLon: maxLon + padM / m.lon,
+        minLat: minLat - padM / m.lat, maxLat: maxLat + padM / m.lat,
+      };
+    }
+
+    const bboxCovers = (outer, inner) => !!outer && !!inner &&
+      inner.minLon >= outer.minLon && inner.maxLon <= outer.maxLon &&
+      inner.minLat >= outer.minLat && inner.maxLat <= outer.maxLat;
+
+    // Informational only: does the osm-paths.json on the server cover the
+    // campus this tool currently describes? Generation stays manual - the
+    // Download osm-paths.json button.
+    async function refreshOsmStatus() {
+      const el = $('osm-status');
+      if (!el) return;
+      if (osmCacheBBox === null) {
+        try {
+          const res = await fetch('/osm-paths.json');
+          osmCacheBBox = res.ok ? (await res.json()).bbox : undefined;
+        } catch { osmCacheBBox = undefined; }
+      }
+      const bbox = campusBBox();
+      if (!bbox) {
+        el.textContent = 'OSM paths: add a building first';
+      } else if (osmCacheBBox === undefined) {
+        el.textContent = 'OSM paths: none on the server yet - press Download osm-paths.json';
+      } else if (bboxCovers(osmCacheBBox, bbox)) {
+        el.textContent = 'OSM paths: the server cache covers this campus';
+      } else {
+        el.textContent = 'OSM paths: stale (campus changed) - press Download osm-paths.json';
+      }
     }
 
     // --- map plumbing ------------------------------------------------------
@@ -317,6 +389,7 @@
     // --- refresh everything from state -------------------------------------
     async function refresh() {
       const b = building(), f = floor();
+      refreshOsmStatus();   // fire-and-forget; fetches the server cache once
       // panel selects
       const bSel = $('building');
       bSel.innerHTML = config.map((bb, i) =>
@@ -755,6 +828,31 @@
       a.click();
       URL.revokeObjectURL(a.href);
       status(`downloaded ${config.length} buildings`);
+    });
+    wire('downloadOsmBtn', 'click', async () => {
+      // Manual generation: decode the z15 PMTiles tiles covering the campus
+      // and download osm-paths.json, the exact schema gen-osm.mjs writes.
+      const bbox = campusBBox();
+      if (!bbox) { status('add a building before generating OSM paths'); return; }
+      status('decoding OSM tiles...');
+      try {
+        const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox, zoom: OSM_ZOOM });
+        const blob = new Blob(
+          [JSON.stringify({ bbox, zoom: OSM_ZOOM, stats: osm.stats, shapes: osm.shapes })],
+          { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'osm-paths.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        // Treat it as the campus cache from here on; upload it to the server.
+        osmCacheBBox = bbox;
+        refreshOsmStatus();
+        status(`downloaded osm-paths.json: ${osm.shapes.length} shapes, ` +
+          `${osm.stats.tiles} tiles - upload it to the server`);
+      } catch (e) {
+        status(`OSM fetch failed: ${e.message || e}`);
+      }
     });
 
     function setOpt(f, key, value) {

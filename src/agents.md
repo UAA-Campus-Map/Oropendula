@@ -45,7 +45,10 @@ build step, no npm dependencies in the app itself.
   prefill from its metadata (`building_code`/`building_name`/`level`), drag the
   plan onto the basemap (draggable datum dot + rotation ring, arrow-key nudges,
   degrees rotation UI storing radians), edit per-floor overrides, and download
-  a drop-in `buildings-config.json`. Persists work-in-progress to localStorage.
+  the deploy artifacts from its grouped **Deploy** section: a drop-in
+  `buildings-config.json` (with every floor's portal cache) and, on demand,
+  `osm-paths.json` (in-browser PMTiles decode, same bbox/schema as
+  gen-osm.mjs). Persists work-in-progress to localStorage.
   MapLibre gotchas hit here: this build's `Evented.on()` returns
   `{unsubscribe}`, **not** the marker (never chain `.on(...).addTo(...)`), and
   `LngLat` properties are `lng`/`lat`. Marker handlers must read the placement
@@ -227,9 +230,9 @@ stores the result on each floor entry of `buildings-config.json` as
   an identity `toLL` (dxf is placement-independent) so it works before a floor
   has a registration. Re-importing a floor JSON drops and recomputes its cache;
   **Download** populates every configured floor before serializing.
-- **`gen-portals.mjs`** (dev-only) bootstraps/refreshes the cache for the whole
-  config in one shot. **Run it whenever a floor JSON changes**, then deploy
-  `buildings-config.json`.
+- **`gen-portals.mjs`** (dev-only) is the CLI fallback for bootstrapping the
+  cache; the import tool is the normal path (a floor JSON change is re-imported
+  there and comes back cached). Then deploy `buildings-config.json`.
 - smoke.mjs verifies every shipped floor's cache equals a fresh extraction.
 
 ## Performance
@@ -250,11 +253,14 @@ The campus grew to ~11 floors / 115 exits and load was ~40 s. Fixes so far:
    `destinationSegments`). Result: `buildCampusRouter` 29 s → ~3 s, per-route
    934 ms → ~70 ms. The API is exact (same visibility test as `findPath`), so
    no behaviour change.
-3. **OSM paths cache** — `gen-osm.mjs` decodes the pmtiles archive once and
-   writes `osm-paths.json` (bbox + shapes); index.html loads it when its bbox
-   covers the campus, else decodes live. Removes ~6 s. **Re-run
-   `gen-osm.mjs` and deploy `osm-paths.json` whenever the building set changes**
-   (the campus bbox grows and the cache stops covering).
+3. **OSM paths cache** — `osm-paths.json` (bbox + shapes) is decoded from the
+   pmtiles archive once; index.html loads it when its bbox covers the campus,
+   else decodes live. Removes ~6 s. **Regenerate and deploy `osm-paths.json`
+   whenever the building set / campus bbox changes** (the cache stops
+   covering). Normal path: `import.html`'s **Download osm-paths.json** button
+   (manual, in-browser decode via osm.mjs; same bbox and schema, verified
+   bit-identical against the checked-in cache); `gen-osm.mjs` is the CLI
+   fallback.
 4. **Selective floor drawing** — floor plans used to be added to the map for
    every floor at boot (visible), then hidden once the picker was ready, so all
    plans flashed during load and map time went to floors nobody viewed.
@@ -531,6 +537,21 @@ every time. After a major change:
 List the changed paths with `git status --short` first so nothing is missed and
 nothing extra is sent. The large static assets (floor JSONs, PMTiles, MapLibre
 `*.mjs`) only need re-uploading when they themselves change.
+
+### Deploying building additions (no server-side commands)
+
+Everything generated is produced by `import.html`; the server only receives
+files:
+
+1. Extract new floor JSONs (external DXF extractor) and import them in
+   `import.html` (placement, manual doors, skybridges).
+2. Press **Download buildings-config.json** (collects every floor's portal
+   cache first) and **Download osm-paths.json** (when the campus bbox grew -
+   the tool's status line says when the server cache is stale). Both buttons
+   sit together in the tool's **Deploy** group.
+3. Upload `buildings-config.json`, `osm-paths.json` and the new floor JSONs to
+   the server. No `node gen-*.mjs` on the server, no build step.
+4. `node smoke.mjs` stays a **local** pre-deploy gate (Node-only checks).
 
 ## 2D / 3D view (index.html)
 
