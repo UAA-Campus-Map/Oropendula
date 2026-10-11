@@ -3,7 +3,9 @@
  * JSONs in this directory.  Usage:  node smoke.mjs
  */
 import { readFileSync } from 'fs';
-import { buildGraph } from './navgraph.mjs';
+import { Worker } from 'node:worker_threads';
+import { availableParallelism } from 'node:os';
+import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache } from './campus.mjs';
 import { loadOsmShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
@@ -44,23 +46,101 @@ function check(name, cond, detail = '') {
   console.log(`  [${ok}] ${name}${detail ? ' - ' + detail : ''}`);
 }
 
-console.log('Loading buildings...');
-const t0 = performance.now();
-const buildings = BUILDING_CONFIGS.map(cfg => {
-  const data = JSON.parse(readFileSync(new URL(cfg.file, import.meta.url), 'utf8'));
-  const toLL = makeTransform(cfg);
+// SMOKE_TIMING=1 prefixes every line with elapsed seconds - run it when
+// hunting for the slow section. Off by default so the gate's output stays
+// clean.
+if (process.env.SMOKE_TIMING) {
+  const T0 = performance.now();
+  const origLog = console.log.bind(console);
+  console.log = (...a) =>
+    origLog(`[${((performance.now() - T0) / 1000).toFixed(1).padStart(5)}s]`, ...a);
+}
+
+/**
+ * Per-floor basis: JSON parse, wall segments, navGraph, fresh portal set.
+ * These are independent per floor and dominated by CPU (buildGraph,
+ * extractPortals), so they run across worker threads - this was ~9 s of the
+ * suite's ~40 s single-threaded. Set SMOKE_NO_WORKERS=1 to run inline.
+ */
+function basisFromJson(cfg, floor, data) {
+  const toLL = makeToLL(cfg, floor);
   // Same wall filter as index.html's loadFloor() (case-insensitive: AS106
   // writes WINDOWS in caps).
-  const walls = data.shapes.filter(s => {
-    const l = s.layer.toLowerCase();
-    return l === 'walls' || l === 'windows';
-  });
+  const walls = data.shapes.filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()));
   const lines = walls.flatMap(s =>
     shapeSegments(s).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
-  const navGraph = buildGraph(lines);
-  const portals = extractPortals(data.shapes, toLL);
+  return {
+    floor, toLL, lines,
+    navGraph: buildGraph(lines),
+    freshPortals: extractPortals(data.shapes, toLL),
+    textLines: data.text_lines ?? [],
+  };
+}
+
+async function buildFloorBasis() {
+  const jobs = [];
+  for (let i = 0; i < CONFIG.length; i++) {
+    for (let k = 0; k < CONFIG[i].floors.length; k++) {
+      jobs.push({ i, k, cfg: CONFIG[i], floor: CONFIG[i].floors[k] });
+    }
+  }
+  if (process.env.SMOKE_NO_WORKERS) {
+    return CONFIG.map(cfg => cfg.floors.map(floor => {
+      const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
+      return basisFromJson(cfg, floor, data);
+    }));
+  }
+  const basis = CONFIG.map(cfg => cfg.floors.map(() => null));
+  const concurrency = Math.max(1, Math.min(8, (availableParallelism?.() ?? 4) - 1));
+  let next = 0;
+  await Promise.all(Array.from({ length: concurrency }, () => (async () => {
+    const worker = new Worker(new URL('./basis-worker.mjs', import.meta.url));
+    try {
+      for (;;) {
+        const job = jobs[next++];
+        if (!job) break;
+        const result = await new Promise((resolve, reject) => {
+          const onMessage = m => { cleanup(); resolve(m); };
+          const onError = e => { cleanup(); reject(e); };
+          const cleanup = () => {
+            worker.off('message', onMessage);
+            worker.off('error', onError);
+          };
+          worker.on('message', onMessage);
+          worker.on('error', onError);
+          worker.postMessage({ cfg: job.cfg, floor: job.floor });
+        });
+        if (!result.ok) throw new Error(`basis worker: ${result.error}`);
+        basis[job.i][job.k] = {
+          floor: job.floor,
+          // toLL is a function - rebuild it here rather than serialising it.
+          toLL: makeToLL(job.cfg, job.floor),
+          lines: result.lines,
+          navGraph: graphFromState(result.state),
+          freshPortals: result.freshPortals,
+          textLines: result.textLines,
+        };
+      }
+    } finally {
+      await worker.terminate();
+    }
+  })()));
+  return basis;
+}
+
+console.log('Loading buildings...');
+const t0 = performance.now();
+// ONE JSON parse + wall pass + buildGraph + fresh portal extraction per floor,
+// shared by every test group below (built in parallel workers). The suite used
+// to redo this per group - the multi-floor block rebuilt every navGraph a
+// second time for its cached-router comparison.
+const floorBasis = await buildFloorBasis();
+
+// The older tests deliberately work on a ground-floor-only campus.
+const buildings = CONFIG.map((cfg, i) => {
+  const { navGraph, lines, freshPortals } = floorBasis[i][0];
   console.log(`  ${cfg.id}: ${navGraph.stats.nodes} nodes, ${navGraph.stats.edges} edges, ` +
-    `portals: ${portals.elevators.length} elevators, ${portals.stairs.length} stairs, ${portals.exits.length} exits`);
+    `portals: ${freshPortals.elevators.length} elevators, ${freshPortals.stairs.length} stairs, ${freshPortals.exits.length} exits`);
   return {
     id: cfg.id,
     groundFloor: cfg.groundFloor,
@@ -70,13 +150,21 @@ const buildings = BUILDING_CONFIGS.map(cfg => {
       // lon/lat wall segments - the router keeps outdoor edges out of the
       // building footprint with these.
       obstacleLines: lines,
-      elevators: portals.elevators,
-      stairs: portals.stairs,
-      exits: portals.exits,
+      elevators: freshPortals.elevators,
+      stairs: freshPortals.stairs,
+      exits: freshPortals.exits,
     }],
   };
 });
 console.log(`Loaded in ${Math.round(performance.now() - t0)}ms\n`);
+
+// The shipped OSM path cache. index.html loads this (or decodes pmtiles live)
+// and the production router walks the network; the full-campus router below
+// uses the same shapes so its multi-floor routes model the deployed app
+// rather than straight-line outdoor legs.
+let osmCache = null;
+try { osmCache = JSON.parse(readFileSync(new URL('./osm-paths.json', import.meta.url), 'utf8')); }
+catch { /* optional; the OSM cache tests below report it */ }
 
 // shapeSegments must read the true vertices in `items`, never the bbox
 // diagonal: a rotated wall run drawn as its bbox is a diagonal slash across
@@ -326,12 +414,13 @@ check('every building has stairs', buildings.every(b => b.floors[0].stairs.lengt
 console.log('\nPortal cache:');
 {
   let floors = 0, missing = 0, mismatches = [];
-  for (const cfg of CONFIG) {
-    for (const floor of cfg.floors) {
+  for (let i = 0; i < CONFIG.length; i++) {
+    const cfg = CONFIG[i];
+    for (let k = 0; k < cfg.floors.length; k++) {
+      const floor = cfg.floors[k];
       if (!floor.portals) { missing++; continue; }
-      const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
-      const toLL = makeToLL(cfg, floor);
-      const fresh = extractPortals(data.shapes, toLL);
+      // Reuse the shared fresh extraction from floorBasis (no second pass).
+      const { toLL, freshPortals: fresh } = floorBasis[i][k];
       const cached = portalsFromCache(floor.portals, toLL);
       // A fresh extraction is the source of truth; the cache must equal it.
       const round = cachePortals(fresh);
@@ -688,9 +777,7 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
 // ---------------------------------------------------------------------------
 console.log('\nOSM paths cache:');
 {
-  let cache = null;
-  try { cache = JSON.parse(readFileSync(new URL('./osm-paths.json', import.meta.url), 'utf8')); }
-  catch { /* optional */ }
+  const cache = osmCache;
   check('osm-paths.json exists', !!cache);
   if (cache) {
     const shapesOk = Array.isArray(cache.shapes) && cache.shapes.length > 0 &&
@@ -733,26 +820,18 @@ console.log('\nOSM paths cache:');
 console.log('\nMulti-floor routing (all real floors):');
 {
   // A second full campus, this time with every registered floor (the `buildings`
-  // above deliberately keep only the ground floor for the older tests). The
-  // expensive per-floor work - JSON parse, wall segments, buildGraph - happens
-  // ONCE here; the two routers below differ only in where their portals come
-  // from (fresh extraction vs the shipped cache). Building it twice cost the
-  // suite a second full navGraph pass (~6 s).
-  const floorBasis = CONFIG.map(cfg => cfg.floors.map(floor => {
-    const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
-    const toLL = makeToLL(cfg, floor);
-    const walls = data.shapes.filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()));
-    const lines = walls.flatMap(s =>
-      shapeSegments(s).map(([a, c]) => [toLL(a[0], a[1]), toLL(c[0], c[1])]));
-    return { floor, data, toLL, lines, navGraph: buildGraph(lines) };
-  }));
-
-  const mkBuilding = (cfg, basics, useCache) => {
+  // above deliberately keep only the ground floor for the older tests). All
+  // per-floor work comes from the shared `floorBasis`; this block only wraps
+  // it. Construction mirrors index.html: portals come from the shipped cache
+  // with a fresh-extraction fallback, manual doors win, skybridges are
+  // explicit, and the router is fed the shipped OSM path cache (the app's
+  // outdoor network). The portal-equality check above proves the cache equals
+  // a fresh extraction, so a second full router to compare the two was pure
+  // duplication (it cost ~10 s per run).
+  const mkBuilding = (cfg, basics) => {
     const b = { id: cfg.id, groundFloor: cfg.groundFloor, floors: [] };
-    for (const { floor, data, toLL, lines, navGraph } of basics) {
-      const portals = useCache && floor.portals
-        ? portalsFromCache(floor.portals, toLL)
-        : extractPortals(data.shapes, toLL);
+    for (const { floor, toLL, lines, navGraph, freshPortals } of basics) {
+      const portals = floor.portals ? portalsFromCache(floor.portals, toLL) : freshPortals;
       // Mirror index.html: manual doors win; skybridges are explicit portals.
       const doorList = floor.exits?.length ? floor.exits : portals.exits;
       const exits = doorList.map((e, i) => ({
@@ -769,18 +848,21 @@ console.log('\nMulti-floor routing (all real floors):');
     }
     return b;
   };
-  const allBuildings = CONFIG.map((c, i) => mkBuilding(c, floorBasis[i], false));
-  const routerAll = buildCampusRouter(allBuildings);
-  const routerCached = buildCampusRouter(CONFIG.map((c, i) => mkBuilding(c, floorBasis[i], true)));
+  const allBuildings = CONFIG.map((c, i) => mkBuilding(c, floorBasis[i]));
+  const routerAll = buildCampusRouter(allBuildings, osmCache?.shapes ?? null);
 
   const A103 = allBuildings.find(b => b.id === 'AS103');
   const A102 = allBuildings.find(b => b.id === 'AS102');
   const A106 = allBuildings.find(b => b.id === 'AS106');
-  const floorCfg = (id, floorId) => CONFIG.find(c => c.id === id).floors.find(f => f.floorId === floorId);
+  // Both helpers read from the shared floorBasis (no re-parse, no re-extract).
+  const basisOf = (id, floorId) => {
+    const i = CONFIG.findIndex(c => c.id === id);
+    const k = CONFIG[i].floors.findIndex(f => f.floorId === floorId);
+    return floorBasis[i][k];
+  };
   const roomLL = (id, floorId) => {
-    const data = JSON.parse(readFileSync(new URL(`${id}-${floorId}.json`, import.meta.url), 'utf8'));
-    const toLL = makeToLL(CONFIG.find(c => c.id === id), floorCfg(id, floorId));
-    return toLL(data.text_lines[0].x, data.text_lines[0].y);
+    const { textLines, toLL } = basisOf(id, floorId);
+    return toLL(textLines[0].x, textLines[0].y);
   };
 
   const sF2 = roomLL('AS103', '02');
@@ -809,12 +891,10 @@ console.log('\nMulti-floor routing (all real floors):');
   check('vertical segments carry a location (3D riser)',
     r9 && r9.segments.filter(s => s.tier === 'elevator' || s.tier === 'stairs').every(s => Array.isArray(s.ll)));
 
-  // A router fed the cached portals must behave identically to one that
-  // extracted them fresh.
-  const r9cached = routerCached.route(sF2, eAS102, { startFloor: '02' });
-  check('cached-portal router matches fresh extraction',
-    !!r9cached && !!r9 && Math.abs(r9cached.totalMeters - r9.totalMeters) < 1e-6,
-    r9cached ? `${r9cached.totalMeters.toFixed(1)}m vs ${r9.totalMeters.toFixed(1)}m` : 'no route');
+  // No separate cached-vs-fresh router comparison here: `routerAll` itself is
+  // fed the shipped cache (the production path) with a fresh fallback, and the
+  // portal-equality check above proves the cache is bit-identical to a fresh
+  // extraction, so routing cannot differ.
 
   // Two buildings with no skybridge: the f2 -> f2 trip still goes down first.
   const r9b = routerAll.route(sF2, eF2, { startFloor: '02', endFloor: '02' });
@@ -835,9 +915,8 @@ console.log('\nMulti-floor routing (all real floors):');
   // Winter: outdoor travel is penalised heavily, so a skybridge (or any indoor
   // detour) beats going outside. AS105-02 and AS117-02 are joined by a bridge.
   const walkableRoom = (id, floorId) => {
-    const data = JSON.parse(readFileSync(new URL(`${id}-${floorId}.json`, import.meta.url), 'utf8'));
-    const toLL = makeToLL(CONFIG.find(c => c.id === id), floorCfg(id, floorId));
-    for (const t of data.text_lines) {
+    const { textLines, toLL } = basisOf(id, floorId);
+    for (const t of textLines) {
       const ll = toLL(t.x, t.y);
       const hit = routerAll.buildingAt(ll, floorId);
       if (hit && hit.building.id === id) return ll;

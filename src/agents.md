@@ -17,8 +17,12 @@ build step, no npm dependencies in the app itself.
   ~0.1 m grid extending ~0.45 m past the wall bbox. `isWalkable(ll)` is an O(1)
   lookup into that same clearance raster (used by the PDR particle filter and
   the GPS-validity gate); `nearestWalkable(ll, radiusCells)` spirals out to the
-  closest free cell. These two are the *only* additions; existing behaviour is
-  untouched.
+  closest free cell. Other additive surface: the attachment API (Performance,
+  item 2) and `buildGraphState(walls)` / `graphFromState(state)` — the graph as
+  serializable raster/nodes/adjacency state plus a rehydrate step, so floors
+  can be built in Worker threads; `buildGraph` is exactly
+  `graphFromState(buildGraphState(walls))` and unchanged in behaviour.
+  Existing behaviour is untouched.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).
@@ -464,17 +468,29 @@ filter's kinematics and map constraint, and the GPS/PDR arbiter's validity
 gate, drift growth, re-seed and hysteresis. Debug scripts live in
 `/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
 
-Runtime ~42-50 s wall / ~45 s CPU (8 buildings / 17 floors; varies with machine
-load and the live OSM fetch). `node --cpu-prof` breakdown (inclusive):
-`buildCampusRouter` ~19 s (it is built three times: ground-floor router, then
-full-campus fresh and cached portal routers), `dijkstraFromAttach` ~16 s (the
-per-node same-floor matrix inside those), `buildGraph` ~9.5 s, `extractPortals`
-~6 s (the cache-integrity check re-extracts every floor fresh), GC ~5 s.
-The suite used to rebuild every navGraph a second time for the cached router;
-`floorBasis` now computes parse/walls/`buildGraph` once and both routers share
-it. The remaining duplicate is the second full-campus router — it exists only
-to compare cached vs fresh portal extraction, which the portal-equality check
-already asserts.
+Runtime ~24 s wall / ~38 s CPU (8 buildings / 17 floors; varies with machine
+load and the live OSM fetch). The per-floor basis (JSON parse, wall segments,
+`buildGraphState`, fresh `extractPortals`) is independent per floor and runs in
+a small pool of **worker threads** (`basis-worker.mjs`), rehydrated with
+`graphFromState` — verified byte-identical to the inline path (same checks and
+metrics; only PDR randomness and timing differ). `SMOKE_NO_WORKERS=1` runs the
+basis inline; `SMOKE_TIMING=1` prefixes every line with elapsed seconds. The
+whole per-floor basis now costs ~3.7 s wall (was ~9.2 s).
+
+**Model fidelity**: the suite builds its campuses the way `index.html` does -
+same wall filter and `shapeSegments`, same `makeToLL`, portals from the shipped
+cache with a fresh-extraction fallback (their equality is asserted), manual
+doors win, skybridges are explicit, and the full-campus router is fed the
+shipped `osm-paths.json` network the app walks (verified: a turf-shaped
+FeatureCollection vs bare lines produce identical graphs, since `buildGraph`
+reads the same coordinates either way). The ground-floor-only routers and
+synthetic campuses are deliberate test constructs, not app paths. UI/3D code is
+not Node-testable and is covered by eyeballing the deployed page.
+
+`node --cpu-prof` self-time after the cuts: `buildGraph` ~9.5 s of CPU across
+17 floors (down to ~3.7 s wall in the worker pool), `dijkstraFromAttach` ~9 s
+(router attachment/matrix + per-route walks), `attach` ~5.5 s (`buildingAt`
+loops, exit reachability), GC ~4 s, live OSM fetch/decode ~3 s.
 
 For registration changes, open `import.html` (serve the dir the same way) and
 eyeball the plan over the basemap before trusting `buildings-config.json`.

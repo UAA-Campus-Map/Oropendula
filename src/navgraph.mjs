@@ -58,8 +58,9 @@ function metresPerDeg(lat) {
  * 3. Clustering free space into rectangle nodes (doorways/rooms adaptively)
  * 4. Connecting mutually visible nodes with edges (max link distance limited)
  *
- * The graph is static - once built, findPath() does Dijkstra on this graph
- * plus temporary start/end nodes connected to visible graph nodes.
+ * Returns only the serializable state (raster, nodes, adjacency, statistics);
+ * call graphFromState() to get the live graph with its query closures. This
+ * split lets the graph be built in a Worker and rehydrated on the main thread.
  *
  * @param {object|object[]|number[][][]} walls - wall centrelines, as any of:
  *        a GeoJSON FeatureCollection, an array of Features, or bare
@@ -74,7 +75,32 @@ function metresPerDeg(lat) {
  *          - isWalkable: O(1) test of whether a (lon,lat) is body-clear
  *          - nearestWalkable: closest body-clear (lon,lat), or null
  */
-export function buildGraph(walls) {
+/**
+ * Line-of-sight test over a clearance raster: true when the straight run a->b
+ * crosses no blocked cell. Sampling is at half-cell intervals. Shared by
+ * buildGraphState (node linking) and graphFromState (clicks, visibility).
+ */
+function makeClearLine(blocked, W, H, OX, OY) {
+  return function clearLine(a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const steps = Math.ceil(dist / (CELL * 0.5)); // sample interval = half cell
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps;
+      const px = a[0] + dx * t;
+      const py = a[1] + dy * t;
+      // Convert sample point to grid coordinates
+      const c = Math.round((px - OX) / CELL - 0.5);
+      const r = Math.round((py - OY) / CELL - 0.5);
+      if (c < 0 || r < 0 || c >= W || r >= H || blocked[r * W + c]) {
+        return false;
+      }
+    }
+    return true;
+  };
+}
+
+export function buildGraphState(walls) {
   const t0 = performance.now();
 
   // Normalise the three shapes callers have in circulation. Guessing wrong
@@ -155,34 +181,7 @@ export function buildGraph(walls) {
     }
   }
 
-  /** 
-   * Is the straight line a->b clear of walls? 
-   * 
-   * Tests line-of-sight by sampling at half-cell intervals (CELL * 0.5).
-   * If any sampled point falls in a blocked cell, the line is not clear.
-   * This is used both for linking graph nodes and for connecting start/end points.
-   * 
-   * @param {[number,number]} a - Start point in local metres
-   * @param {[number,number]} b - End point in local metres
-   * @returns {boolean} True if line is clear
-   */
-  function clearLine(a, b) {
-    const dx = b[0] - a[0], dy = b[1] - a[1];
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const steps = Math.ceil(dist / (CELL * 0.5)); // sample interval = half cell
-    for (let s = 1; s < steps; s++) {
-      const t = s / steps;
-      const px = a[0] + dx * t;
-      const py = a[1] + dy * t;
-      // Convert sample point to grid coordinates
-      const c = Math.round((px - OX) / CELL - 0.5);
-      const r = Math.round((py - OY) / CELL - 0.5);
-      if (c < 0 || r < 0 || c >= W || r >= H || blocked[r * W + c]) {
-        return false;
-      }
-    }
-    return true;
-  }
+  const clearLine = makeClearLine(blocked, W, H, OX, OY);
 
   // --- 2. nodes: one per merged rectangle of free space ---------------------
   // A plain fixed lattice does not work indoors: a doorway narrower than the
@@ -263,6 +262,34 @@ export function buildGraph(walls) {
       }
     }
   }
+
+  // Build statistics
+  const blockedCount = blocked.reduce((a, v) => a + v, 0);
+  const totalCells = W * H;
+  const edgeCount = adj.reduce((a, l) => a + l.length, 0) / 2; // undirected edges
+  const stats = {
+    cells: totalCells,
+    nodes: nodes.length,
+    edges: edgeCount,
+    blockedPercent: +(100 * blockedCount / totalCells).toFixed(1),
+    buildMs: +(performance.now() - t0).toFixed(0),
+    rasterHoles: `${missed}/${sampled}`,
+  };
+  if (missed) console.warn('navgraph: raster has holes', stats.rasterHoles);
+
+  return {origin, scale, OX, OY, W, H, nodes, adj, blocked, stats};
+}
+
+/**
+ * Rebuild the live navigation graph (query closures included) from the
+ * serializable state returned by buildGraphState. Output is exactly what
+ * buildGraph() returns for the same walls.
+ */
+export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked, stats}) {
+  const mLon = scale.lon, mLat = scale.lat;
+  const toM = ([lon, lat]) => [(lon - origin.lon) * mLon, (lat - origin.lat) * mLat];
+  const toLL = ([x, y]) => [origin.lon + x / mLon, origin.lat + y / mLat];
+  const clearLine = makeClearLine(blocked, W, H, OX, OY);
 
   // --- 4 & 5. attach the clicks, then Dijkstra ----------------------------
   /**
@@ -472,25 +499,15 @@ export function buildGraph(walls) {
     return null;
   }
 
-  // Build statistics
-  const blockedCount = blocked.reduce((a, v) => a + v, 0);
-  const totalCells = W * H;
-  const edgeCount = adj.reduce((a, l) => a + l.length, 0) / 2; // undirected edges
-  const stats = {
-    cells: totalCells,
-    nodes: nodes.length,
-    edges: edgeCount,
-    blockedPercent: +(100 * blockedCount / totalCells).toFixed(1),
-    buildMs: +(performance.now() - t0).toFixed(0),
-    rasterHoles: `${missed}/${sampled}`,
-  };
-  if (missed) console.warn('navgraph: raster has holes', stats.rasterHoles);
-
   return {findPath, nodes, stats, isWalkable, nearestWalkable,
           attach, dijkstraFromAttach, distToAttach, pathToAttach};
 }
 
-/** Binary min-heap keyed on cost for Dijkstra's algorithm. */
+/** Build the navigation graph for a set of wall centrelines (see buildGraphState). */
+export function buildGraph(walls) {
+  return graphFromState(buildGraphState(walls));
+}
+
 class MinHeap {
   constructor() {
     this.cost = [];
