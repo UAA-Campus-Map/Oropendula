@@ -727,7 +727,7 @@
     const WALL_WIDTH_M = 0.25;    // extruded wall thickness
     const ROUTE_WIDTH_M = 0.35;   // route ribbon width
     const STRUCTURE_OPACITY = 0.22;   // x-ray fill-extrusion opacity, all levels
-    const TOP_OUTLINE_M = 0.3;        // opaque base band height on the top level
+    const TOP_OUTLINE_M = 0.2;        // base band height on the top level (kept subtle)
     const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
     const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
 
@@ -828,11 +828,11 @@
       structureLevels = [...levels].sort((a, c) => a - c);
       map.addSource('campus-3d', { type: 'geojson', data: { type: 'FeatureCollection', features } });
       // The top level's walls are split into two stacked extrusions: this
-      // opaque band from `base` to `base + TOP_OUTLINE_M`, and the translucent
-      // wall ABOVE it - applyStructureStyle raises the selected level's
-      // `fill-extrusion-base` to base + TOP_OUTLINE_M so the two volumes do
-      // not overlap. This build cannot lift a 2D line, so an extrusion is the
-      // outline.
+      // near-black band from `base` to `base + TOP_OUTLINE_M`, and the
+      // translucent wall ABOVE it - applyStructureStyle raises the selected
+      // level's `fill-extrusion-base` to base + TOP_OUTLINE_M so the two
+      // volumes do not overlap. This build cannot lift a 2D line, so an
+      // extrusion is the outline.
       //
       // ORDER IS LOAD-BEARING. This build's fill-extrusion painter draws EVERY
       // extrusion in the translucent pass, in style order, with depth writes
@@ -848,10 +848,12 @@
         filter: ['all', ['==', ['get', 'level'], floorLevelOf(currentFloorId())],
                  ['==', ['get', 'kind'], 'wall']],
         paint: {
-          'fill-extrusion-color': '#000000',
+          // Softened: near-black (not pure) and slightly transparent, so the
+          // base band reads as a hint of the plan rather than a hard ink line.
+          'fill-extrusion-color': '#16181c',
           'fill-extrusion-base': ['get', 'base'],
           'fill-extrusion-height': ['+', ['get', 'base'], TOP_OUTLINE_M],
-          'fill-extrusion-opacity': 1,
+          'fill-extrusion-opacity': 0.7,
         },
       });
       for (const level of structureLevels) {

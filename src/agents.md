@@ -560,18 +560,19 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   upper floors cannot blend over lower ones.
 - Top-level outline: the selected (topmost displayed) level's walls are split
   into two **stacked** extrusions. `campus-3d-top-outline` draws the bottom
-  `base -> base + TOP_OUTLINE_M (0.3)` volume in solid black, and
-  `applyStructureStyle` raises that level's `fill-extrusion-base` to
-  `base + TOP_OUTLINE_M`, so its translucent wall sits directly above with no
-  overlap. **Order is load-bearing**: this build's fill-extrusion painter
-  draws EVERY extrusion in the translucent pass, in style order, with depth
-  writes (`LEQUAL, ReadWrite`) even at opacity 1 (verify in the bundle:
-  `if(i.currentPass==='translucent')`). A layer added after the walls renders
-  last and is depth-rejected behind any nearer wall; added FIRST, the walls
-  blend over it exactly like they blend over the route. So the outline layer
-  is added **before** the `campus-3d-level-*` layers. The filter follows the
-  selected level; the layer is hidden in 2D and in "Find Path" mode (whose
-  selected walls are already solid black).
+  `base -> base + TOP_OUTLINE_M (0.2)` volume in near-black
+  (`#16181c`) at opacity 0.7 - deliberately softened so the band hints at the
+  plan instead of inking it. `applyStructureStyle` raises that level's
+  `fill-extrusion-base` to `base + TOP_OUTLINE_M`, so its translucent wall
+  sits directly above with no overlap. **Order is load-bearing**: this build's
+  fill-extrusion painter draws EVERY extrusion in the translucent pass, in
+  style order, with depth writes (`LEQUAL, ReadWrite`) even at opacity 1
+  (verify in the bundle: `if(i.currentPass==='translucent')`). A layer added
+  after the walls renders last and is depth-rejected behind any nearer wall;
+  added FIRST, the walls blend over it exactly like they blend over the route.
+  So the outline layer is added **before** the `campus-3d-level-*` layers. The
+  filter follows the selected level; the layer is hidden in 2D and in
+  "Find Path" mode (whose selected walls are already solid black).
 - Route source `campus-3d-route` (rebuilt in `renderRoute`, opaque): each route
   segment polyline becomes a raised ribbon (~0.35 m wide, `base+0.1 -> base+0.6`,
   coloured by tier); each vertical leg (which now carries `ll`, the connector
