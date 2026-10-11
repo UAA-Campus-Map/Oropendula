@@ -9,6 +9,7 @@ import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache } from './campus.mjs';
 import { loadOsmShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
+import { convexHull, hullSamples, bestFitRigid } from './align.mjs';
 
 import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
@@ -194,6 +195,63 @@ catch { /* optional; the OSM cache tests below report it */ }
   });
   check('shapeSegments: arc items are skipped, not flattened', arc.length === 0);
   check('shapeSegments: empty shape yields nothing', shapeSegments({bbox: [0, 0, 1, 1]}).length === 0);
+}
+
+// ---------------------------------------------------------------------------
+// Floor auto-align (align.mjs) - synthetic rigid recovery for the import
+// tool's "align to ground".
+// ---------------------------------------------------------------------------
+console.log('\nFloor auto-align:');
+{
+  const corners = [[0, 0], [100, 0], [100, 60], [0, 60]];
+  const hull = convexHull(corners.concat([[50, 30], [10, 10]]));
+  check('convexHull drops interior points', hull.length === 4, `${hull.length} pts`);
+  const ring = hullSamples(corners, 10);
+  check('hullSamples walks the perimeter', ring.length >= 30 && ring.length <= 34,
+    `${ring.length} points`);
+  check('hullSamples of a degenerate set is empty', hullSamples([[0, 0], [1, 1]], 10).length === 0);
+
+  // Asymmetric pentagon so the recovered rotation is unambiguous (a plain
+  // rectangle has a 180° twin).
+  const shape = [[0, 0], [100, 0], [100, 40], [55, 65], [0, 60]];
+  const reference = hullSamples(shape, 2);
+  const alpha = (-35 * Math.PI) / 180;
+  const shift = [123, -47];
+  const ca = Math.cos(alpha), sa = Math.sin(alpha);
+  const current = reference.map(([x, y]) =>
+    [ca * x - sa * y + shift[0], sa * x + ca * y + shift[1]]);
+
+  const norm = (a) => {
+    a = a % (2 * Math.PI);
+    if (a > Math.PI) a -= 2 * Math.PI;
+    if (a < -Math.PI) a += 2 * Math.PI;
+    return a;
+  };
+  const fit = bestFitRigid(current, reference);
+  check('bestFitRigid recovers the rotation (scan seed)',
+    !!fit && Math.abs(norm(fit.rotation - 35 * Math.PI / 180)) < 0.01,
+    fit ? `${(fit.rotation * 180 / Math.PI).toFixed(2)}°` : 'null');
+  check('bestFitRigid residual ~ 0 on exact data', !!fit && fit.residual < 0.05,
+    fit ? `${fit.residual.toFixed(4)} m` : 'null');
+  // Applying the fit to the current points must land on the reference.
+  const c2 = Math.cos(fit.rotation), s2 = Math.sin(fit.rotation);
+  const moved = current.map(([x, y]) =>
+    [c2 * x - s2 * y + fit.translation[0], s2 * x + c2 * y + fit.translation[1]]);
+  let maxNN = 0;
+  for (const m of moved) {
+    let nn = Infinity;
+    for (const r of reference) nn = Math.min(nn, Math.hypot(m[0] - r[0], m[1] - r[1]));
+    maxNN = Math.max(maxNN, nn);
+  }
+  check('bestFitRigid maps current onto reference', maxNN < 0.2, `max nn ${maxNN.toFixed(3)} m`);
+
+  const seeded = bestFitRigid(current, reference, { rotation: 0.4 });
+  check('bestFitRigid seeded path converges too',
+    !!seeded && Math.abs(norm(seeded.rotation - 35 * Math.PI / 180)) < 0.01 &&
+    seeded.residual < 0.05,
+    seeded ? `${(seeded.rotation * 180 / Math.PI).toFixed(2)}°, ${seeded.residual.toFixed(4)} m` : 'null');
+  check('bestFitRigid handles empty input', bestFitRigid([], reference) === null &&
+    bestFitRigid(current, []) === null);
 }
 
 // The PDR particle filter relies on these O(1) accessors staying consistent
@@ -1078,6 +1136,44 @@ console.log('\nExplicit skybridge destination (synthetic):');
     routerXF.stats.skybridgeEdges === 1 &&
     !!rXF && rXF.segments.some(s => s.tier === 'skybridge') &&
     !rXF.segments.some(s => s.tier === 'outdoor'));
+}
+
+console.log('\nConnector anchors without a ground-floor stop (synthetic):');
+{
+  // A stairwell that exists on floors 02 and 03 but not 01: the first stop
+  // anchors the connector and the other floor links to it. Before the anchor
+  // fix, the second floor's lookup of the missing ground-floor stop passed
+  // `undefined` into distLL and crashed buildCampusRouter.
+  const lat0 = 61.17, lon0 = -149.86;
+  const mpd = metresPerDegree(lat0);
+  const half = 6;
+  const dx = half / mpd.lon, dy = half / mpd.lat;
+  const square = (cx, cy) => {
+    const c = [[cx - dx, cy - dy], [cx + dx, cy - dy], [cx + dx, cy + dy], [cx - dx, cy + dy]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const mk = (floorId, stairs) => ({
+    floorId, ...square(lon0, lat0), elevators: [], stairs, exits: [],
+  });
+  const b = {
+    id: 'X', groundFloor: '01',
+    floors: [
+      mk('01', []),
+      mk('02', [{ id: 's2', ll: [lon0, lat0] }]),
+      mk('03', [{ id: 's3', ll: [lon0, lat0] }]),
+    ],
+  };
+  let router = null, threw = null;
+  try { router = buildCampusRouter([b]); } catch (e) { threw = e; }
+  check('builds when the ground floor lacks that connector kind', !threw,
+    threw ? String(threw) : 'ok');
+  const r = router && router.route([lon0, lat0], [lon0, lat0],
+    { startFloor: '02', endFloor: '03' });
+  showRoute('X f02 -> X f03 (anchored stairwell)', r);
+  check('upper-floor stops still link vertically',
+    !!r && r.segments.some(s => s.tier === 'stairs') &&
+    !r.segments.some(s => s.tier === 'outdoor'));
 }
 
 // ---------------------------------------------------------------------------

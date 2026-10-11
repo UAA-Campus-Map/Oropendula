@@ -31,6 +31,9 @@ build step, no npm dependencies in the app itself.
   elevators/stairs/exits from tagged DXF layers; `buildCampusRouter(buildings,
   outdoorShapes?)` links connectors across floors, builds the macro graph over
   building exits, and answers `route(startLL, endLL, {startFloor, endFloor})`.
+  Each connector carries an explicit first-stop `anchor` — a kind missing on
+  the ground floor anchors on its first upper-floor stop (looking the ground
+  stop up directly passed `undefined` into `distLL` and crashed).
   Also exports `shapeSegments` (true geometry from `items` — see below).
 - `osm.mjs` — translates OSM road/path data into the custom shape format on a
   `PATHS` layer (see below). Direct reader over the basemap PMTiles archive.
@@ -48,7 +51,10 @@ build step, no npm dependencies in the app itself.
   the deploy artifacts from its grouped **Deploy** section: a drop-in
   `buildings-config.json` (with every floor's portal cache) and, on demand,
   `osm-paths.json` (in-browser PMTiles decode, same bbox/schema as
-  gen-osm.mjs). Persists work-in-progress to localStorage.
+  gen-osm.mjs). The **align to ground** button best-fits the selected floor's
+  exterior perimeter onto the building's ground floor (see `align.mjs`);
+  stairs are deliberately not used as anchors, elevators are. Persists
+  work-in-progress to localStorage.
   MapLibre gotchas hit here: this build's `Evented.on()` returns
   `{unsubscribe}`, **not** the marker (never chain `.on(...).addTo(...)`), and
   `LngLat` properties are `lng`/`lat`. Marker handlers must read the placement
@@ -470,12 +476,15 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 ## Testing
 
 `node smoke.mjs` — the only gate; run it after any change to campus.mjs,
-geo.mjs, osm.mjs, buildings-config.json or a building registration. It covers:
+geo.mjs, osm.mjs, align.mjs, buildings-config.json or a building registration.
+It covers:
 portal sanity, exits outside the footprint / near real doors, exit reachability
 for every building, six end-to-end routes (same floor, cross-building, outdoor
 click, vertical, cross-floor, cross-campus), a hermetic synthetic outdoor grid
 incl. the no-network fallback, and a live OSM test (network — degrades to
-skipped offline). It also covers the positioning stack on synthetic signals:
+skipped offline). It also covers the floor auto-align math (`align.mjs`:
+convex hull/sampling, and rigid recovery of a known rotation+shift on a
+synthetic asymmetric perimeter), the positioning stack on synthetic signals:
 `isWalkable`/`nearestWalkable` consistency, step detection vs a synthetic gait
 across cadence/amplitude/noise, heading smoothing/gyro/bias, the particle
 filter's kinematics and map constraint, and the GPS/PDR arbiter's validity

@@ -939,27 +939,40 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     const anyLL = ground.elevators[0]?.ll ?? ground.stairs[0]?.ll ?? ground.exits[0]?.ll;
     const scale = metresPerDeg(anyLL?.[1] ?? 61.19);
     const byKind = {elevator: new Map(), stairs: new Map()};
-    // seed with ground-floor connectors
-    for (const p of ground.elevators) {
-      byKind.elevator.set(p.id, {kind: 'elevator', building: b.id, stops: new Map([[ground.floorId, p.ll]])});
+    // Seed with the ground floor's connectors. Every connector carries an
+    // explicit `anchor` (its own first stop): a connector kind that is missing
+    // on the ground floor (bad data, or a stairwell that only exists on upper
+    // floors) seeds from the first floor that has it, and later floors link to
+    // that anchor by proximity. Looking up the ground-floor stop directly
+    // crashed (`distLL(undefined, ...)`) when no such stop existed.
+    for (const p of ground.elevators ?? []) {
+      byKind.elevator.set(p.id, {
+        kind: 'elevator', building: b.id, anchor: p.ll,
+        stops: new Map([[ground.floorId, p.ll]]),
+      });
     }
-    for (const p of ground.stairs) {
-      byKind.stairs.set(p.id, {kind: 'stairs', building: b.id, stops: new Map([[ground.floorId, p.ll]])});
+    for (const p of ground.stairs ?? []) {
+      byKind.stairs.set(p.id, {
+        kind: 'stairs', building: b.id, anchor: p.ll,
+        stops: new Map([[ground.floorId, p.ll]]),
+      });
     }
-    // attach stops from other floors to the nearest ground-floor connector
+    // attach stops from other floors to the nearest anchor of the same kind
     for (const f of b.floors) {
       if (f.floorId === b.groundFloor) continue;
       for (const kind of ['elevator', 'stairs']) {
-        const list = f[kind === 'elevator' ? 'elevators' : 'stairs'];
+        const list = f[kind === 'elevator' ? 'elevators' : 'stairs'] ?? [];
         for (const p of list) {
           let best = null, bestD = Infinity;
           for (const c of byKind[kind].values()) {
-            const gll = c.stops.get(b.groundFloor);
-            const d = distLL(gll, p.ll, scale);
+            const d = distLL(c.anchor, p.ll, scale);
             if (d < bestD) { bestD = d; best = c; }
           }
           if (best && bestD <= CONNECTOR_LINK_M) best.stops.set(f.floorId, p.ll);
-          else byKind[kind].set(`${kind}-x${byKind[kind].size}`, {kind, building: b.id, stops: new Map([[f.floorId, p.ll]])});
+          else byKind[kind].set(`${kind}-x${byKind[kind].size}`, {
+            kind, building: b.id, anchor: p.ll,
+            stops: new Map([[f.floorId, p.ll]]),
+          });
         }
       }
     }
