@@ -523,19 +523,35 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   (NOT the axis-aligned bbox — that overhangs badly on a rotated building,
   AS117 is ~19 deg). It is drawn as **one `fill-extrusion` layer per floor
   level** (`campus-3d-level-k`), added in ascending order AFTER the route, each
-  `fill-extrusion-opacity: 0.15` (x-ray), data-driven base/height. Walls are
+  `fill-extrusion-opacity: STRUCTURE_OPACITY` (0.22, x-ray), data-driven
+  base/height. Walls are
   darker than the floor plate (`kind` property drives the colour). Why per
   level: transparent fill-extrusions still **write depth** in this build, so a
   single combined layer depth-rejects everything behind it (looks solid) and
   upper floors cannot blend over lower ones.
+- Top-level outline: the selected (topmost displayed) level's walls are split
+  into two **stacked** extrusions. `campus-3d-top-outline` draws the bottom
+  `base -> base + TOP_OUTLINE_M (0.3)` volume in solid black, and
+  `applyStructureStyle` raises that level's `fill-extrusion-base` to
+  `base + TOP_OUTLINE_M`, so its translucent wall sits directly above with no
+  overlap. **Order is load-bearing**: this build's fill-extrusion painter
+  draws EVERY extrusion in the translucent pass, in style order, with depth
+  writes (`LEQUAL, ReadWrite`) even at opacity 1 (verify in the bundle:
+  `if(i.currentPass==='translucent')`). A layer added after the walls renders
+  last and is depth-rejected behind any nearer wall; added FIRST, the walls
+  blend over it exactly like they blend over the route. So the outline layer
+  is added **before** the `campus-3d-level-*` layers. The filter follows the
+  selected level; the layer is hidden in 2D and in "Find Path" mode (whose
+  selected walls are already solid black).
 - Route source `campus-3d-route` (rebuilt in `renderRoute`, opaque): each route
   segment polyline becomes a raised ribbon (~0.35 m wide, `base+0.1 -> base+0.6`,
   coloured by tier); each vertical leg (which now carries `ll`, the connector
   landing) becomes a riser box between the two floors' bases.
 - Floor picker shows **floors 1..n** (n = selected level) by toggling the
-  per-level layers, and brightens the selected floor (`#4a90e2` vs dark grey
-  `#3f454d`). The route is always drawn in full across floors (so it can float
-  above the shown floors).
+  per-level layers; the top displayed level's walls are drawn slightly darker
+  (`#1f2328` vs `#2b3036`, no blue highlight) so the top of the stack reads,
+  and the floor plates share one colour (`#6b7683`). The route is always drawn
+  in full across floors (so it can float above the shown floors).
 - **"Find Path" mode** (`findPathMode`): while picking the two taps, the floor
   plates are hidden and the selected level's walls are drawn solid black
   (opaque) so the room layout reads, and the selected floor's room-number

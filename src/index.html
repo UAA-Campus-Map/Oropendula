@@ -662,6 +662,8 @@
     const WALL_TOP_M = 5.3;       // wall height above a floor's base
     const WALL_WIDTH_M = 0.25;    // extruded wall thickness
     const ROUTE_WIDTH_M = 0.35;   // route ribbon width
+    const STRUCTURE_OPACITY = 0.22;   // x-ray fill-extrusion opacity, all levels
+    const TOP_OUTLINE_M = 0.3;        // opaque base band height on the top level
     const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
     const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
 
@@ -719,12 +721,14 @@
     // would depth-reject everything behind it and read as solid; splitting by
     // level lets each upper floor blend over the lower ones (true x-ray).
     let structureLevels = [];
-    // Walls darker than the floor plate; the selected level is blue-tinted.
+    // Walls darker than the floor plate. The top displayed level (the
+    // selected one) gets slightly darker walls instead of the old blue
+    // highlight - it is the top of the stack, not a starring role. Floor
+    // plates share one colour across levels.
     const structureColorFor = (level) => {
-      const sel = level === floorLevelOf(currentFloorId());
-      const wall = sel ? '#1f5f9e' : '#2b3036';
-      const floor = sel ? '#7fb3e0' : '#6b7683';
-      return ['case', ['==', ['get', 'kind'], 'floor'], floor, wall];
+      const top = level === floorLevelOf(currentFloorId());
+      const wall = top ? '#1f2328' : '#2b3036';
+      return ['case', ['==', ['get', 'kind'], 'floor'], '#6b7683', wall];
     };
 
     /** Build the static structure: extruded walls + floor plates, once. */
@@ -759,6 +763,33 @@
       }
       structureLevels = [...levels].sort((a, c) => a - c);
       map.addSource('campus-3d', { type: 'geojson', data: { type: 'FeatureCollection', features } });
+      // The top level's walls are split into two stacked extrusions: this
+      // opaque band from `base` to `base + TOP_OUTLINE_M`, and the translucent
+      // wall ABOVE it - applyStructureStyle raises the selected level's
+      // `fill-extrusion-base` to base + TOP_OUTLINE_M so the two volumes do
+      // not overlap. This build cannot lift a 2D line, so an extrusion is the
+      // outline.
+      //
+      // ORDER IS LOAD-BEARING. This build's fill-extrusion painter draws EVERY
+      // extrusion in the translucent pass, in style order, with depth writes
+      // (`LEQUAL, ReadWrite`) regardless of opacity. Added after the walls, the
+      // band renders last and is depth-rejected behind any nearer wall; added
+      // FIRST, the walls blend over it exactly like they blend over the route,
+      // so the band stays visible through them. Keep this layer before the
+      // campus-3d-level-* layers.
+      map.addLayer({
+        id: 'campus-3d-top-outline',
+        type: 'fill-extrusion',
+        source: 'campus-3d',
+        filter: ['all', ['==', ['get', 'level'], floorLevelOf(currentFloorId())],
+                 ['==', ['get', 'kind'], 'wall']],
+        paint: {
+          'fill-extrusion-color': '#000000',
+          'fill-extrusion-base': ['get', 'base'],
+          'fill-extrusion-height': ['+', ['get', 'base'], TOP_OUTLINE_M],
+          'fill-extrusion-opacity': 1,
+        },
+      });
       for (const level of structureLevels) {
         map.addLayer({
           id: `campus-3d-level-${level}`,
@@ -769,7 +800,7 @@
             'fill-extrusion-color': structureColorFor(level),
             'fill-extrusion-base': ['get', 'base'],
             'fill-extrusion-height': ['get', 'top'],
-            'fill-extrusion-opacity': 0.15,
+            'fill-extrusion-opacity': STRUCTURE_OPACITY,
             'fill-extrusion-vertical-gradient': true,
           },
         });
@@ -791,15 +822,29 @@
         map.setLayoutProperty(id, 'visibility', (is3D && level <= n) ? 'visible' : 'none');
         const sel = level === n;
         if (findPathMode) {
-          // Walls only (plates hidden), selected level solid black.
+          // Walls only (plates hidden), selected level solid black, full
+          // height (the outline band is hidden in this mode).
           map.setFilter(id, ['all', ['==', ['get', 'level'], level], ['==', ['get', 'kind'], 'wall']]);
+          map.setPaintProperty(id, 'fill-extrusion-base', ['get', 'base']);
           map.setPaintProperty(id, 'fill-extrusion-color', sel ? '#000000' : '#2b3036');
-          map.setPaintProperty(id, 'fill-extrusion-opacity', sel ? 1 : 0.15);
+          map.setPaintProperty(id, 'fill-extrusion-opacity', sel ? 1 : STRUCTURE_OPACITY);
         } else {
           map.setFilter(id, ['==', ['get', 'level'], level]);
+          // The top level's translucent walls start ABOVE the opaque outline
+          // band (two stacked extrusions, no overlap).
+          map.setPaintProperty(id, 'fill-extrusion-base',
+            sel ? ['+', ['get', 'base'], TOP_OUTLINE_M] : ['get', 'base']);
           map.setPaintProperty(id, 'fill-extrusion-color', structureColorFor(level));
-          map.setPaintProperty(id, 'fill-extrusion-opacity', 0.15);
+          map.setPaintProperty(id, 'fill-extrusion-opacity', STRUCTURE_OPACITY);
         }
+      }
+      if (map.getLayer('campus-3d-top-outline')) {
+        // The black base band follows the selected level; hidden while picking
+        // a route (that mode draws the walls solid black already).
+        map.setFilter('campus-3d-top-outline', ['all',
+          ['==', ['get', 'level'], n], ['==', ['get', 'kind'], 'wall']]);
+        map.setLayoutProperty('campus-3d-top-outline', 'visibility',
+          (is3D && !findPathMode) ? 'visible' : 'none');
       }
       if (map.getLayer('campus-3d-route')) {
         map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
