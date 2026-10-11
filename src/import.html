@@ -23,6 +23,11 @@
     }
     #panel .row { display: flex; gap: 6px; margin: 8px 0; }
     #panel .row > * { flex: 1; }
+    #panel .floor-label {
+      align-self: center; text-align: center;
+      font-size: 13px; font-weight: 600; color: #333333;
+      user-select: none;
+    }
     #panel button { padding: 6px; font-size: 12px; cursor: pointer; }
     #drop {
       border: 2px dashed #999; border-radius: 8px; padding: 14px; text-align: center;
@@ -75,9 +80,11 @@
     <label>ground floor <input type="text" id="groundFloor" /></label>
 
     <h2>Floor</h2>
-    <label>floor <select id="floor"></select></label>
-    <label>floorId <input type="text" id="floorId" /></label>
-    <label>json url <input type="text" id="url" /></label>
+    <div class="row">
+      <button id="floorPrevBtn" title="Floor below">&minus;</button>
+      <span id="floorLabel" class="floor-label">&mdash;</span>
+      <button id="floorNextBtn" title="Floor above">+</button>
+    </div>
     <label><input type="checkbox" id="showRoomLabels" /> show room labels</label>
     <label>wallLayerId override <input type="text" id="wallLayerId" placeholder="auto" /></label>
     <label>roomLayerId override <input type="text" id="roomLayerId" placeholder="auto" /></label>
@@ -169,6 +176,10 @@
     let config = [];            // the buildingsConfig array being edited
     const floorData = new Map();// `${buildingId}/${floorId}` -> parsed building JSON
     let selected = {building: 0, floor: 0};
+    // Boot/render guards: map writes wait for the style layers (setData),
+    // but the panel populates as soon as the config is loaded.
+    let mapReady = false;
+    let refreshing = false, refreshQueued = false;
     let datumMarker = null, handleMarker = null;
     let didInitialFit = false;      // first load: fit the plan clear of the panel
     let portalsDirty = false;       // a portal cache was computed since last persist
@@ -320,10 +331,11 @@
         },
         paint: { 'text-color': '#8e44ad', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
       });
-      $('#showLabels').addEventListener('change', refresh);
+      $('showLabels').addEventListener('change', refresh);
       map.on('keydown', onKey);
       map.getContainer().setAttribute('tabindex', '0');
-      refresh();                     // re-draw now that the sources exist
+      mapReady = true;
+      refresh();                     // now the style layers exist
     });
 
     // Door / skybridge editing: taps place or remove a portal on the floor,
@@ -387,7 +399,22 @@
     }
 
     // --- refresh everything from state -------------------------------------
-    async function refresh() {
+    // Serialized: overlapping refreshes could race (one starting before the
+    // map layers exist, another after) and finish out of order. The panel is
+    // populated immediately; map writes are skipped until the style is ready
+    // and the map-load refresh fills them in.
+    function refresh() {
+      if (refreshing) { refreshQueued = true; return; }
+      refreshing = true;
+      refreshNow()
+        .catch((e) => console.warn('import refresh failed:', e))
+        .finally(() => {
+          refreshing = false;
+          if (refreshQueued) { refreshQueued = false; refresh(); }
+        });
+    }
+
+    async function refreshNow() {
       const b = building(), f = floor();
       refreshOsmStatus();   // fire-and-forget; fetches the server cache once
       // panel selects
@@ -395,10 +422,9 @@
       bSel.innerHTML = config.map((bb, i) =>
         `<option value="${i}">${bb.id || '(new)'}</option>`).join('');
       bSel.value = String(selected.building);
-      const fSel = $('floor');
-      fSel.innerHTML = (b?.floors ?? []).map((ff, i) =>
-        `<option value="${i}">${ff.floorId}</option>`).join('');
-      fSel.value = String(selected.floor);
+      // Floor stepper: the label is the floorId; the buttons step within the
+      // selected building (disabled states set in syncPanel).
+      $('floorLabel').textContent = f ? f.floorId : '—';
       // Bridge destination options: auto plus every OTHER building.
       const bTo = $('bridgeTo');
       const curTo = bTo.value;
@@ -407,7 +433,12 @@
           `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
       if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
 
-      if (!b || !f) { setData('imp-walls', empty); return; }
+      if (!b || !f) {
+        setData('imp-walls', empty);
+        $('floorPrevBtn').disabled = true;
+        $('floorNextBtn').disabled = true;
+        return;
+      }
       const toLL = makeToLL(b, f);
       const data = await loadFloorData(b, f);
       if (data) ensurePortals(b, f, data);
@@ -477,7 +508,7 @@
       syncMarkers();
       syncPanel();
       syncPortalPanel();
-      if (!didInitialFit && data) {
+      if (!didInitialFit && data && mapReady) {
         didInitialFit = true;
         const bb = floorBBox(data);
         if (bb) {
@@ -492,6 +523,7 @@
     }
 
     function setData(id, fc) {
+      if (!mapReady) return;            // layers don't exist until style load
       const src = map.getSource(id);
       if (src) src.setData(fc);
     }
@@ -660,15 +692,18 @@
       const b = building(), f = floor();
       const enabled = !!b && !!f;
       for (const el of document.querySelectorAll('#panel input, #panel select, #panel button')) {
-        if (el.id === 'resetBtn' || el.id === 'file') continue;   // always usable
+        // reset/file stay usable; the floor stepper gets its own bounds below.
+        if (el.id === 'resetBtn' || el.id === 'file' ||
+            el.id === 'floorPrevBtn' || el.id === 'floorNextBtn') continue;
         el.disabled = !enabled;
       }
+      const prevBtn = $('floorPrevBtn'), nextBtn = $('floorNextBtn');
+      prevBtn.disabled = !enabled || selected.floor <= 0;
+      nextBtn.disabled = !enabled || selected.floor >= (b?.floors.length ?? 0) - 1;
       if (!b || !f) return;
       const { origin, offset } = placementOf(b, f);
       $('id').value = b.id ?? '';
       $('groundFloor').value = b.groundFloor ?? '';
-      $('floorId').value = f.floorId ?? '';
-      $('url').value = f.url ?? '';
       $('showRoomLabels').checked = !!f.showRoomLabels;
       $('wallLayerId').value = f.wallLayerId ?? '';
       $('roomLayerId').value = f.roomLayerId ?? '';
@@ -737,11 +772,20 @@
     wire('addFloorBtn', 'click', () => { attachTo = building(); $('file').click(); });
     wire('file', 'change', e => { ingestFiles([...e.target.files], attachTo); attachTo = null; });
     wire('building', 'change', e => { selected = { building: +e.target.value, floor: 0 }; editMode = null; refresh(); });
-    wire('floor', 'change', e => { selected.floor = +e.target.value; editMode = null; refresh(); });
+    // Floor stepper (replaces the old floor/floorId/url inputs: floorId comes
+    // from the JSON's metadata and the URL from the uploaded filename, so
+    // neither needs editing).
+    function stepFloor(delta) {
+      const b = building();
+      if (!b) return;
+      selected.floor = Math.max(0, Math.min(b.floors.length - 1, selected.floor + delta));
+      editMode = null;
+      refresh();
+    }
+    wire('floorPrevBtn', 'click', () => stepFloor(-1));
+    wire('floorNextBtn', 'click', () => stepFloor(1));
     wire('id', 'change', e => { building().id = e.target.value; persist(); refresh(); });
     wire('groundFloor', 'change', e => { building().groundFloor = e.target.value; persist(); refresh(); });
-    wire('floorId', 'change', e => { floor().floorId = e.target.value; persist(); refresh(); });
-    wire('url', 'change', e => { floor().url = e.target.value; floorData.delete(floorKey(building(), floor())); persist(); refresh(); });
     wire('showRoomLabels', 'change', e => { floor().showRoomLabels = e.target.checked; persist(); });
     wire('wallLayerId', 'change', e => { setOpt(floor(), 'wallLayerId', e.target.value); });
     wire('roomLayerId', 'change', e => { setOpt(floor(), 'roomLayerId', e.target.value); });
@@ -866,7 +910,15 @@
     for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); });
     drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], null));
 
-    loadInitial().then(refresh);
+    loadInitial().then(() => refresh());
+
+    // Console debugging, same spirit as index.html's window.campusRouter.
+    window.importTool = {
+      map, floorData,
+      get config() { return config; },
+      get selected() { return selected; },
+      refresh,
+    };
   </script>
 </body>
 </html>

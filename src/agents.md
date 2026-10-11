@@ -501,6 +501,11 @@ reads the same coordinates either way). The ground-floor-only routers and
 synthetic campuses are deliberate test constructs, not app paths. UI/3D code is
 not Node-testable and is covered by eyeballing the deployed page.
 
+**Never run headless-browser tests** (Firefox/Chromium screenshots, DOM dumps,
+remote debugging) **without asking the user first.** Ask for a screenshot (or
+permission) instead - the user can supply them. UI verification is otherwise
+manual on the deployed page.
+
 `node --cpu-prof` self-time after the cuts: `buildGraph` ~9.5 s of CPU across
 17 floors (down to ~3.7 s wall in the worker pool), `dijkstraFromAttach` ~9 s
 (router attachment/matrix + per-route walks), `attach` ~5.5 s (`buildingAt`
