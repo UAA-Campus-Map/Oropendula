@@ -389,6 +389,16 @@ console.log('\nGPS/PDR arbiter:');
   const settled = arb.estimate(39000);                  // > hysteresis
   check('source switch is hysteretic', midway.source === 'gps' && settled.source === 'pdr',
     `${midway.source} -> ${settled.source}`);
+
+  // "I'm Here" cancels GPS: clearGps must forget the fix (and its held copy)
+  // so a stale, wrong fix cannot win the arbitration back after the anchor.
+  arb.gps({ lon: glon, lat: glat, accuracy: 1, t: 40000 });
+  arb.estimate(40000);
+  arb.clearGps();
+  const cleared = arb.estimate(40500);
+  check('clearGps forgets the fix and yields to PDR',
+    cleared.source === 'pdr' && cleared.gpsAccuracyM === null,
+    `${cleared.source} gpsAcc ${cleared.gpsAccuracyM}`);
 }
 
 // Even-odd ray cast (mirrors campus.mjs's insideWalls) for exit placement.

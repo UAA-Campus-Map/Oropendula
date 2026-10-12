@@ -88,6 +88,23 @@ export class PositionArbiter {
     this.metresSinceCorrection += stepLengthM;
   }
 
+  /**
+   * Forget the current GPS fix (and its held copy). Used when the user says
+   * "I'm Here" because the fix is wrong: without this the stale fix stays a
+   * candidate - or is held through a source switch - and wins the
+   * arbitration again seconds after the anchor. Normal GPS/PDR arbitration
+   * resumes when a new fix arrives.
+   */
+  clearGps() {
+    this.gpsFix = null;
+    this.heldGps = null;
+    if (this.source === 'gps') {
+      this.source = null;
+      this._candidate = null;
+      this._candidateSince = null;
+    }
+  }
+
   /** A manual anchor (map tap): re-seed and treat as a correction. */
   anchor([lon, lat], { spreadM = 2.5 } = {}) {
     this.filter.seed([lon, lat], { spreadM, heading: this.heading, headingSpreadDeg: 30 });

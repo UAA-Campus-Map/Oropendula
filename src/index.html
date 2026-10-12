@@ -93,6 +93,14 @@
       color: #ffffff;
     }
 
+    /* Follow paused by a manual gesture: a blue outline hints that tapping
+       the button resumes following. */
+    .control-btn.paused {
+      border-color: #4a90e2;
+      color: #4a90e2;
+      box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25);
+    }
+
     .floor-control {
       display: flex;
       align-items: center;
@@ -357,6 +365,8 @@
          ?dev=1 (or via the console: pathBtn.click()). -->
     <button id="path-btn" class="control-btn" style="display: none">Find Path</button>
     <button id="view-btn" class="control-btn" title="Toggle 2D / 3D">2D</button>
+    <button id="follow-btn" class="control-btn"
+            title="Follow me (camera faces my heading)">Follow</button>
     <button id="location-btn" class="control-btn icon-btn" title="My Location (GPS)"
             aria-label="My Location">
       <!-- Crosshair with a centre dot: the universal "locate me" symbol. -->
@@ -452,6 +462,8 @@
     let isDefiningPath = false;
     let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
     let is3D = false;            // starts in 2D; toggled by the view button
+    let followMode = false;      // camera follows the live position
+    let followPaused = false;    // a manual gesture paused it; tap Follow to resume
     let firstPathPoint = null;
     let firstPathFloor = null;   // floor shown when the start was tapped
 
@@ -472,6 +484,7 @@
     const anchorBtn = document.getElementById('anchor-btn');
     const pathBtn = document.getElementById('path-btn');
     const viewBtn = document.getElementById('view-btn');
+    const followBtn = document.getElementById('follow-btn');
     const floorDown = document.getElementById('floor-down');
     const floorUp = document.getElementById('floor-up');
     const floorLabel = document.getElementById('floor-label');
@@ -522,20 +535,35 @@
     searchGo.addEventListener('click', runSearch);
     searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
 
+    // Follow is active only while engaged and not paused by a gesture.
+    function followActive() { return followMode && !followPaused; }
+
+    /**
+     * Rotation gestures: available in 3D only, and never while Follow owns
+     * the bearing - a gesture would fight the follow loop every frame.
+     */
+    function applyRotationMode() {
+      if (is3D && !followActive()) {
+        map.dragRotate?.enable?.();
+        map.touchZoomRotate?.enableRotation?.();
+      } else {
+        map.dragRotate?.disable?.();
+        map.touchZoomRotate?.disableRotation?.();
+      }
+    }
+
     /** Switch between the flat 2D plan and the extruded 3D stack. */
     function applyViewMode() {
       viewBtn.textContent = is3D ? '3D' : '2D';
       viewBtn.classList.toggle('active', is3D);
       if (is3D) {
         map.easeTo({ pitch: 50, bearing: map.getBearing(), duration: 500 });
-        map.dragRotate?.enable?.();
-        map.touchZoomRotate?.enableRotation?.();
       } else {
         map.easeTo({ pitch: 0, bearing: 0, duration: 500 });
-        map.dragRotate?.disable?.();
-        map.touchZoomRotate?.disableRotation?.();
       }
+      applyRotationMode();
       applyFloorFilter(currentFloorId());
+      applyLiveMode();
       renderRoute();
     }
     floorDown.addEventListener('click', () => setFloor(floorLevel - 1));
@@ -549,7 +577,12 @@
     // zero-hardware calibration point.
     let placingAnchor = false;
     anchorBtn.addEventListener('click', () => {
-      if (!livePosMarker) startLiveLocate();
+      // "I'm Here" corrects a wrong fix, so it CANCELS GPS instead of
+      // starting it: a live (wrong) fix would win the arbitration again
+      // seconds after the anchor. PDR + the manual anchor take over;
+      // "My Location" turns GPS back on.
+      stopGps();
+      ensureLiveSetup();
       placingAnchor = true;
       anchorBtn.classList.add('active');
       statusText.textContent = 'Tap the map where you are';
@@ -751,6 +784,18 @@
       const hx = (sizeM / 2) / m.lon, hy = (sizeM / 2) / m.lat;
       return [[ll[0] - hx, ll[1] - hy], [ll[0] + hx, ll[1] - hy],
               [ll[0] + hx, ll[1] + hy], [ll[0] - hx, ll[1] + hy], [ll[0] - hx, ll[1] - hy]];
+    }
+
+    /** Closed lon/lat circle ring of radius `radiusM` around a point. */
+    function discRing(ll, radiusM, steps = 12) {
+      const m = metresPerDegree(ll[1]);
+      const ring = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * 2 * Math.PI;
+        ring.push([ll[0] + Math.cos(t) * radiusM / m.lon,
+                   ll[1] + Math.sin(t) * radiusM / m.lat]);
+      }
+      return ring;
     }
 
     /**
@@ -1222,6 +1267,12 @@
     let lastAccuracyMeters = 0;
     let geoWatchId = null;
     let didAutoCenter = false;   // fly to the first fix after "My Location"
+    // Live 3D avatar + Follow state (see the sections below): the latest
+    // estimate, and the most recent heading in degrees clockwise from north.
+    let followCenter = null;      // latest estimate [lon, lat]
+    let lastHeadingDeg = null;    // compass heading / GPS course, degrees
+    let followRaf = null;         // requestAnimationFrame handle
+    let followFraming = false;    // the one-shot enable ease owns the camera
 
     // PDR + GPS locator (motion.mjs -> locate.mjs -> arbiter.mjs). GPS and
     // dead reckoning run at the same time; the arbiter picks whichever is
@@ -1338,12 +1389,22 @@
       if (!est) return;
       currentEstimate = est;
       const ll = [est.lon, est.lat];
+      followCenter = ll;
+      if (followActive() && !followFraming) startFollowLoop();
       if (livePosMarker) livePosMarker.setLngLat(ll);
       lastAccuracyMeters = est.accuracyM;
       if (map.getSource('location-radius')) {
         map.getSource('location-radius').setData(
           turf.circle(ll, Math.max(1, est.accuracyM), { steps: 64, units: 'meters' }));
       }
+      // 3D: the same estimate as a blocky avatar extrusion on the selected
+      // floor (DOM markers cannot be lifted). 2D keeps the DOM pin and the
+      // flat accuracy/heading layers.
+      ensureLive3D();
+      if (map.getSource('campus-3d-live')) {
+        map.getSource('campus-3d-live').setData(live3DData(est));
+      }
+      if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
       statusText.textContent = est.source === 'gps'
         ? `GPS ±${est.accuracyM.toFixed(0)} m`
         : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
@@ -1355,6 +1416,7 @@
     // magnetometer flickers. The map stays north-up: only the arrow turns.
     function updateHeadingDisplay(headingRad) {
       const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
+      lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
       compassDisplay.textContent = `${Math.round(deg)}°`;
       if (livePosMarker && map.getSource('location-heading')) {
         const markerPos = livePosMarker.getLngLat();
@@ -1362,6 +1424,127 @@
           [markerPos.lng, markerPos.lat], Math.max(1, lastAccuracyMeters), deg, { units: 'meters' });
         map.getSource('location-heading').setData(
           turf.lineString([[markerPos.lng, markerPos.lat], outsidePoint.geometry.coordinates]));
+      }
+    }
+
+    // --- "My Location" in 3D: a blocky avatar --------------------------------
+    // DOM markers live in 2D screen space and cannot be lifted (no z), so in
+    // 3D the live marker becomes a little figure built from extrusions - body
+    // column, lighter head and a facing wedge along the heading - plus a
+    // translucent accuracy disc lying on the same floor. Real position sources
+    // (GPS/PDR) carry no height, so the avatar always stands on the
+    // **selected floor**: the floor picker is authoritative, exactly as in 2D.
+    const AVATAR_BODY_M = 0.62;        // torso width
+    const AVATAR_HEAD_M = 0.42;        // head width
+    const AVATAR_COLOR = '#4a90e2';
+    const AVATAR_HEAD_COLOR = '#dce9f8';
+    const AVATAR_POINTER_COLOR = '#2f6fb5';
+    const AVATAR_DISC_MIN_ACC_M = 1.5; // exact fixes still get no disc
+    const AVATAR_DISC_MAX_M = 40;      // clamp huge outdoor GPS accuracy
+
+    function live3DData(est) {
+      const ll = [est.lon, est.lat];
+      const base = floorBase(currentFloorId()) + 0.05;
+      const parts = [
+        { kind: 'body', color: AVATAR_COLOR,
+          ring: discRing(ll, AVATAR_BODY_M / 2, 10), low: 0.55, high: 1.45 },
+        { kind: 'head', color: AVATAR_HEAD_COLOR,
+          ring: discRing(ll, AVATAR_HEAD_M / 2, 10), low: 1.45, high: 1.85 },
+      ];
+      // Facing wedge at shoulder height - rotated to the smoothed heading
+      // (compass, or the GPS course while moving). Skipped until one exists.
+      if (lastHeadingDeg != null) {
+        const m = metresPerDegree(ll[1]);
+        const th = lastHeadingDeg * Math.PI / 180;
+        const perp = th + Math.PI / 2;
+        const bx = Math.sin(perp) * 0.2 / m.lon, by = Math.cos(perp) * 0.2 / m.lat;
+        parts.push({
+          kind: 'pointer', color: AVATAR_POINTER_COLOR,
+          ring: [[ll[0] - bx, ll[1] - by], [ll[0] + bx, ll[1] + by],
+                 [ll[0] + Math.sin(th) * 0.6 / m.lon, ll[1] + Math.cos(th) * 0.6 / m.lat],
+                 [ll[0] - bx, ll[1] - by]],
+          low: 1.1, high: 1.4,
+        });
+      }
+      if (est.accuracyM >= AVATAR_DISC_MIN_ACC_M) {
+        const disc = turf.circle(ll, Math.min(est.accuracyM, AVATAR_DISC_MAX_M),
+          { steps: 48, units: 'meters' });
+        parts.push({
+          kind: 'accuracy', color: AVATAR_COLOR,
+          ring: disc.geometry.coordinates[0], low: 0.02, high: 0.12,
+        });
+      }
+      return {
+        type: 'FeatureCollection',
+        features: parts.map((p) => ({
+          type: 'Feature',
+          properties: { kind: p.kind, color: p.color, base: base + p.low, top: base + p.high },
+          geometry: { type: 'Polygon', coordinates: [p.ring] },
+        })),
+      };
+    }
+
+    /** Create the 3D avatar layers once, after the style is ready. */
+    function ensureLive3D() {
+      if (map.getSource('campus-3d-live')) return;
+      // No isStyleLoaded() guard: this custom MapLibre build's style.loaded()
+      // flag stays false while tiles are active, so it would never create the
+      // layers; a throw (style still loading) is retried by the next estimate.
+      try {
+        map.addSource('campus-3d-live', {
+          type: 'geojson', data: { type: 'FeatureCollection', features: [] },
+        });
+        map.addLayer({
+          id: 'campus-3d-live',
+          type: 'fill-extrusion',
+          source: 'campus-3d-live',
+          filter: ['!=', ['get', 'kind'], 'accuracy'],
+          paint: {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 1,
+          },
+        });
+        map.addLayer({
+          id: 'campus-3d-live-accuracy',
+          type: 'fill-extrusion',
+          source: 'campus-3d-live',
+          filter: ['==', ['get', 'kind'], 'accuracy'],
+          paint: {
+            'fill-extrusion-color': AVATAR_COLOR,
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 0.22,
+          },
+        });
+      } catch { return; }   // style not ready; next estimate retries
+      // Insert BEFORE the structure (which is added after the route) so the
+      // translucent walls blend over the avatar instead of depth-rejecting it.
+      const anchor = map.getLayer('campus-3d-route') ? 'campus-3d-route'
+        : map.getLayer('campus-3d-top-outline') ? 'campus-3d-top-outline'
+          : structureLevels.length ? `campus-3d-level-${structureLevels[0]}` : null;
+      for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {
+        if (anchor) map.moveLayer(id, anchor);
+        map.setLayoutProperty(id, 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    /** 2D: DOM pin + flat circles. 3D: the floor-pinned avatar extrusions. */
+    function applyLiveMode() {
+      if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
+      for (const id of ['location-radius', 'location-radius-outline', 'location-heading-outline']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'none' : 'visible');
+      }
+      for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    /** Re-place the avatar after a floor change (no new estimate needed). */
+    function refreshLive3D() {
+      if (currentEstimate && map.getSource('campus-3d-live')) {
+        map.getSource('campus-3d-live').setData(live3DData(currentEstimate));
       }
     }
 
@@ -1421,6 +1604,14 @@
       }
       lastAccuracyMeters = accuracy;
 
+      // No compass (desktop, denied motion permission): use the GPS course of
+      // travel while moving and hold the last bearing when stopped. A real
+      // compass heading wins - it also updates through updateHeadingDisplay.
+      if (motion?.heading?.hasHeading !== true
+          && Number.isFinite(position.coords.heading)) {
+        lastHeadingDeg = position.coords.heading;
+      }
+
       const accuracyCircle = turf.circle([longitude, latitude], accuracy, {
         steps: 64,
         units: 'meters',
@@ -1444,11 +1635,12 @@
       statusText.textContent = 'Location access denied';
     }
 
-    function startLiveLocate() {
-      locationBtn.classList.add('active');
-      statusText.textContent = 'Locating...';
-      didAutoCenter = false;   // fly to the next fix again
-
+    /**
+     * Marker + accuracy/heading layers + PDR, WITHOUT geolocation: the shared
+     * setup for "My Location" (which then starts GPS) and for "I'm Here"
+     * (which corrects GPS, so it must never start it).
+     */
+    function ensureLiveSetup() {
       if (livePosMarker) {
         livePosMarker.remove();
       }
@@ -1511,6 +1703,37 @@
         },
       });
 
+      // Start dead reckoning alongside GPS; the arbiter chooses between them.
+      // motion.mjs owns the orientation listener (absolute-only, smoothed) and
+      // requests iOS permission in its start().
+      ensureLocator([map.getCenter().lng, map.getCenter().lat]);
+      startMotion();
+      applyLiveMode();   // the marker may have been re-created in this mode
+    }
+
+    /**
+     * STOP geolocation (marker, PDR and manual anchors keep running). Used by
+     * "I'm Here": the user reaches for it when GPS is wrong, so a live (but
+     * wrong) fix must not stay a candidate - `clearGps` forgets it, or the
+     * arbiter holds it through a source switch and the marker snaps back
+     * seconds after the anchor.
+     */
+    function stopGps() {
+      if (geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId);
+        geoWatchId = null;
+      }
+      locationBtn.classList.remove('active');
+      if (locator) locator.arbiter.clearGps();
+    }
+
+    function startLiveLocate() {
+      locationBtn.classList.add('active');
+      statusText.textContent = 'Locating...';
+      didAutoCenter = false;   // fly to the next fix again
+
+      ensureLiveSetup();
+
       if (geoWatchId !== null) {
         navigator.geolocation.clearWatch(geoWatchId);
       }
@@ -1518,12 +1741,173 @@
         maximumAge: 5000,
         enableHighAccuracy: true,
       });
+    }
 
-      // Start dead reckoning alongside GPS; the arbiter chooses between them.
-      // motion.mjs owns the orientation listener (absolute-only, smoothed) and
-      // requests iOS permission in its start().
-      ensureLocator([map.getCenter().lng, map.getCenter().lat]);
-      startMotion();
+    // --- Follow mode ---------------------------------------------------------
+    // Camera follow: keep the walker on screen and drive the camera
+    // orientation from the current mode - **3D** angles the view (pitch 50)
+    // and turns the map to the heading (offset ahead along it, so the walker
+    // sits in the lower third facing "forward"); **2D** is a plain north-up
+    // top-down plan, exactly like regular 2D, panned to keep the walker on
+    // screen. An rAF loop with exponential smoothing is used instead of
+    // repeated easeTo calls: fixes arrive continuously and restarting an
+    // animation on every one stutters - and the loop's own jumpTo would cancel
+    // such eases anyway, so the loop must carry pitch/bearing itself. Zoom is
+    // not part of the loop, so pinch-zoom stays live.
+    const FOLLOW_LOOK_AHEAD_M = 22;   // metres ahead of the walker (3D only)
+    const FOLLOW_PITCH_3D = 50;       // 3D follow angle; 2D is always top-down
+    const FOLLOW_CENTER_RATE = 6;     // exponential smoothing rates, per second
+    const FOLLOW_BEARING_RATE = 5;
+    const FOLLOW_PITCH_RATE = 5;
+    const FOLLOW_ZOOM = 19;           // zoom-in on activation (never zoom out)
+    const FOLLOW_FRAME_MS = 700;      // one-shot enable ease duration
+
+    function followCameraCenter(ll) {
+      // Look-ahead is a 3D concept (the camera faces the heading); 2D centres
+      // the walker exactly. No heading yet -> exact centre either way.
+      if (!is3D || lastHeadingDeg == null) return ll;
+      return turf.destination(ll, FOLLOW_LOOK_AHEAD_M, lastHeadingDeg,
+        { units: 'meters' }).geometry.coordinates;
+    }
+
+    function startFollowLoop() {
+      if (followRaf !== null) return;
+      let prev = performance.now();
+      const step = (now) => {
+        followRaf = null;
+        if (!followActive() || !followCenter) return;
+        const dt = Math.min(0.25, Math.max(0.001, (now - prev) / 1000));
+        prev = now;
+        const target = followCameraCenter(followCenter);
+        const cur = map.getCenter();
+        const a = 1 - Math.exp(-FOLLOW_CENTER_RATE * dt);
+        const jump = {
+          center: [cur.lng + (target[0] - cur.lng) * a,
+                   cur.lat + (target[1] - cur.lat) * a],
+        };
+        // Mode owns orientation: 3D turns to the heading and angles at 50
+        // deg; 2D is north-up and top-down. The loop drives both because an
+        // applyViewMode easeTo cannot survive the loop's jumpTo.
+        const bearingTarget = is3D ? (lastHeadingDeg ?? map.getBearing()) : 0;
+        const curB = map.getBearing();
+        // Shortest path across the +/-180 seam, or the map spins the long way.
+        const delta = ((bearingTarget - curB + 540) % 360) - 180;
+        jump.bearing = curB + delta * (1 - Math.exp(-FOLLOW_BEARING_RATE * dt));
+        const pitchTarget = is3D ? FOLLOW_PITCH_3D : 0;
+        const curP = map.getPitch();
+        jump.pitch = curP + (pitchTarget - curP) * (1 - Math.exp(-FOLLOW_PITCH_RATE * dt));
+        map.jumpTo(jump);
+        followRaf = requestAnimationFrame(step);
+      };
+      followRaf = requestAnimationFrame(step);
+    }
+
+    function stopFollowLoop() {
+      if (followRaf !== null) cancelAnimationFrame(followRaf);
+      followRaf = null;
+    }
+
+    /** 'off' | 'active' | 'paused' - the button wears the state. */
+    function setFollowButton(state) {
+      followBtn.classList.toggle('active', state === 'active');
+      followBtn.classList.toggle('paused', state === 'paused');
+      followBtn.textContent = state === 'paused' ? 'Resume' : 'Follow';
+      followBtn.title = state === 'active' ? 'Following - tap to stop'
+        : state === 'paused' ? 'Resume following'
+          : 'Follow me (camera faces my heading)';
+    }
+
+    function enableFollow() {
+      followMode = true;
+      followPaused = false;
+      setFollowButton('active');
+      // Follow needs a live position: start My Location if nothing feeds one
+      // yet (this tap is the user gesture the sensors need).
+      if (geoWatchId === null && !livePosMarker) startLiveLocate();
+      didAutoCenter = true;   // no competing flyTo on the first fix
+      applyRotationMode();
+      const ll = currentEstimate
+        ? [currentEstimate.lon, currentEstimate.lat]
+        : [map.getCenter().lng, map.getCenter().lat];
+      // One-shot framing: ease to the walker and ZOOM IN (at least z18, never
+      // out). The loop must not run yet - its jumpTo cancels this ease, which
+      // is why the zoom-in never used to happen - so it waits for the ease.
+      followFraming = true;
+      map.easeTo({
+        center: followCameraCenter(ll),
+        bearing: is3D ? (lastHeadingDeg ?? map.getBearing()) : 0,
+        pitch: is3D ? FOLLOW_PITCH_3D : 0,
+        zoom: Math.max(map.getZoom(), FOLLOW_ZOOM),
+        duration: FOLLOW_FRAME_MS,
+      });
+      window.setTimeout(() => {
+        followFraming = false;
+        if (followActive()) startFollowLoop();
+      }, FOLLOW_FRAME_MS + 50);
+    }
+
+    function resumeFollow() {
+      followPaused = false;
+      setFollowButton('active');
+      applyRotationMode();
+      startFollowLoop();
+    }
+
+    function disableFollow() {
+      followMode = false;
+      followPaused = false;
+      setFollowButton('off');
+      stopFollowLoop();
+      applyRotationMode();
+    }
+
+    followBtn.addEventListener('click', () => {
+      if (!followMode) enableFollow();
+      else if (followPaused) resumeFollow();
+      else disableFollow();
+    });
+
+    // A manual drag on the map pauses Follow (nav-app pattern): the button
+    // turns into "Resume". Detected from DOM pointer events on the map canvas
+    // itself, NOT MapLibre's dragstart/rotatestart/pitchstart: this custom
+    // build fires rotate/pitch events for PROGRAMMATIC camera changes too
+    // (jumpTo/easeTo that alter bearing/pitch), so listening to them paused
+    // Follow the moment our own loop or ease moved the map - the button stuck
+    // on "Resume" on mobile. One-finger drags (and mouse drags) pause; wheel
+    // and two-finger pinch stay live - rotation is disabled while following,
+    // so two fingers can only zoom.
+    const FOLLOW_GESTURE_PX = 8;
+    {
+      const el = map.getCanvasContainer();
+      let down = null;   // { x, y } of the first contact, null when pinch/up
+      const at = (e) => (e.touches ? e.touches[0] : e);
+      const onDown = (e) => {
+        down = null;
+        if (!followActive()) return;
+        if (e.touches && e.touches.length !== 1) return;   // pinch/rotate
+        const p = at(e);
+        if (p) down = { x: p.clientX, y: p.clientY };
+      };
+      const onMove = (e) => {
+        if (!down || !followActive()) return;
+        if (e.touches && e.touches.length !== 1) { down = null; return; }
+        const p = at(e);
+        if (!p || Math.hypot(p.clientX - down.x, p.clientY - down.y) < FOLLOW_GESTURE_PX) return;
+        down = null;
+        followPaused = true;
+        setFollowButton('paused');
+        applyRotationMode();
+        stopFollowLoop();
+      };
+      const onUp = () => { down = null; };
+      el.addEventListener('touchstart', onDown, { passive: true });
+      el.addEventListener('touchmove', onMove, { passive: true });
+      el.addEventListener('touchend', onUp, { passive: true });
+      el.addEventListener('touchcancel', onUp, { passive: true });
+      el.addEventListener('mousedown', onDown);
+      el.addEventListener('mousemove', onMove);
+      el.addEventListener('mouseup', onUp);
+      el.addEventListener('mouseleave', onUp);
     }
 
     // One entry per building; floors listed underneath (all buildings are
@@ -1876,6 +2260,7 @@
           ['==', ['get', 'toFloor'], floorId]]);
       }
       applyStructureStyle();
+      refreshLive3D();   // the 3D avatar follows the selected floor
     }
 
     // Map load

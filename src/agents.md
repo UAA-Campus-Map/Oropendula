@@ -82,8 +82,9 @@ build step, no npm dependencies in the app itself.
   metrics and calibration. Never referenced by prod.
 - `index.html` — the demo: loads buildings, asks osm.mjs for the road network,
   builds the router, draws the route's connector dots and tiered routes, and
-  drives the live marker from the arbiter (GPS + PDR). "I'm Here" taps a manual
-  anchor at the map centre.
+  drives the live marker from the arbiter (GPS + PDR). "I'm Here" stops GPS
+  and taps a manual anchor (for when the fix is wrong); "My Location" starts
+  GPS again.
 - `smoke.mjs` — the test gate (`node smoke.mjs`). Check count scales with
   exit count (~96 currently); **all must pass**, zero failures tolerated. It
   reads its registrations from `buildings-config.json` — the same file
@@ -442,7 +443,15 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   re-routed (with no floor hints) and PDR steps left the line stale indoors.
 - **Anchors** are manual: press "I'm Here", then tap the map to place your
   location (not the map centre); the tap re-seeds the particle cloud and resets
-  drift. The **displayed floor is authoritative**: `anchorAt` passes
+  drift. **"I'm Here" cancels GPS** (the user reaches for it when the fix is
+  wrong): the handler calls `stopGps()` - clears the geolocation watch AND
+  `arbiter.clearGps()` - and `ensureLiveSetup()` (marker/layers/PDR without
+  geolocation), because a live-but-wrong fix would otherwise win the
+  arbitration again seconds after the anchor (or be held through a source
+  switch). "My Location" re-starts the GPS watch. `ensureLiveSetup` is shared
+  by both flows; the old handler called `startLiveLocate()`, which turned GPS
+  ON when it should be turning it off. The **displayed floor is authoritative**:
+  `anchorAt` passes
   `floorOfView()` into `ensureLocator`, which uses
   `campusRouter.buildingAt(ll, hint)` to bind building+floor. Floor picks by
   wall centroid cannot tell stacked floors apart (01/02/03 share a footprint),
@@ -633,11 +642,73 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   can't be elevated in this build, so they sit on the ground plane.
 - The old 2D wall `line` / room-label `symbol` layers and connector dots are
   hidden in 3D — symbols can't be elevated in this build, so they would sit at
-  ground under the stack. The destination marker is a DOM marker in 2D and a
-  raised pin extrusion on the destination's floor in 3D (DOM markers cannot be
-  lifted).
+  ground under the stack. Markers that must not sit under the stack become
+  extrusions: the **destination** is a DOM marker in 2D and a raised pin
+  extrusion on the destination's floor in 3D, and **"My Location"** is a DOM
+  pin in 2D and a blocky **avatar** in 3D (`campus-3d-live` source: body
+  column + lighter head + a facing wedge along the smoothed heading, plus a
+  translucent accuracy disc; `applyLiveMode` toggles them with the DOM pin and
+  the flat `location-radius`/`location-heading` layers). The avatar's base is
+  always `floorBase(currentFloorId())`: real position sources (GPS/PDR) carry
+  no height, so the **floor picker is authoritative** exactly as in 2D.
+  `applyFloorFilter` calls `refreshLive3D()` so it follows floor changes
+  without waiting for the next fix; the disc is omitted below 1.5 m accuracy
+  and clamped at 40 m, and the layers are inserted before the structure so the
+  translucent walls blend over the avatar instead of depth-rejecting it.
 - Camera: constructed with `dragRotate/pitchWithRotate`, `pitch: 50`,
   `maxPitch: 75`; the user pitches/rotates freely.
+
+### Follow mode (index.html)
+
+The **Follow** button (`#follow-btn`) keeps the live position centred and, in
+3D, rotates the map so the heading points up the screen - "walk forward and
+the map walks with you". Semantics:
+
+- **OFF -> ACTIVE** on tap: starts My Location when nothing feeds a position
+  yet (the tap is the gesture the sensors need), suppresses the first-fix
+  `flyTo` (`didAutoCenter = true`), runs the one-shot framing ease (below) and
+  then starts the loop. Tap while ACTIVE turns it off.
+- **A manual drag pauses** it (nav-app pattern): the button restyles (blue
+  outline, text becomes "Resume") and rotation re-enables so the user can look
+  around. Tapping then resumes and recentres. Detection is **DOM-level**
+  (`touchstart`/`touchmove` + `mousedown`/`mousemove` on `getCanvasContainer`,
+  pause after ~8 px of one-finger/mouse movement), **not** MapLibre's
+  `dragstart`/`rotatestart`/`pitchstart`: this custom build fires
+  rotate/pitch events for **programmatic** camera changes too (`jumpTo`/
+  `easeTo` that alter bearing/pitch), which paused Follow the instant our own
+  ease or the loop moved the map - the button stuck on "Resume" on mobile.
+  Two-finger gestures and the wheel do not pause (rotation is disabled while
+  following, so two fingers only zoom).
+- **Mode owns the camera orientation, and the loop drives it**: 3D angles the
+  view (pitch `FOLLOW_PITCH_3D` = 50) and turns the map to the heading; 2D is
+  a plain north-up top-down plan (`pitch 0`, `bearing 0`), exactly like
+  regular 2D, only panned to keep the walker on screen. The loop sets
+  pitch/bearing itself (`jumpTo` carries both, smoothed with the shortest-path
+  bearing across the +/-180 seam) because its own `jumpTo` cancels any
+  `applyViewMode` easeTo while following - which is why toggling 2D/3D during
+  follow used to change nothing. Rotation gestures stay disabled while ACTIVE
+  (`applyRotationMode` owns `dragRotate`/`touchZoomRotate` and defers to
+  Follow).
+- The camera centre is, **in 3D only**, the estimate **offset
+  `FOLLOW_LOOK_AHEAD_M` (22 m) ahead along the heading**
+  (`turf.destination`), so the walker sits in the lower third facing forward.
+  2D (and any mode before a heading exists) centres the estimate exactly.
+- **Activation zooms in**: `enableFollow` runs a one-shot framing `easeTo`
+  (to the walker, pitch/bearing per mode, `zoom = max(current, FOLLOW_ZOOM =
+  19)`, `FOLLOW_FRAME_MS = 700`). The loop must not run during it - its
+  `jumpTo` would cancel the ease, which is why the zoom-in never used to
+  happen - so `followFraming` holds `renderEstimate` off until the timeout
+  fires (and skips starting the loop if the gesture paused meanwhile).
+- **Heading priority**: smoothed compass (`motion.mjs`) -> **GPS course**
+  (`position.coords.heading`, while moving only) so desktop/no-compass
+  devices still orient; both feed `lastHeadingDeg` (also the avatar's facing
+  wedge), the last one holds when stopped.
+- The loop is `requestAnimationFrame` with exponential smoothing (centre
+  ~6/s, bearing ~5/s, pitch ~5/s) calling `map.jumpTo`, **not** repeated
+  `easeTo` (fixes arrive continuously and restarting an animation per fix
+  stutters). **Zoom is deliberately not part of the loop**, so pinch-zoom
+  stays live. `renderEstimate` stores `followCenter` and restarts the loop
+  while active; the loop stops itself when paused/disabled.
 
 ## Building / room search (index.html)
 
