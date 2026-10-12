@@ -474,6 +474,60 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   `pdr-heading-bias` + `pdr-heading-mode=relative`. Absolute and relative
   frames are never mixed (that caused the old "haywire" heading). This lets the
   device avoid the unreliable indoor magnetometer after one calibration walk.
+- **Continuous GPS step-length auto-calibration** (`autocal.mjs`) runs whenever
+  GPS is good and the user walks - no dedicated calibration walk. Three signals
+  feed it: (1) Doppler speed integrated between the first and last counted step
+  of a segment, over the N-1 steps walked in exactly that time (the precise
+  method; anchoring to step times removes the partial-step boundary error);
+  (2) endpoint displacement over the steps counted between two good fixes (an
+  independent cross-check, and the only channel on devices that report no
+  speed); (3) step rate twice over - the segment cadence normalises each
+  sample back to the model's reference cadence (`cadenceRef`/`cadenceGain`
+  come from the StepLengthModel), and cadence itself is measured from the
+  median step interval. **The calibrator's inputs are raw GPS fixes and raw
+  step events only** - the arbiter/PDR estimate (position, speed or the step
+  model it uses) is never fed in, so PDR can never calibrate itself; the
+  `successPosition` wiring stamps each fix with its measurement time
+  (`maximumAge` can return a cached fix) and ignores repeated cached fixes.
+  A window must also be covered by *continuous* raw GPS: a gap >6 s between
+  good fixes, or good fixes spanning <80% of the window, is rejected - so a
+  GPS dropout (indoors, where the arbiter is on PDR) cannot be stitched into
+  a position-only sample measured as a straight chord across the hole.
+  A segment qualifies only at 5-60 s (≥10 steps, ≥6 m),
+  straight (net
+  course change ≤40° AND circular concentration R ≥ 0.75 of the fix courses -
+  the endpoint check alone is blind to curves wrapping past 180° within the
+  window), pause-free (≤1.5 s internal step gaps), fix accuracy ≤15 m
+  throughout, and walking-range Doppler speeds. Accuracy is **dynamic, not a
+  hard 10 m cutoff**: beyond 10 m ("fine") the speed and position
+  uncertainties of a fix scale with its reported accuracy, so coarse-GPS
+  samples are wider and the 90%/±6% confidence gate simply demands
+  proportionally more walking before the claim opens (the same walk scores
+  98.3% at 10 m and 92.7% at 15 m in the tests); at a leg boundary the
+  interval's walking speed is taken
+  from the walking endpoint only, so a decaying stationary speed cannot pull
+  the distance (and the base) low. **Turns are allowed when the walker pauses
+  at the turn**: a step gap >1.5 s closes the leg explicitly (bypassing the
+  duration deferral), so a back-and-forth walk through a constrained indoor
+  space calibrates leg by leg instead of being poisoned by its U-turn
+  courses. Candidates otherwise close nearest to a
+  30 s target; a sub-15 s window is only accepted once the chain has waited a
+  full target interval, so a straight stretch after a corner becomes a long,
+  precise sample instead of a barely-legal 5 s one. Samples combine
+  inverse-variance weighted with a 1.5% irreducible systematic floor (a GPS
+  speed scale bias does not average away); a "calibrated" claim additionally
+  needs ≥20 steps, ≥10 m, ≥2 segments and early/late agreement. The sidebar
+  panel and the amber/green dot inside the "Calibrate walking model" button
+  show the live estimate, the confidence of being within ±6%, the 90% interval
+  and the speed/position weight mix - and it updates while the user walks,
+  even before the first sample: current GPS accuracy and Doppler speed, the
+  steps/duration of the current stretch, and the newest attempt's outcome or
+  reject reason ("turned without pausing", "stretch too short", "stopped
+  mid-stretch", ...). `stepModel.base` is **only ever written
+  when the estimate is within ±6% at 90% confidence**, and persisted as
+  `pdr-step-auto` (+ `pdr-step-base`); a manual known-distance Apply sets
+  `pdr-step-manual` (green dot) and a later certified GPS estimate may
+  supersede the base.
 - **The filter must be seeded or PDR silently does nothing.** `ParticleFilter.
   predict()` is a no-op until `seed()`. So when a locator is created,
   index.html/locate-test snap the seed to the nearest walkable point; the
@@ -497,8 +551,17 @@ synthetic asymmetric perimeter), the positioning stack on synthetic signals:
 `isWalkable`/`nearestWalkable` consistency, step detection vs a synthetic gait
 across cadence/amplitude/noise, heading smoothing/gyro/bias, the particle
 filter's kinematics and map constraint, and the GPS/PDR arbiter's validity
-gate, drift growth, re-seed and hysteresis. Debug scripts live in
-`/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
+gate, drift growth, re-seed and hysteresis. The GPS step-length auto-calibrator
+is covered on synthetic GPS walks: certification only at ≥90% within ±6%,
+poor fixes / pauses / sharp curves rejected, coarse fixes up to the 15 m floor
+accepted (with accuracy-scaled confidence, >15 m rejected), GPS dropouts
+never stitched across, noisy courses and
+right-angle
+corners tolerated, pause-at-turn-around back-and-forth walking in a
+constrained space certifying without a downward base bias, the position-only
+fallback certifying, cadence normalisation, and split-half inconsistency
+withholding the claim. Debug
+scripts live in `/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
 
 Runtime ~24 s wall / ~38 s CPU (8 buildings / 17 floors; varies with machine
 load and the live OSM fetch). The per-floor basis (JSON parse, wall segments,

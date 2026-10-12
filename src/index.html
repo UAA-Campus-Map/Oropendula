@@ -101,6 +101,29 @@
       box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25);
     }
 
+    /* GPS step-length calibration state, shown inside the "Calibrate walking
+       model" button: amber "!" = not calibrated, green check = the estimate
+       is within +-6% at 90% confidence (or a manual known-distance
+       calibration was applied). */
+    .cal-state-icon {
+      display: inline-block;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      margin-right: 0.45rem;
+      background: #e6a23c;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 15px;
+      text-align: center;
+      flex: none;
+    }
+
+    .cal-state-icon.calibrated {
+      background: #2ecc71;
+    }
+
     .floor-control {
       display: flex;
       align-items: center;
@@ -359,7 +382,10 @@
         <button id="search-go" title="Route to room">Go</button>
       </div>
     </div>
-    <button id="menu-btn" class="control-btn">Calibrate walking model</button>
+    <button id="menu-btn" class="control-btn" title="Step length calibration">
+      <span id="cal-state-icon" class="cal-state-icon" aria-label="Not calibrated">!</span>
+      Calibrate walking model
+    </button>
     <button id="anchor-btn" class="control-btn">I'm Here</button>
     <!-- "Find Path" is a dev tool now: hidden unless the page is opened with
          ?dev=1 (or via the console: pathBtn.click()). -->
@@ -415,6 +441,24 @@
     </div>
 
     <div class="info-section">
+      <div class="info-label">Auto-calibration (GPS)</div>
+      <p class="hint">Keep GPS on while you walk: step length is measured
+        automatically from GPS speed, step rate and position. Nothing is
+        applied until the estimate is within &plusmn;6% at 90% confidence.
+        Turning around is fine - pause when you turn and each leg counts
+        separately.</p>
+      <div id="autocal-status" class="info-value">Turn on GPS and walk</div>
+      <div class="cal-row"><span>GPS now</span><span id="autocal-gps" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Current stretch</span><span id="autocal-stretch" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Last leg</span><span id="autocal-lastleg" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Step length</span><span id="autocal-length" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Confidence within &plusmn;6%</span><span id="autocal-conf" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>90% interval</span><span id="autocal-ci" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Speed / position</span><span id="autocal-mix" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Data</span><span id="autocal-data" class="cal-val">&mdash;</span></div>
+    </div>
+
+    <div class="info-section">
       <div class="info-label">Heading</div>
       <div id="compass" class="info-value">0°</div>
     </div>
@@ -431,6 +475,7 @@
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
+    import { GpsStepCalibrator } from './autocal.mjs';
     import { ParticleFilter } from './locate.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
@@ -511,6 +556,16 @@
     const calHeadingEl = document.getElementById('cal-heading');
     const calStartLabel = document.getElementById('cal-start-label');
     const calEndLabel = document.getElementById('cal-end-label');
+    const calStateIcon = document.getElementById('cal-state-icon');
+    const autocalStatusEl = document.getElementById('autocal-status');
+    const autocalGpsEl = document.getElementById('autocal-gps');
+    const autocalStretchEl = document.getElementById('autocal-stretch');
+    const autocalLastlegEl = document.getElementById('autocal-lastleg');
+    const autocalLengthEl = document.getElementById('autocal-length');
+    const autocalConfEl = document.getElementById('autocal-conf');
+    const autocalCiEl = document.getElementById('autocal-ci');
+    const autocalMixEl = document.getElementById('autocal-mix');
+    const autocalDataEl = document.getElementById('autocal-data');
 
     // Event listeners
     menuBtn.addEventListener('click', toggleSidebar);
@@ -691,8 +746,11 @@
     function applyCalibration() {
       if (!calibration.result) return;
       stepModel.base = calibration.result;
+      manualCalApplied = true;
+      autoCalBaseApplied = null;
       try {
         localStorage.setItem('pdr-step-base', String(calibration.result));
+        localStorage.setItem('pdr-step-manual', '1');
         if (calibration.headingBias != null) {
           localStorage.setItem('pdr-heading-bias', String(calibration.headingBias));
           localStorage.setItem('pdr-heading-mode', 'relative');
@@ -701,6 +759,122 @@
       statusText.textContent = `Step length set to ${calibration.result.toFixed(3)} m` +
         (calibration.headingBias != null ? ', heading calibrated' : '');
       calApplyBtn.disabled = true;
+      updateAutocalUI();
+    }
+
+    // --- GPS auto-calibration state, indicator and panel --------------------
+    /** The amber/green dot inside the "Calibrate walking model" button. */
+    function setCalStateIcon(calibrated) {
+      calStateIcon.textContent = calibrated ? '\u2713' : '!';
+      calStateIcon.classList.toggle('calibrated', calibrated);
+      calStateIcon.setAttribute('aria-label', calibrated ? 'Calibrated' : 'Not calibrated');
+    }
+
+    /** Human phrases for the calibrator's reject reasons (live panel). */
+    const AUTOCAL_REJECT = {
+      span: 'stretch too short',
+      steps: 'stretch too short',
+      distance: 'stretch too short',
+      gap: 'stopped mid-stretch',
+      cadence: 'wrong pace',
+      turn: 'turned without pausing',
+      coverage: 'not walking steadily',
+      speed: 'not walking steadily',
+      plausibility: 'reading implausible',
+    };
+
+    /** Live rows that update on every fix/step, even before any sample. */
+    function paintAutocalLive(live) {
+      autocalGpsEl.textContent = live.fixAccuracyM == null ? '\u2014'
+        : `\u00b1${live.fixAccuracyM.toFixed(0)} m`
+          + (live.fixSpeedMps != null ? ` \u00b7 ${live.fixSpeedMps.toFixed(2)} m/s` : '');
+      autocalStretchEl.textContent = live.stretch.steps > 0
+        ? `${live.stretch.steps} steps \u00b7 ${live.stretch.seconds.toFixed(1)} s`
+        : '\u2014';
+      autocalLastlegEl.textContent = !live.lastAttempt ? 'measuring\u2026'
+        : live.lastAttempt.ok
+          ? `accepted ${live.lastAttempt.baseM.toFixed(3)} m`
+          : `rejected: ${AUTOCAL_REJECT[live.lastAttempt.reason] ?? 'no usable stretch'}`;
+    }
+
+    let lastAutocalPaint = -Infinity;
+
+    /** Cheap throttle: steps arrive several times a second, fixes once. */
+    function updateAutocalUIThrottled(t) {
+      if (t - lastAutocalPaint < 500) return;
+      lastAutocalPaint = t;
+      updateAutocalUI();
+    }
+
+    /**
+     * Paint the panel stats and the button dot from the calibrator, and apply
+     * the estimate to the step model ONLY when it is certified (within +-6%
+     * at 90% confidence). Before any live data this session, a previously
+     * certified calibration is shown instead.
+     */
+    function updateAutocalUI() {
+      const s = gpsCal.stats();
+      let certified = s.calibrated;
+      paintAutocalLive(s.live);
+
+      if (s.baseM == null && storedAutoCal) {
+        autocalStatusEl.textContent =
+          `Auto-calibrated earlier (90% interval \u00b1${storedAutoCal.ci90RelPct.toFixed(1)}%)`;
+        autocalLengthEl.textContent = `${storedAutoCal.baseM.toFixed(3)} m`;
+        autocalConfEl.textContent = `${storedAutoCal.confidencePct.toFixed(0)}% (target 90%)`;
+        autocalCiEl.textContent =
+          `\u00b1${storedAutoCal.ci90RelPct.toFixed(1)}% (\u00b1${(storedAutoCal.baseM * storedAutoCal.ci90RelPct).toFixed(0)} cm)`;
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = 'stored';
+        certified = true;
+      } else if (s.status === 'idle') {
+        autocalStatusEl.textContent = 'Turn on GPS and walk to auto-calibrate';
+        autocalLengthEl.textContent = '\u2014';
+        autocalConfEl.textContent = '\u2014';
+        autocalCiEl.textContent = '\u2014';
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = '\u2014';
+      } else if (s.status === 'collecting') {
+        autocalStatusEl.textContent = s.live.walking
+          ? 'Measuring this walking stretch\u2026'
+          : 'Waiting for a straight walking stretch (pause when you turn)';
+        autocalLengthEl.textContent = '\u2014';
+        autocalConfEl.textContent = '\u2014';
+        autocalCiEl.textContent = '\u2014';
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = '\u2014';
+      } else {
+        autocalStatusEl.textContent = s.calibrated
+          ? `Calibrated: 90% interval \u00b1${s.ci90RelPct.toFixed(1)}%`
+          : `Calibrating\u2026 ${s.confidencePct.toFixed(0)}% sure within \u00b16%`;
+        autocalLengthEl.textContent = `${s.baseM.toFixed(3)} m`;
+        autocalConfEl.textContent = `${s.confidencePct.toFixed(0)}% (target 90%)`;
+        autocalCiEl.textContent =
+          `\u00b1${s.ci90RelPct.toFixed(1)}% (\u00b1${(s.baseM * s.ci90RelPct).toFixed(0)} cm)`;
+        autocalMixEl.textContent =
+          `${s.samples.speedSharePct.toFixed(0)}% / ${(100 - s.samples.speedSharePct).toFixed(0)}%`;
+        autocalDataEl.textContent = `${s.samples.total} segments \u00b7 ` +
+          `${s.samples.steps} steps \u00b7 ${s.samples.distanceM.toFixed(0)} m`;
+      }
+
+      setCalStateIcon(certified || manualCalApplied);
+      menuBtn.title = certified || manualCalApplied
+        ? 'Step length calibrated (within \u00b16% at 90% confidence)'
+        : 'Step length calibration - walk with GPS on';
+
+      if (s.calibrated && s.baseM != null
+          && (autoCalBaseApplied == null || Math.abs(s.baseM - autoCalBaseApplied) > 0.002)) {
+        stepModel.base = s.baseM;
+        autoCalBaseApplied = s.baseM;
+        storedAutoCal = {
+          baseM: s.baseM, ci90RelPct: s.ci90RelPct,
+          confidencePct: s.confidencePct, t: Date.now(),
+        };
+        try {
+          localStorage.setItem('pdr-step-base', String(s.baseM));
+          localStorage.setItem('pdr-step-auto', JSON.stringify(storedAutoCal));
+        } catch (e) { /* ignore */ }
+      }
     }
 
     function toggleSidebar() {
@@ -1266,6 +1440,7 @@
     let headingIndicator = null;
     let lastAccuracyMeters = 0;
     let geoWatchId = null;
+    let lastCalFixStamp = null;   // de-dupe cached fixes for the auto-calibrator
     let didAutoCenter = false;   // fly to the first fix after "My Location"
     // Live 3D avatar + Follow state (see the sections below): the latest
     // estimate, and the most recent heading in degrees clockwise from north.
@@ -1278,6 +1453,16 @@
     // dead reckoning run at the same time; the arbiter picks whichever is
     // more accurate, so the app transitions in and out of buildings on its own.
     const stepModel = new StepLengthModel();
+    // Continuous GPS step-length auto-calibration (autocal.mjs): every good-GPS
+    // walking stretch feeds the estimator; `stepModel.base` is only touched
+    // once the estimate is within +-6% at 90% confidence - never before.
+    const gpsCal = new GpsStepCalibrator({
+      cadenceRef: stepModel.cadenceRef,
+      cadenceGain: stepModel.gain,
+    });
+    let manualCalApplied = false;     // a known-distance calibration was applied
+    let autoCalBaseApplied = null;    // last base the auto-calibrator wrote
+    let storedAutoCal = null;         // last certified auto-calibration (persisted)
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -1288,7 +1473,13 @@
       if (Number.isFinite(savedBias)) savedHeadingBias = savedBias;
       const savedMode = localStorage.getItem('pdr-heading-mode');
       if (savedMode === 'relative') savedHeadingMode = 'relative';
+      storedAutoCal = JSON.parse(localStorage.getItem('pdr-step-auto') || 'null');
+      if (!(storedAutoCal && storedAutoCal.confidencePct >= 90)) storedAutoCal = null;
+      manualCalApplied = localStorage.getItem('pdr-step-manual') === '1'
+        || (savedBase > 0 && !storedAutoCal);
     } catch (e) { /* ignore */ }
+    // Paint the button dot + panel from the stored calibration (if any).
+    updateAutocalUI();
     let motion = null;
     let locator = null;    // { building, floor, filter, arbiter }
     let currentEstimate = null;
@@ -1559,6 +1750,13 @@
             calibration.steps++;
             calStepsEl.textContent = String(calibration.steps);
           }
+          // The step channel of the GPS auto-calibration: raw step events from
+          // the motion sensor (the only possible source of step rate). The
+          // calibrator's spatial and speed evidence comes solely from raw GPS
+          // fixes in successPosition; the PDR/arbiter estimate is never fed
+          // into it, so PDR can never calibrate itself.
+          gpsCal.addStep({ t });
+          updateAutocalUIThrottled(t);
           if (!locator || !motion.heading.hasHeading) return;
           locator.arbiter.setHeading(motion.heading.heading);
           locator.arbiter.step({
@@ -1628,6 +1826,24 @@
         locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
         renderEstimate(locator.arbiter.estimate(t));
       }
+      // ...and to the step-length auto-calibrator: RAW GPS ONLY. Its inputs
+      // are this geolocation fix (position/accuracy/speed/course) and the raw
+      // step events above - never the arbiter/PDR estimate or its position.
+      // maximumAge can hand back a cached fix, so the fix is stamped with its
+      // measurement time (performance clock, like the step events) and a
+      // repeated cached fix is not counted twice.
+      const stamp = Number.isFinite(position.timestamp) ? position.timestamp : null;
+      if (stamp === null || stamp !== lastCalFixStamp) {
+        lastCalFixStamp = stamp;
+        const ageMs = stamp === null ? 0
+          : Math.max(0, Math.min(Date.now() - stamp, 10000));
+        gpsCal.addFix({
+          t: t - ageMs, lon: longitude, lat: latitude, accuracyM: accuracy,
+          speedMps: position.coords.speed,
+          courseDeg: position.coords.heading,
+        });
+      }
+      updateAutocalUI();
       // (Live re-routing happens inside renderEstimate for every source.)
     }
 
@@ -1725,6 +1941,9 @@
       }
       locationBtn.classList.remove('active');
       if (locator) locator.arbiter.clearGps();
+      if (!gpsCal.stats().calibrated) {
+        autocalStatusEl.textContent = 'GPS off - auto-calibration pauses';
+      }
     }
 
     function startLiveLocate() {

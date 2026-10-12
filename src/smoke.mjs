@@ -13,6 +13,7 @@ import { convexHull, hullSamples, bestFitRigid } from './align.mjs';
 
 import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
+import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
 import { ParticleFilter, corridorAxis } from './locate.mjs';
 import { PositionArbiter } from './arbiter.mjs';
 
@@ -1391,6 +1392,344 @@ function runSteps(det, samples) {
     fn({ type: 'deviceorientation', alpha: 90, timeStamp: 10 }));
   check('relative mode uses the plain event', relLast != null && relLast.absolute === false,
     relLast ? `${(relLast.heading * 180 / Math.PI).toFixed(1)} deg` : 'none');
+}
+
+// ---------------------------------------------------------------------------
+// GPS step length auto-calibration (autocal.mjs) - synthetic GPS walks.
+// ---------------------------------------------------------------------------
+console.log('\nGPS step length auto-calibration (autocal.mjs):');
+
+// Seeded uniforms/Gaussians so a certification test that passes once keeps
+// passing (Math.random would make a borderline threshold flaky).
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gauss(rng) {
+  const u = Math.max(rng(), 1e-9), v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/**
+ * Feed a synthetic straight walk: steps at `cadenceHz` with ground-truth step
+ * length base * cadenceFactor, one GPS fix per second (position noise on both
+ * axes, Doppler-like speed noise, course along the walk). Returns the end
+ * state so blocks can be chained (corners, pace changes). `turnRateDegS`
+ * bends the path continuously (a curve).
+ */
+function feedCalWalk(cal, opts = {}) {
+  const {
+    base = 0.75, cadenceHz = 1.85, seconds = 60, startT = 0,
+    startLon = -149.83, startLat = 61.19, bearingDeg = 90,
+    acc = 4, posNoiseM = 2.5, speedNoise = 0.15, doppler = true,
+    courseNoiseDeg = 0, turnRateDegS = 0, accuracyAt = null, rng = mulberry32(1),
+  } = opts;
+  const stepLen = base * (1 + 0.35 * (cadenceHz - 1.8) / 1.8);
+  const groundSpeed = stepLen * cadenceHz;
+  const stepMs = 1000 / cadenceHz;
+  const endT = startT + seconds * 1000;
+  const mpd = metresPerDegree(startLat);
+  let bearing = bearingDeg * Math.PI / 180;
+  let east = 0, north = 0, curT = startT;
+  let nextStepT = startT + stepMs * 0.5;
+  let nextFixT = startT + 1000;
+  const advance = (toT) => {
+    const dt = (toT - curT) / 1000;
+    if (dt <= 0) return;
+    const dd = groundSpeed * dt;
+    east += Math.sin(bearing) * dd;
+    north += Math.cos(bearing) * dd;
+    bearing += turnRateDegS * Math.PI / 180 * dt;
+    curT = toT;
+  };
+  for (;;) {
+    const stepNext = nextStepT <= endT ? nextStepT : Infinity;
+    const fixNext = nextFixT <= endT ? nextFixT : Infinity;
+    const t = Math.min(stepNext, fixNext);
+    if (!isFinite(t)) break;
+    advance(t);
+    if (t === stepNext) {
+      cal.addStep({ t });
+      nextStepT += stepMs;
+    } else {
+      cal.addFix({
+        t,
+        lon: startLon + (east + gauss(rng) * posNoiseM) / mpd.lon,
+        lat: startLat + (north + gauss(rng) * posNoiseM) / mpd.lat,
+        accuracyM: typeof accuracyAt === 'function' ? accuracyAt((t - startT) / 1000) : acc,
+        speedMps: doppler ? groundSpeed + gauss(rng) * speedNoise : null,
+        courseDeg: bearing * 180 / Math.PI + gauss(rng) * courseNoiseDeg,
+      });
+      nextFixT += 1000;
+    }
+  }
+  advance(endT);
+  return {
+    t: endT,
+    lon: startLon + east / mpd.lon,
+    lat: startLat + north / mpd.lat,
+    bearingDeg: bearing * 180 / Math.PI,
+  };
+}
+
+{
+  // Two minutes of straight walking with good GPS certify the estimate.
+  const cal = new GpsStepCalibrator();
+  feedCalWalk(cal, { base: 0.75, cadenceHz: 1.9, seconds: 120, startT: 1000, rng: mulberry32(7) });
+  const s = cal.stats();
+  check('straight walk certifies', s.calibrated,
+    s.confidencePct != null ? `conf ${s.confidencePct.toFixed(1)}%, CI ±${s.ci90RelPct.toFixed(1)}%` : 'no estimate');
+  check('certified base is within 1.5% of truth',
+    s.baseM != null && Math.abs(s.baseM - 0.75) / 0.75 < 0.015,
+    s.baseM != null ? `${s.baseM.toFixed(3)} m vs 0.750` : 'none');
+  check('the speed method dominates when available',
+    s.samples.speedSharePct > 50, `${s.samples.speedSharePct?.toFixed(0)}% speed`);
+  check('a claim always implies ≥90% within ±6%',
+    !s.calibrated || (s.confidencePct >= 90 && s.ci90RelPct <= 6 + 1e-9),
+    `${s.confidencePct?.toFixed(1)}% / ±${s.ci90RelPct?.toFixed(1)}%`);
+
+  // A short stroll yields at most a provisional estimate - never a claim.
+  const shortCal = new GpsStepCalibrator();
+  feedCalWalk(shortCal, { seconds: 12, startT: 1000, rng: mulberry32(8) });
+  check('a short stroll never certifies', !shortCal.stats().calibrated);
+
+  // ...but a single ~25 s walk is enough under the 20-step / 10 m gates.
+  const strideCal = new GpsStepCalibrator();
+  feedCalWalk(strideCal, { seconds: 25, startT: 1000, rng: mulberry32(70) });
+  const sts = strideCal.stats();
+  check('a ~25 s walk certifies (20 steps / 10 m gates)',
+    sts.calibrated,
+    sts.confidencePct != null
+      ? `${sts.samples.steps} steps, ${sts.samples.distanceM.toFixed(0)} m, conf ${sts.confidencePct.toFixed(1)}%`
+      : 'none');
+
+  // Real GPS courses are noisy even walking straight; the straightness gate
+  // must not reject a genuinely straight walk because of that.
+  const jitterCal = new GpsStepCalibrator();
+  feedCalWalk(jitterCal, { seconds: 120, courseNoiseDeg: 20, startT: 1000, rng: mulberry32(60) });
+  check('a straight walk with noisy GPS course still certifies',
+    jitterCal.stats().calibrated,
+    jitterCal.stats().confidencePct != null ? `conf ${jitterCal.stats().confidencePct.toFixed(1)}%` : 'none');
+
+  // Poor fixes are unusable evidence, however long the walk.
+  const badCal = new GpsStepCalibrator();
+  feedCalWalk(badCal, { seconds: 120, acc: 25, startT: 1000, rng: mulberry32(9) });
+  check('poor GPS fixes are ignored entirely',
+    badCal.stats().baseM == null && badCal.stats().status === 'idle');
+
+  // Coarse-but-usable fixes: up to the 15 m floor they are accepted, the
+  // uncertainties scale with accuracy, and the confidence gate - not a hard
+  // cutoff - decides how much extra walking they need.
+  const pastCal = new GpsStepCalibrator();
+  feedCalWalk(pastCal, { seconds: 120, acc: 16, startT: 1000, rng: mulberry32(110) });
+  check('fixes past the 15 m floor are ignored entirely', pastCal.stats().baseM == null);
+
+  const coarseCal = new GpsStepCalibrator();
+  feedCalWalk(coarseCal, { seconds: 120, acc: 15, startT: 1000, rng: mulberry32(110) });
+  const ccs = coarseCal.stats();
+  check('15 m fixes certify given more walking', ccs.calibrated,
+    ccs.confidencePct != null ? `conf ${ccs.confidencePct.toFixed(1)}%` : 'none');
+  check('coarse-fix base within 3% of truth',
+    ccs.baseM != null && Math.abs(ccs.baseM - 0.75) / 0.75 < 0.03,
+    ccs.baseM != null ? `${ccs.baseM.toFixed(3)} m` : 'none');
+
+  // Same physical walk, only the reported accuracy differs: the coarse run
+  // must score strictly lower confidence (that is the dynamism).
+  const c10 = new GpsStepCalibrator();
+  feedCalWalk(c10, { seconds: 60, acc: 10, startT: 1000, rng: mulberry32(111) });
+  const c15 = new GpsStepCalibrator();
+  feedCalWalk(c15, { seconds: 60, acc: 15, startT: 1000, rng: mulberry32(111) });
+  check('the same walk is less confident at 15 m than at 10 m',
+    c10.stats().confidencePct > c15.stats().confidencePct,
+    `10 m: ${c10.stats().confidencePct.toFixed(1)}%, 15 m: ${c15.stats().confidencePct.toFixed(1)}%`);
+
+  // A GPS dropout (the arbiter is on PDR indoors) must not let two good fixes
+  // be stitched into a position-only sample across the gap: only raw GPS
+  // evidence that is continuously present may be used.
+  const gapCal = new GpsStepCalibrator();
+  feedCalWalk(gapCal, {
+    seconds: 20, startT: 1000, rng: mulberry32(120),
+    accuracyAt: (s) => (s >= 5 && s <= 16 ? 25 : 4),
+  });
+  const gs = gapCal.stats();
+  check('a GPS dropout cannot be stitched into a sample',
+    gs.samples.total === 0, `${gs.samples.total} samples`);
+  check('live stats: the dropout is reported as a GPS-gap rejection',
+    gs.live.lastAttempt != null && gs.live.lastAttempt.reason === 'coverage',
+    gs.live.lastAttempt ? String(gs.live.lastAttempt.reason) : 'none');
+
+  // Control: the same walk with continuous good fixes samples normally.
+  const connectedCal = new GpsStepCalibrator();
+  feedCalWalk(connectedCal, { seconds: 20, startT: 1000, rng: mulberry32(120) });
+  check('...while the same walk with continuous GPS samples fine',
+    connectedCal.stats().samples.total > 0, `${connectedCal.stats().samples.total} samples`);
+
+  // A stop in the middle: fixes keep arriving, steps do not. No segment may
+  // span the pause, and calibration resumes when walking does.
+  const pauseCal = new GpsStepCalibrator();
+  const pa = feedCalWalk(pauseCal, { seconds: 10, startT: 1000, rng: mulberry32(10) });
+  const beforePause = pauseCal.stats().samples.total;
+  for (let t = pa.t + 1000; t <= pa.t + 10000; t += 1000) {
+    pauseCal.addFix({ t, lon: pa.lon, lat: pa.lat, accuracyM: 4, speedMps: 0, courseDeg: pa.bearingDeg });
+  }
+  const pb = feedCalWalk(pauseCal, {
+    seconds: 6, startT: pa.t + 10000, startLon: pa.lon, startLat: pa.lat,
+    bearingDeg: pa.bearingDeg, rng: mulberry32(11),
+  });
+  check('a pause is not counted as walking',
+    pauseCal.stats().samples.total === beforePause,
+    `${beforePause} -> ${pauseCal.stats().samples.total}`);
+  feedCalWalk(pauseCal, {
+    seconds: 60, startT: pb.t, startLon: pb.lon, startLat: pb.lat,
+    bearingDeg: pb.bearingDeg, rng: mulberry32(12),
+  });
+  check('walking resumes the calibration after the pause',
+    pauseCal.stats().samples.total > beforePause);
+
+  // Gentler than a right angle every few metres: a continuous sharp curve
+  // must not qualify as a straight calibration stretch.
+  const curveCal = new GpsStepCalibrator();
+  feedCalWalk(curveCal, { seconds: 120, turnRateDegS: 12, startT: 1000, rng: mulberry32(13) });
+  check('a sharp continuous curve is rejected',
+    curveCal.stats().samples.total === 0, `${curveCal.stats().samples.total} samples`);
+  check('live stats: a curve reports "turn" as the reject reason',
+    curveCal.stats().live.lastAttempt != null
+      && curveCal.stats().live.lastAttempt.ok === false
+      && curveCal.stats().live.lastAttempt.reason === 'turn',
+    curveCal.stats().live.lastAttempt ? String(curveCal.stats().live.lastAttempt.reason) : 'none');
+
+  // Right-angle corners are fine: the straight blocks between them calibrate.
+  const cornerCal = new GpsStepCalibrator();
+  let cst = { t: 1000, lon: -149.83, lat: 61.19, bearingDeg: 90 };
+  for (let k = 0; k < 4; k++) {
+    const end = feedCalWalk(cornerCal, {
+      base: 0.75, cadenceHz: 1.9, seconds: 30, startT: cst.t,
+      startLon: cst.lon, startLat: cst.lat, bearingDeg: cst.bearingDeg,
+      rng: mulberry32(20 + k),
+    });
+    cst = { t: end.t, lon: end.lon, lat: end.lat, bearingDeg: cst.bearingDeg + 90 };
+  }
+  const cs2 = cornerCal.stats();
+  check('straight blocks between right-angle corners certify',
+    cs2.calibrated, cs2.confidencePct != null ? `conf ${cs2.confidencePct.toFixed(1)}%` : 'none');
+  check('corner-walk base within 3% of truth',
+    cs2.baseM != null && Math.abs(cs2.baseM - 0.75) / 0.75 < 0.03,
+    cs2.baseM != null ? `${cs2.baseM.toFixed(3)} m` : 'none');
+
+  // Constrained indoor space: short legs (7 s) with a pause at every
+  // turn-around. The pause closes each leg, so the U-turn courses never mix
+  // into a segment - and the boundary speed handling must not bias the base
+  // low (a stationary fix averaged into the leg's first pair would).
+  const turnCal = new GpsStepCalibrator();
+  let tst = { t: 1000, lon: -149.83, lat: 61.19, bearingDeg: 90 };
+  for (let k = 0; k < 6; k++) {
+    tst = feedCalWalk(turnCal, {
+      base: 0.75, cadenceHz: 1.9, seconds: 7, startT: tst.t,
+      startLon: tst.lon, startLat: tst.lat, bearingDeg: tst.bearingDeg,
+      rng: mulberry32(90 + k),
+    });
+    for (let t = tst.t + 1000; t <= tst.t + 3000; t += 1000) {
+      turnCal.addFix({ t, lon: tst.lon, lat: tst.lat, accuracyM: 4, speedMps: 0, courseDeg: null });
+    }
+    tst = { t: tst.t + 3000, lon: tst.lon, lat: tst.lat, bearingDeg: tst.bearingDeg + 180 };
+  }
+  const tns = turnCal.stats();
+  check('pause-and-turn walking certifies in a constrained space',
+    tns.calibrated,
+    tns.confidencePct != null
+      ? `${tns.samples.total} legs, ${tns.samples.steps} steps, ${tns.samples.distanceM.toFixed(0)} m, conf ${tns.confidencePct.toFixed(1)}%`
+      : 'none');
+  check('pause-and-turn base within 3% (no pause bias)',
+    tns.baseM != null && Math.abs(tns.baseM - 0.75) / 0.75 < 0.03,
+    tns.baseM != null ? `${tns.baseM.toFixed(3)} m` : 'none');
+
+  // Live progress: the panel can show the walk as it happens - latest fix,
+  // steps in the current stretch, and the newest attempt's outcome.
+  const liveCal = new GpsStepCalibrator();
+  feedCalWalk(liveCal, { seconds: 30, startT: 1000, rng: mulberry32(100) });
+  const ls = liveCal.stats();
+  check('live stats: latest fix visible',
+    ls.live.fixAccuracyM === 4 && ls.live.fixSpeedMps != null,
+    `±${ls.live.fixAccuracyM} m, v=${ls.live.fixSpeedMps?.toFixed(2)}`);
+  check('live stats: an accepted leg is reported',
+    ls.live.lastAttempt != null && ls.live.lastAttempt.ok === true
+      && ls.live.lastAttempt.baseM > 0.6,
+    ls.live.lastAttempt ? `ok=${ls.live.lastAttempt.ok}, ${ls.live.lastAttempt.baseM?.toFixed(3)} m` : 'none');
+  check('live stats: the current stretch restarts after an accepted leg',
+    ls.samples.total >= 2 && ls.live.stretch.steps < 30,
+    `${ls.samples.total} legs, ${ls.live.stretch.steps} steps since`);
+
+  // ...and a stretch that is too short to sample yet says so.
+  const shortLive = new GpsStepCalibrator();
+  feedCalWalk(shortLive, { seconds: 7, cadenceHz: 1.5, startT: 1000, rng: mulberry32(101) });
+  const sl = shortLive.stats().live;
+  check('live stats: stretch grows before any sample',
+    sl.stretch.steps >= 3 && sl.stretch.seconds > 1,
+    `${sl.stretch.steps} steps, ${sl.stretch.seconds.toFixed(1)} s`);
+  check('live stats: a too-short stretch is reported as such',
+    sl.lastAttempt != null && !sl.lastAttempt.ok
+      && ['steps', 'span', 'distance'].includes(sl.lastAttempt.reason),
+    sl.lastAttempt ? String(sl.lastAttempt.reason) : 'none');
+
+  // Devices that report no speed: displacement/step geometry still certifies,
+  // just more slowly (position noise is the limiting factor).
+  const posCal = new GpsStepCalibrator();
+  feedCalWalk(posCal, {
+    seconds: 360, doppler: false, acc: 2.5, posNoiseM: 1.2,
+    startT: 1000, rng: mulberry32(30),
+  });
+  const ps = posCal.stats();
+  check('position-only walking still certifies', ps.calibrated,
+    ps.confidencePct != null ? `conf ${ps.confidencePct.toFixed(1)}%` : 'none');
+  check('position-only base within 4% of truth',
+    ps.baseM != null && Math.abs(ps.baseM - 0.75) / 0.75 < 0.04,
+    ps.baseM != null ? `${ps.baseM.toFixed(3)} m` : 'none');
+
+  // Cadence normalisation: the same person walking at two paces must produce
+  // the same base, not a blend of their step lengths.
+  const cadCal = new GpsStepCalibrator();
+  const ca = feedCalWalk(cadCal, { base: 0.75, cadenceHz: 1.6, seconds: 60, startT: 1000, rng: mulberry32(50) });
+  feedCalWalk(cadCal, {
+    base: 0.75, cadenceHz: 2.2, seconds: 60, startT: ca.t, startLon: ca.lon,
+    startLat: ca.lat, bearingDeg: ca.bearingDeg, rng: mulberry32(51),
+  });
+  const cds = cadCal.stats();
+  check('cadence changes are normalised away',
+    cds.baseM != null && Math.abs(cds.baseM - 0.75) / 0.75 < 0.03,
+    cds.baseM != null ? `${cds.baseM.toFixed(3)} m` : 'none');
+
+  // If the first and second halves disagree, the pooled mean is a fiction:
+  // the claim must be withheld even though the pooled confidence looks good.
+  const splitCal = new GpsStepCalibrator();
+  const sa = feedCalWalk(splitCal, { base: 0.65, seconds: 60, startT: 1000, rng: mulberry32(40) });
+  feedCalWalk(splitCal, {
+    base: 0.9, seconds: 60, startT: sa.t, startLon: sa.lon,
+    startLat: sa.lat, bearingDeg: sa.bearingDeg, rng: mulberry32(41),
+  });
+  const ss = splitCal.stats();
+  check('inconsistent halves block the claim',
+    !ss.calibrated && ss.missing.includes('consistency'), ss.missing.join(','));
+  check('...while the provisional estimate stays between the halves',
+    ss.baseM > 0.6 && ss.baseM < 0.95, ss.baseM != null ? `${ss.baseM.toFixed(3)} m` : 'none');
+
+  // The confidence function is the gate itself: 90% exactly at sigma =
+  // tolerance / z90, and quickly small for a sloppy estimate.
+  check('confidence is 90% at the z90 boundary',
+    Math.abs(calibrationConfidence(0.06, 0.06 / 1.6448536269514722) - 0.9) < 0.002);
+  check('confidence is low for a sloppy estimate',
+    calibrationConfidence(0.06, 0.06) < 0.7);
+
+  // Fresh state: idle until GPS, collecting once fixes arrive.
+  const fresh = new GpsStepCalibrator();
+  check('idle before any GPS',
+    fresh.stats().status === 'idle' && fresh.stats().baseM == null);
+  fresh.addFix({ t: 1000, lon: -149.83, lat: 61.19, accuracyM: 5, speedMps: null, courseDeg: null });
+  check('a fix alone is collecting, not calibrating', fresh.stats().status === 'collecting');
 }
 
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : failures + ' FAILURES'}`);process.exit(failures === 0 ? 0 : 1);
