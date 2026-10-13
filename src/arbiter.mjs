@@ -35,25 +35,33 @@ export class PositionArbiter {
    * @param {object}   opts.filter            a locate.mjs ParticleFilter
    * @param {Function} opts.isWalkable        (lonLat) -> bool (navgraph)
    * @param {Function} [opts.nearestWalkable] (lonLat, radius) -> lonLat|null
+   * @param {Function} [opts.isOutsideBuildings] (lonLat) -> bool: allowed
+   *        free-roam area outdoors - "outside every building with a plan on
+   *        this floor" (null = freely anywhere)
    * @param {number}   [opts.gpsStalenessS=6]     GPS older than this is ignored
    * @param {number}   [opts.gpsMaxAccuracyM=60]  fixes worse than this are ignored
-   * @param {number}   [opts.gpsReseedAccuracyM=20] fixes better than this re-seed PDR
-   * @param {number}   [opts.switchFactor=0.8]    how much better to force a switch
+   * @param {number}   [opts.gpsSeedAccuracyM=20] the first fix of an outdoor
+   *        episode re-anchors the cloud up to this accuracy (the app may have
+   *        snapped it inside a building); later corrections need
+   *        `gpsOverrideAccuracyM`
+   * @param {number}   [opts.gpsOverrideAccuracyM=3] outdoors, GPS only overrides
+   *        free-roaming PDR (and re-seeds the cloud) with a fix this good
    * @param {number}   [opts.hysteresisS=3]       seconds before a switch commits
    * @param {number}   [opts.pdrBaseAccM=2.5]     PDR accuracy at zero distance
    * @param {number}   [opts.pdrDriftPerM=0.08]   added PDR error per metre walked
    * @param {number}   [opts.buildingZoneM=15]    within this of a wall = "at a building"
    */
-  constructor({ filter, isWalkable, nearestWalkable,
-    gpsStalenessS = 6, gpsMaxAccuracyM = 60, gpsReseedAccuracyM = 20,
-    gpsHoldS = 10,
-    switchFactor = 0.8, hysteresisS = 3,
+  constructor({ filter, isWalkable, nearestWalkable, isOutsideBuildings = null,
+    gpsStalenessS = 6, gpsMaxAccuracyM = 60,
+    gpsSeedAccuracyM = 20, gpsOverrideAccuracyM = 3,
+    gpsHoldS = 10, hysteresisS = 3,
     pdrBaseAccM = 2.5, pdrDriftPerM = 0.08, buildingZoneM = 15 } = {}) {
     Object.assign(this, {
-      filter, isWalkable, nearestWalkable,
-      gpsStalenessS, gpsMaxAccuracyM, gpsReseedAccuracyM, gpsHoldS,
-      switchFactor, hysteresisS, pdrBaseAccM, pdrDriftPerM, buildingZoneM,
+      filter, isWalkable, nearestWalkable, isOutsideBuildings,
+      gpsStalenessS, gpsMaxAccuracyM, gpsSeedAccuracyM, gpsOverrideAccuracyM, gpsHoldS,
+      hysteresisS, pdrBaseAccM, pdrDriftPerM, buildingZoneM,
     });
+    this._outdoor = false;
     this.gpsFix = null;
     this.heldGps = null;         // last good fix, held through a source switch
     this.metresSinceCorrection = 0;
@@ -64,19 +72,45 @@ export class PositionArbiter {
     this.lastAnchor = null;
   }
 
+  /**
+   * Does this fix land inside the bound building? `isWalkable` is the bound
+   * floor's own clearance raster, so a fix on it is inside that building (or
+   * in its doorway band), while an outdoor fix is not.
+   */
+  insideBuilding(fix) {
+    if (!fix || !this.isWalkable) return false;
+    return !!this.isWalkable([fix.lon, fix.lat]);
+  }
+
   /** A geolocation fix. `accuracy` in metres. */
   gps(fix) {
     this.gpsFix = fix;
     const plausible = this.isPlausible(fix);
-    // Seed on the first plausible fix so PDR is live, and re-seed whenever a
-    // good fix arrives (GPS as a free anchor).
-    if (plausible && (!this.filter.initialized || fix.accuracy <= this.gpsReseedAccuracyM)) {
-      this.filter.seed([fix.lon, fix.lat], {
-        spreadM: Math.max(1.0, Math.min(fix.accuracy, 8)),
-        heading: this.heading,
-        headingSpreadDeg: this.heading == null ? 180 : 25,
-      });
-      this.metresSinceCorrection = 0;
+    const indoor = this.insideBuilding(fix);
+    const outdoor = plausible && !indoor;
+    // Outdoors the cloud must not be tied to the floor plan (skybridges, the
+    // gaps between buildings, unmapped walkways are all off the raster), so
+    // free-roam on every believable outdoor fix - constrained to outside every
+    // building that has a plan on this floor, so PDR cannot cut through one.
+    this.filter.setFreeRoam?.(outdoor, this.isOutsideBuildings);
+    const justWentOutdoor = outdoor && !this._outdoor;
+    this._outdoor = outdoor;
+    // Outdoors the cloud is re-anchored from a fix when it is the first of an
+    // outdoor episode (the app may have snapped the cloud into a building,
+    // up to gpsSeedAccuracyM) or whenever the fix is more accurate than the
+    // PDR estimate itself. A very good fix (gpsOverrideAccuracyM) also wins
+    // the displayed source via estimate().
+    if (outdoor) {
+      const limit = justWentOutdoor ? this.gpsSeedAccuracyM : this.gpsOverrideAccuracyM;
+      const betterThanPdr = fix.accuracy < this.pdrAccuracy();
+      if (!this.filter.initialized || fix.accuracy <= limit || betterThanPdr) {
+        this.filter.seed([fix.lon, fix.lat], {
+          spreadM: Math.max(1.0, Math.min(fix.accuracy, 8)),
+          heading: this.heading,
+          headingSpreadDeg: this.heading == null ? 180 : 25,
+        });
+        this.metresSinceCorrection = 0;
+      }
     }
   }
 
@@ -155,28 +189,40 @@ export class PositionArbiter {
     const pdr = this.filter.initialized ? this.filter.estimate() : null;
     const pdrAcc = this.pdrAccuracy();
 
-    let winner;
-    if (g && !pdr) winner = 'gps';
-    else if (!g && pdr) winner = 'pdr';
-    else if (g && pdr) {
-      if (g.accuracy < pdrAcc * this.switchFactor) winner = 'gps';
-      else if (pdrAcc < g.accuracy * this.switchFactor) winner = 'pdr';
-      else winner = this.source === 'pdr' ? 'pdr' : 'gps';   // too close: keep, default absolute GPS
-    } else {
-      return null;
-    }
+    // Entering a building hand over to dead reckoning IMMEDIATELY: an indoor
+    // fix (lands on the bound floor's walkable area) or any implausible fix is
+    // poison outdoors-grade arbitration cares about, so it must not hold on
+    // through the hysteresis window or win on a fake small accuracy.
+    // OUTDOORS the opposite holds: PDR is not tied to the floor plan at all
+    // (skybridge, gap between buildings, unmapped walkway all leave the
+    // raster), so it drives the estimate - GPS only overrides it with a very
+    // good fix (<= gpsOverrideAccuracyM).
+    const raw = this.gpsFix;
+    const rawFresh = raw && t - raw.t <= this.gpsStalenessS * 1000;
+    const handOver = !!(rawFresh && pdr && (this.insideBuilding(raw) || !this.isPlausible(raw)));
 
-    // Hysteresis: only commit a change after it persists.
-    if (winner !== this.source) {
-      if (winner !== this._candidate) { this._candidate = winner; this._candidateSince = t; }
-      else if (t - this._candidateSince >= this.hysteresisS * 1000) {
-        this.source = winner;
+    if (handOver) {
+      this.source = 'pdr';
+      this._candidate = null;
+      this._candidateSince = null;
+    } else {
+      let winner = 'pdr';
+      if (g && !pdr) winner = 'gps';                       // nothing to dead-reckon from yet
+      else if (g && g.accuracy <= this.gpsOverrideAccuracyM) winner = 'gps';
+      else if (!pdr && !g) return null;
+
+      // Hysteresis: only commit a change after it persists.
+      if (winner !== this.source) {
+        if (winner !== this._candidate) { this._candidate = winner; this._candidateSince = t; }
+        else if (t - this._candidateSince >= this.hysteresisS * 1000) {
+          this.source = winner;
+          this._candidate = null;
+          this._candidateSince = null;
+        }
+      } else {
         this._candidate = null;
         this._candidateSince = null;
       }
-    } else {
-      this._candidate = null;
-      this._candidateSince = null;
     }
 
     // While committed to GPS, hold the last good fix through the switch window

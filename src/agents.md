@@ -433,6 +433,28 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   picks the smaller uncertainty with hysteresis. Critical: indoor GPS accuracy
   is often optimistically small *and wrong*, so fixes landing in a wall (when
   near a known building) are discarded. GPS acts as a free anchor when good.
+  **Entering a building hands over to PDR immediately**: an indoor fix (one that
+  lands on the bound floor's walkable raster - `insideBuilding`) or any
+  implausible fix forces `source = 'pdr'` with no hysteresis delay, and such
+  fixes are **never used to re-seed the particle cloud** (a metres-wrong indoor
+  "good" fix would drag every particle with it - the poisoning that motivated
+  this). **Outdoors PDR must not be tied to the floor plan at all**:
+  whenever the latest believable fix is outside the bound building, the filter
+  enters **free roam** (`ParticleFilter.setFreeRoam(on, isAllowed)`), which
+  lifts the walkability weighting and snap-back recovery. It is **constrained
+  to "outside every building that has a plan on this floor"**
+  (`isOutsideBuildings`, built in index.html's `ensureLocator` from the
+  same-level floors' navgraphs): the cloud flows around building footprints
+  instead of cutting through them, while a skybridge passing over a building
+  with no floor at this level stays free. PDR drives the estimate there; GPS
+  overrides the displayed source only with a **very good fix,
+  `gpsOverrideAccuracyM = 3` m**. The cloud is re-anchored from an outdoor fix
+  when it is the **first fix of an outdoor episode** (up to
+  `gpsSeedAccuracyM = 20` m - the app may have snapped the cloud into a
+  building) or whenever the fix is **more accurate than the PDR estimate**
+  (`fix.accuracy < pdrAccuracy()`); otherwise it just dead-reckons. Indoor
+  fixes never re-seed. Free-roam toggles per fix, so an exit frees as soon as
+  a fix shows the doorway/outdoors.
 - **Live re-route**: with a route on screen, every position update re-routes
   from the current estimate to the same destination (`rerouteFromEstimate`,
   called from `renderEstimate`), so the drawn line always leads forward instead

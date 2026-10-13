@@ -101,7 +101,25 @@ export class ParticleFilter {
     this.heading = new Float64Array(count);
     this.weight = new Float64Array(count);
     this.headingBias = 0;
+    // When the walker is outside the bound building, PDR must NOT be tied to
+    // the floor-plan raster (skybridges, the gaps between buildings and any
+    // unmapped walkway are all off it). Free roam lifts the walkability
+    // weighting and the snap-back recovery, so the cloud moves freely.
+    this.freeRoam = false;
+    this.freeRoamAllowed = null;
     this.initialized = false;
+  }
+
+  /**
+   * Outside a building: move freely (no floor-plan constraint). An optional
+   * `isAllowed(ll)` predicate constrains that freedom - the app passes
+   * "outside every building that has a plan on this floor", so PDR cannot cut
+   * through a building while still working over one (a skybridge above a
+   * building with no floor at this level stays free).
+   */
+  setFreeRoam(on, isAllowed = null) {
+    this.freeRoam = !!on;
+    this.freeRoamAllowed = this.freeRoam ? isAllowed : null;
   }
 
   /** Reset the cloud around a known point (a manual anchor). */
@@ -109,8 +127,9 @@ export class ParticleFilter {
     for (let i = 0; i < this.count; i++) {
       const e = gaussian() * spreadM, n = gaussian() * spreadM;
       const [plon, plat] = offsetLL(lon, lat, e, n);
-      const fixed = this.isWalkable([plon, plat]) ? [plon, plat]
-        : (this.nearestWalkable?.([plon, plat]) ?? [plon, plat]);
+      const fixed = this.freeRoam ? [plon, plat]
+        : this.isWalkable([plon, plat]) ? [plon, plat]
+          : (this.nearestWalkable?.([plon, plat]) ?? [plon, plat]);
       this.lon[i] = fixed[0];
       this.lat[i] = fixed[1];
       const h = heading == null ? Math.random() * 2 * Math.PI
@@ -140,6 +159,29 @@ export class ParticleFilter {
 
   /** Weight particles by walkability, then resample if they are collapsing. */
   _update() {
+    // Free roam (outdoors). With no predicate every particle is equally
+    // plausible; with one (outside all buildings on this floor) the forbidden
+    // footprints are down-weighted and resampled away, so the cloud flows
+    // around them instead of walking through.
+    if (this.freeRoam) {
+      const allow = this.freeRoamAllowed;
+      if (!allow) {
+        this.weight.fill(1 / this.count);
+        return;
+      }
+      let total = 0;
+      for (let i = 0; i < this.count; i++) {
+        const w = allow([this.lon[i], this.lat[i]]) ? 1 : 0.02;
+        this.weight[i] = w;
+        total += w;
+      }
+      if (total <= 0) return;
+      for (let i = 0; i < this.count; i++) this.weight[i] /= total;
+      let sumSq = 0;
+      for (let i = 0; i < this.count; i++) sumSq += this.weight[i] * this.weight[i];
+      if (sumSq > 2 / this.count) this._resample();
+      return;
+    }
     let total = 0, live = 0;
     for (let i = 0; i < this.count; i++) {
       const w = this.isWalkable([this.lon[i], this.lat[i]]) ? 1 : 0.02;  // hard-ish floor

@@ -323,6 +323,45 @@ console.log('\nPDR particle filter:');
   est = filt.estimate();
   const anchorErr = Math.hypot((est.lon - lon0) * mpd.lon - 3, (est.lat - lat0) * mpd.lat);
   check('anchor re-seeds near the tapped point', anchorErr < 1.0, `${anchorErr.toFixed(2)} m err`);
+
+  // Free roam (outside a building): the floor-plan constraint is lifted, so
+  // the cloud walks freely off the corridor - a skybridge or the gap between
+  // buildings leaves the raster entirely.
+  const roam = new ParticleFilter({ isWalkable: corridorWalkable, nearestWalkable: corridorNearest,
+    count: 400, headingNoiseDeg: 5, distanceNoise: 0.05, lateralNoiseM: 0.02 });
+  roam.setFreeRoam(true);
+  roam.seed(toLL(0, 8), { spreadM: 0.5, heading: 0, headingSpreadDeg: 5 });   // 8 m off the corridor
+  for (let k = 0; k < 10; k++) roam.predict(0.7, 0);                          // walk further north
+  est = roam.estimate();
+  const roamN = (est.lat - lat0) * mpd.lat;
+  check('free roam moves PDR freely outside the floor plan',
+    roamN > 12, `${roamN.toFixed(1)} m north (seeded at 8, +7 walked)`);
+  const pinned = new ParticleFilter({ isWalkable: corridorWalkable, nearestWalkable: corridorNearest,
+    count: 400, headingNoiseDeg: 5, distanceNoise: 0.05, lateralNoiseM: 0.02 });
+  pinned.seed(toLL(0, 8), { spreadM: 0.5, heading: 0, headingSpreadDeg: 5 });
+  for (let k = 0; k < 10; k++) pinned.predict(0.7, 0);
+  est = pinned.estimate();
+  const pinnedN = Math.abs((est.lat - lat0) * mpd.lat);
+  check('without free roam the cloud is pinned to the plan',
+    pinnedN < 2, `${pinnedN.toFixed(1)} m off the corridor`);
+
+  // Constrained free roam ("outside all buildings on this floor"): forbidden
+  // footprints are down-weighted, so a cloud straddling one is pushed to the
+  // allowed side instead of walking through it.
+  const allowedNorth = (p) => (p[1] - lat0) * mpd.lat >= 0;   // forbid n < 0
+  const mkRoam = (allow) => {
+    const f = new ParticleFilter({ isWalkable: corridorWalkable, nearestWalkable: corridorNearest,
+      count: 400, headingNoiseDeg: 5, distanceNoise: 0.05, lateralNoiseM: 0.02 });
+    f.setFreeRoam(true, allow);
+    f.seed(toLL(0, 0), { spreadM: 3, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    for (let k = 0; k < 4; k++) f.predict(0.7, Math.PI / 2);
+    return (f.estimate().lat - lat0) * mpd.lat;
+  };
+  const constrainedN = mkRoam(allowedNorth);
+  check('constrained free roam pushes PDR off a forbidden footprint',
+    constrainedN > 0.6, `${constrainedN.toFixed(2)} m north`);
+  const looseN = Math.abs(mkRoam(null));
+  check('unconstrained free roam stays symmetric', looseN < 0.6, `${looseN.toFixed(2)} m off`);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,10 +405,84 @@ console.log('\nGPS/PDR arbiter:');
   check('PDR uncertainty grows with distance walked', est.accuracyM > 3.5, `${est.accuracyM.toFixed(1)} m after 21 m`);
   check('PDR estimate stays on the corridor', isWalkable([est.lon, est.lat]));
 
-  // A good fix on the corridor re-seeds the cloud and resets the drift.
-  const [plon, plat] = toLL(12, 0);
-  arb.gps({ lon: plon, lat: plat, accuracy: 3, t: 20000 });
-  check('a good fix resets the PDR drift counter', arb.metresSinceCorrection === 0, `${arb.metresSinceCorrection} m`);
+  // An indoor fix must NOT re-seed the cloud (even a "good" one can be metres
+  // wrong inside and would drag every particle to the wrong place); an outdoor
+  // good fix still resets the drift.
+  const [ilon, ilat] = toLL(12, 0);          // on the corridor: indoor, walkable
+  const driftBefore = arb.metresSinceCorrection;
+  arb.gps({ lon: ilon, lat: ilat, accuracy: 3, t: 20000 });
+  check('an indoor fix does not re-seed the cloud',
+    arb.metresSinceCorrection === driftBefore && driftBefore > 0,
+    `${driftBefore} -> ${arb.metresSinceCorrection} m`);
+  arb.gps({ lon: glon, lat: glat, accuracy: 3, t: 21000 });
+  check('an outdoor good fix resets the PDR drift counter',
+    arb.metresSinceCorrection === 0, `${arb.metresSinceCorrection} m`);
+
+  // Outdoors PDR drives the estimate (the cloud is free, not tied to the
+  // floor plan); only a VERY good fix (<= 3 m) overrides it - and re-seeds.
+  arb.anchor(toLL(0, 0), { spreadM: 1.0 });
+  for (let k = 0; k < 5; k++) arb.step({ stepLengthM: 0.7, headingRad: 0 });
+  const drift5 = arb.metresSinceCorrection;
+  arb.gps({ lon: glon, lat: glat, accuracy: 5, t: 22000 });   // mediocre outdoor fix
+  arb.estimate(22000);
+  const mediocre = arb.estimate(26000);
+  check('a mediocre outdoor fix does not override free-roaming PDR',
+    mediocre.source === 'pdr', `${mediocre.source} @${mediocre.gpsAccuracyM} m`);
+  check('...and does not re-seed the cloud',
+    arb.metresSinceCorrection === drift5, `${drift5} -> ${arb.metresSinceCorrection} m`);
+  arb.gps({ lon: glon, lat: glat, accuracy: 2, t: 27000 });   // very good outdoor fix
+  arb.estimate(27000);
+  const goodAfter = arb.estimate(31000);                      // > hysteresis
+  check('a very good outdoor fix overrides PDR',
+    goodAfter.source === 'gps', `${goodAfter.source}`);
+  check('...and re-seeds the cloud', arb.metresSinceCorrection === 0,
+    `${arb.metresSinceCorrection} m`);
+
+  // Free roam follows indoor/outdoor: outdoor fixes lift the floor-plan
+  // constraint (skybridges, gaps between buildings), indoor fixes restore it.
+  const roamArb = new PositionArbiter({
+    filter: new ParticleFilter({ isWalkable, nearestWalkable, count: 100 }),
+    isWalkable, nearestWalkable,
+  });
+  roamArb.gps({ lon: glon, lat: glat, accuracy: 5, t: 0 });      // outdoor
+  check('outdoor fixes free the cloud', roamArb.filter.freeRoam === true);
+  roamArb.gps({ lon: ilon, lat: ilat, accuracy: 5, t: 1000 });   // on the corridor
+  check('indoor fixes re-constrain the cloud', roamArb.filter.freeRoam === false);
+
+  // Going outdoors re-anchors ONCE (the app may have snapped the cloud into a
+  // building); after that only a very good fix corrects it.
+  const outArb = new PositionArbiter({
+    filter: new ParticleFilter({ isWalkable, nearestWalkable, count: 100 }),
+    isWalkable, nearestWalkable,
+  });
+  outArb.anchor(toLL(0, 0), { spreadM: 1 });
+  for (let k = 0; k < 5; k++) outArb.step({ stepLengthM: 0.7, headingRad: 0 });
+  const beforeOut = outArb.metresSinceCorrection;
+  outArb.gps({ lon: glon, lat: glat, accuracy: 12, t: 0 });      // first outdoor fix (mediocre)
+  check('the first outdoor fix re-anchors the cloud',
+    beforeOut > 0 && outArb.metresSinceCorrection === 0,
+    `${beforeOut} -> ${outArb.metresSinceCorrection} m`);
+  for (let k = 0; k < 5; k++) outArb.step({ stepLengthM: 0.7, headingRad: 0 });
+  outArb.gps({ lon: glon, lat: glat, accuracy: 12, t: 1000 });   // later mediocre fix
+  check('later mediocre outdoor fixes do not re-anchor',
+    outArb.metresSinceCorrection > 0, `${outArb.metresSinceCorrection} m`);
+
+  // Outdoors, a fix MORE ACCURATE THAN THE PDR ESTIMATE re-seeds the cloud
+  // even if it is not "very good" (over 3 m); a fix worse than PDR does not.
+  const rsArb = new PositionArbiter({
+    filter: new ParticleFilter({ isWalkable, nearestWalkable, count: 100 }),
+    isWalkable, nearestWalkable,
+  });
+  rsArb.gps({ lon: glon, lat: glat, accuracy: 2, t: 0 });        // outdoor mode established
+  rsArb.anchor(toLL(0, 0), { spreadM: 1 });
+  for (let k = 0; k < 40; k++) rsArb.step({ stepLengthM: 0.7, headingRad: 0 });   // ~28 m
+  const rsPdrAcc = rsArb.pdrAccuracy();                          // ~4.7 m
+  rsArb.gps({ lon: glon, lat: glat, accuracy: rsPdrAcc + 2, t: 1000 });
+  check('an outdoor fix worse than the PDR estimate does not re-seed',
+    rsArb.metresSinceCorrection > 0, `${rsArb.metresSinceCorrection.toFixed(1)} m`);
+  rsArb.gps({ lon: glon, lat: glat, accuracy: rsPdrAcc - 1, t: 2000 });
+  check('an outdoor fix better than the PDR estimate re-seeds',
+    rsArb.metresSinceCorrection === 0, `PDR ±${rsPdrAcc.toFixed(1)} m`);
 
   // A first plausible fix (even a coarse one) must seed the filter so PDR is
   // live - otherwise steps are counted but never move anything (the index.html
@@ -380,16 +493,24 @@ console.log('\nGPS/PDR arbiter:');
   coarseArb.gps({ lon: glon, lat: glat, accuracy: 40, t: 0 });
   check('a coarse first fix seeds the filter', coarseFilter.initialized === true);
 
-  // Hysteresis: switching source needs the winner to stay ahead.
+  // Entering a building is IMMEDIATE: an indoor/implausible fix hands over to
+  // PDR on the spot, with no hysteresis window.
   arb.anchor(toLL(0, 0), { spreadM: 1.0 });
-  arb.gps({ lon: glon, lat: glat, accuracy: 1, t: 30000 });   // clearly better than PDR
+  arb.gps({ lon: glon, lat: glat, accuracy: 1, t: 30000 });   // outdoor, clearly better
   arb.estimate(30000);
-  arb.estimate(34000);                                  // commit GPS
-  arb.gps({ lon: wlon, lat: wlat, accuracy: 5, t: 34000 }); // now implausible
-  const midway = arb.estimate(35400);                   // < hysteresis
-  const settled = arb.estimate(39000);                  // > hysteresis
-  check('source switch is hysteretic', midway.source === 'gps' && settled.source === 'pdr',
-    `${midway.source} -> ${settled.source}`);
+  arb.estimate(34000);                                        // commit GPS
+  arb.gps({ lon: wlon, lat: wlat, accuracy: 5, t: 34000 });   // implausible (in a wall)
+  const indoorNow = arb.estimate(34400);                      // 0.4 s later
+  check('an indoor fix hands over to PDR immediately',
+    indoorNow.source === 'pdr', indoorNow.source);
+
+  // ...but LEAVING a building still switches back through normal hysteresis.
+  arb.gps({ lon: glon, lat: glat, accuracy: 1, t: 35000 });   // outdoor, clearly better
+  const leaveMid = arb.estimate(35400);                       // < hysteresis
+  const leaveAfter = arb.estimate(39000);                     // > hysteresis
+  check('leaving a building still switches back through hysteresis',
+    leaveMid.source === 'pdr' && leaveAfter.source === 'gps',
+    `${leaveMid.source} -> ${leaveAfter.source}`);
 
   // "I'm Here" cancels GPS: clearGps must forget the fix (and its held copy)
   // so a stale, wrong fix cannot win the arbitration back after the anchor.

@@ -1524,12 +1524,23 @@
         isWalkable: g.isWalkable,
         nearestWalkable: g.nearestWalkable,
       });
+      // Outdoors, PDR free-roams but must stay off every building that has a
+      // plan at this level (the bound one included) - so the cloud cannot cut
+      // through a building, while a gap between buildings, or a bridge passing
+      // over a building with no floor here, stays usable.
+      const level = pick.floor.floorId;
+      const sameLevel = buildings
+        .map((b) => ({ b, f: b.floors.find((x) => x.floorId === level) }))
+        .filter((x) => x.f);
+      const isOutsideBuildings = (ll) =>
+        !sameLevel.some((x) => x.f.navGraph.isWalkable(ll));
       locator = {
         building: pick.building, floor: pick.floor, filter,
         arbiter: new PositionArbiter({
           filter,
           isWalkable: g.isWalkable,
           nearestWalkable: g.nearestWalkable,
+          isOutsideBuildings,
         }),
       };
       // Seed the cloud so PDR is live immediately. The particle filter does
