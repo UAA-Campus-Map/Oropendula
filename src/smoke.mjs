@@ -384,6 +384,16 @@ console.log('\nPDR particle filter:');
   const anchorErr = Math.hypot((est.lon - lon0) * mpd.lon - 3, (est.lat - lat0) * mpd.lat);
   check('anchor re-seeds near the tapped point', anchorErr < 1.0, `${anchorErr.toFixed(2)} m err`);
 
+  // The cloud is exposed for on-map display, weight-normalised.
+  {
+    const pts = filt.points();
+    const wsum = pts.reduce((s, p) => s + p.w, 0);
+    check('particle cloud is exposed for display',
+      pts.length === filt.count && Math.abs(wsum - 1) < 1e-9, `${pts.length} pts`);
+    check('an unseeded filter exposes no points',
+      new ParticleFilter({ isWalkable: () => true }).points().length === 0);
+  }
+
   // Free roam (outside a building): the floor-plan constraint is lifted, so
   // the cloud walks freely off the corridor - a skybridge or the gap between
   // buildings leaves the raster entirely.
@@ -422,6 +432,124 @@ console.log('\nPDR particle filter:');
     constrainedN > 0.6, `${constrainedN.toFixed(2)} m north`);
   const looseN = Math.abs(mkRoam(null));
   check('unconstrained free roam stays symmetric', looseN < 0.6, `${looseN.toFixed(2)} m off`);
+
+  // --- wall / doorway behaviour ------------------------------------------
+  // Two rooms split by a north-south wall at e=0 with a 0.9 m doorway at n=0.
+  // The wall blocks a 0.6 m band (thickness + body clearance), mirroring the
+  // navgraph raster. Rooms span |e| < 6, |n| < 3.
+  const roomWalkable = (p) => {
+    const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+    if (Math.abs(e) >= 6 || Math.abs(n) >= 3) return false;
+    if (Math.abs(e) <= 0.3 && Math.abs(n) > 0.45) return false;   // wall; doorway open
+    return true;
+  };
+  const roomNearest = (p) => {
+    const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+    if (roomWalkable(p)) return p;
+    if (Math.abs(e) <= 0.3) return toLL(e < 0 ? -0.31 : 0.31, n);
+    return toLL(Math.max(-5.9, Math.min(5.9, e)), Math.max(-2.9, Math.min(2.9, n)));
+  };
+  const mkRoom = (opts = {}) => new ParticleFilter({
+    isWalkable: roomWalkable, nearestWalkable: roomNearest,
+    count: 120, headingNoiseDeg: 4, distanceNoise: 0.05, lateralNoiseM: 0.03, ...opts,
+  });
+
+  // Tunnelling: a single step aimed at the solid wall (away from the door)
+  // must not cross it.
+  {
+    const f = mkRoom();
+    f.seed(toLL(-1.0, 2.0), { spreadM: 0.05, heading: Math.PI / 2, headingSpreadDeg: 2 });
+    f.predict(0.7, Math.PI / 2, { accuracyM: 10 });
+    let crossed = 0;
+    for (let i = 0; i < f.count; i++) {
+      const e = (f.lon[i] - lon0) * mpd.lon, n = (f.lat[i] - lat0) * mpd.lat;
+      if (e > 0.3 && Math.abs(n) > 0.45) crossed++;   // the far side of the solid wall
+    }
+    check('particles do not tunnel through a wall', crossed === 0, `${crossed} crossed`);
+  }
+  // A real doorway is walkable: aimed at the gap, the cloud crosses.
+  {
+    const f = mkRoom();
+    f.seed(toLL(-1.0, 0.0), { spreadM: 0.1, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    for (let k = 0; k < 8; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 12 });
+    const e = (f.estimate().lon - lon0) * mpd.lon;
+    check('a doorway lets the cloud cross', e > 1.0, `e=${e.toFixed(2)} m`);
+  }
+  // Wall-slide: a particle offset from the doorway slides along the wall to the
+  // opening and spreads through it (the "handle doorways" case).
+  {
+    const f = mkRoom();
+    f.seed(toLL(-1.5, 1.4), { spreadM: 0.1, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    for (let k = 0; k < 12; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 20 });
+    let maxE = -Infinity;
+    for (let i = 0; i < f.count; i++) maxE = Math.max(maxE, (f.lon[i] - lon0) * mpd.lon);
+    check('particles slide through an offset doorway', maxE > 0.5, `max e=${maxE.toFixed(2)} m`);
+  }
+  // The reported estimate is walkable even with the cloud split across the wall.
+  {
+    const f = new ParticleFilter({ isWalkable: roomWalkable, nearestWalkable: roomNearest, count: 200 });
+    f.seed([lon0, lat0], { spreadM: 1.5, heading: 0 });
+    check('estimate is never inside a wall', roomWalkable([f.estimate().lon, f.estimate().lat]));
+  }
+  // Stall guard: a SEALED room (no opening for wall-slide to reach) leaves the
+  // cloud unable to advance, so the guard must arm after a few steps.
+  {
+    const boxWalkable = (p) => {
+      const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+      return Math.abs(e) < 0.05 && Math.abs(n) < 0.05;
+    };
+    const boxNearest = (p) => {
+      const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+      return toLL(Math.max(-0.049, Math.min(0.049, e)), Math.max(-0.049, Math.min(0.049, n)));
+    };
+    const f = new ParticleFilter({ isWalkable: boxWalkable, nearestWalkable: boxNearest,
+      count: 120, stallSteps: 3, relaxSteps: 5 });
+    f.seed(toLL(0, 0), { spreadM: 0.1, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    for (let k = 0; k < 6; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 10 });
+    check('a sealed room arms the stall guard', f.relaxLeft > 0, `relaxLeft=${f.relaxLeft}`);
+  }
+  // Heading prior: a known heading seeds within +/-90 deg.
+  {
+    const f = new ParticleFilter({ isWalkable: () => true, count: 300 });
+    f.seed([lon0, lat0], { spreadM: 1, heading: 0 });
+    let maxDev = 0;
+    for (let i = 0; i < f.count; i++) {
+      maxDev = Math.max(maxDev, Math.abs(wrapAngle(f.heading[i])));
+    }
+    check('known heading seeds within +/-90 deg', maxDev <= Math.PI / 2 + 1e-9,
+      `${(maxDev * 180 / Math.PI).toFixed(1)} deg`);
+  }
+  // Accuracy radius: the trusted radius bounds the cloud spread.
+  {
+    const f = new ParticleFilter({ isWalkable: () => true, count: 300 });
+    f.seed([lon0, lat0], { spreadM: 5, heading: Math.PI / 2, headingSpreadDeg: 90 });
+    f.predict(0.7, Math.PI / 2, { accuracyM: 1.0 });
+    const spread = f.estimate().spreadM;
+    check('accuracy radius bounds the cloud spread', spread < 2.0, `${spread.toFixed(2)} m`);
+  }
+  // Rear-hemisphere prior: particles behind the mean lose weight.
+  {
+    const f = new ParticleFilter({ isWalkable: () => true, count: 400, behindWeight: 0.05 });
+    f.seed([lon0, lat0], { spreadM: 2, heading: Math.PI / 2, headingSpreadDeg: 30 });
+    f.predict(0.7, Math.PI / 2, { accuracyM: Infinity });
+    const mean = f._weightedMean();
+    let wRear = 0, nRear = 0, wFront = 0, nFront = 0;
+    for (let i = 0; i < f.count; i++) {
+      const de = (f.lon[i] - mean.lon) * mpd.lon;
+      if (de < 0) { wRear += f.weight[i]; nRear++; } else { wFront += f.weight[i]; nFront++; }
+    }
+    check('particles behind the heading are down-weighted',
+      wRear / Math.max(1, nRear) < wFront / Math.max(1, nFront),
+      `rear ${(wRear / Math.max(1, nRear)).toExponential(1)} vs front ${(wFront / Math.max(1, nFront)).toExponential(1)}`);
+  }
+  // U-turn: a ~180 deg heading change is flagged (priors lifted that step).
+  {
+    const f = new ParticleFilter({ isWalkable: () => true, count: 300 });
+    f.seed([lon0, lat0], { spreadM: 1, heading: Math.PI / 2, headingSpreadDeg: 30 });
+    for (let k = 0; k < 5; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 10 });
+    f.predict(0.7, -Math.PI / 2, { accuracyM: 10 });
+    check('a U-turn is flagged for the priors', f.reversed === true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1491,6 +1619,47 @@ function runSteps(det, samples) {
   const strongWalk = runSteps(new StepDetector(), jostle(2.5)).length;
   check('...but the same rhythm at step intensity still counts', strongWalk > 5,
     `detected ${strongWalk}`);
+
+  // Only movement ALONG gravity counts. Rotating/tilting the phone sweeps
+  // gravity across the device axes; a rhythmic horizontal shove moves |a| but
+  // not the vertical component. Neither is walking.
+  const roll = [];
+  for (let i = 0, tt = 0; i < 250; i++, tt += 20) {
+    const ang = (i / 250) * Math.PI * 2;             // one slow full roll
+    roll.push({ t: tt, ax: 9.80665 * Math.sin(ang), ay: 0,
+      az: 9.80665 * Math.cos(ang) });
+  }
+  check('rotating the phone is not counted as steps',
+    runSteps(new StepDetector(), roll).length === 0,
+    `detected ${runSteps(new StepDetector(), roll).length}`);
+
+  const shove = (onZ) => {
+    const out = [];
+    for (let i = 0, tt = 0; i < 500; i++, tt += 20) {
+      const s = 5 * Math.sin((i / 25) * 2 * Math.PI);   // 2 Hz, |a| swings hard
+      out.push({ t: tt, ax: onZ ? 0 : s, ay: 0, az: 9.80665 + (onZ ? s : 0) });
+    }
+    return out;
+  };
+  const horiz = runSteps(new StepDetector(), shove(false)).length;
+  check('rhythmic horizontal shoving is not counted as steps', horiz === 0,
+    `detected ${horiz}`);
+  // Sanity: the OLD magnitude signal WOULD fire on this shove - so the
+  // projection onto gravity is what rejects it, not the intensity gate.
+  {
+    let base = null, oldPeaks = 0;
+    for (const { ax, ay, az } of shove(false)) {
+      const mag = Math.hypot(ax, ay, az);
+      if (base == null) { base = mag; continue; }
+      base += 0.02 * (mag - base);
+      if (mag - base > 0.8) oldPeaks++;
+    }
+    check('the old magnitude signal would have fired here (regression guard)',
+      oldPeaks > 3, `${oldPeaks} peaks`);
+  }
+  const vert = runSteps(new StepDetector(), shove(true)).length;
+  check('...but the same rhythm along gravity still counts', vert > 5,
+    `detected ${vert}`);
 }
 
 {

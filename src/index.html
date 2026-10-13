@@ -577,8 +577,10 @@
     const searchGo = document.getElementById('search-go');
 
     // "Find Path" (tap start + destination) is kept as a dev tool: the button
-    // is hidden in normal use, re-shown by ?dev=1 or the console.
-    if (new URLSearchParams(location.search).has('dev')) pathBtn.style.display = '';
+    // is hidden in normal use, re-shown by ?dev=1 or the console. The same
+    // flag gates the on-map particle-cloud overlay (debug telemetry).
+    const devMode = new URLSearchParams(location.search).has('dev');
+    if (devMode) pathBtn.style.display = '';
     const sidebar = document.getElementById('sidebar');
     const sidebarHandle = document.getElementById('sidebar-handle');
     const compassDisplay = document.getElementById('compass');
@@ -1708,6 +1710,56 @@
       }
     }
 
+    // --- particle cloud overlay (debug telemetry) ---------------------------
+    // Draws the PDR particle filter's cloud - where the pedestrian *could* be -
+    // as dots sized/darkened by particle weight. Created lazily (the style may
+    // still be loading when the first estimate arrives) and refreshed on every
+    // estimate, for both GPS and dead-reckoning sources (PDR runs either way).
+    function ensureParticleLayer() {
+      if (!devMode || (map.getLayer && map.getLayer('pdr-particles'))) return;
+      try {
+        if (!map.getSource('pdr-particles')) {
+          map.addSource('pdr-particles', {
+            type: 'geojson', data: { type: 'FeatureCollection', features: [] },
+          });
+        }
+        map.addLayer({
+          id: 'pdr-particles',
+          type: 'circle',
+          source: 'pdr-particles',
+          paint: {
+            // Weighted particles are larger and more opaque; the cloud sharpens
+            // as the floor plan squeezes it into a corridor.
+            'circle-radius': ['interpolate', ['linear'], ['get', 'w'], 0, 1.5, 0.02, 3.5],
+            'circle-color': '#e0533d',
+            'circle-opacity': ['interpolate', ['linear'], ['get', 'w'], 0, 0.12, 0.02, 0.7],
+          },
+        });
+        // Flat dots read wrong under a pitched 3D view (they sit at ground
+        // level, not the selected floor); show them in 2D only.
+        map.setLayoutProperty('pdr-particles', 'visibility', is3D ? 'none' : 'visible');
+      } catch { /* style not ready; the next estimate retries */ }
+    }
+
+    function particleData() {
+      const pts = locator?.filter?.points?.() ?? [];
+      return {
+        type: 'FeatureCollection',
+        features: pts.map((p) => ({
+          type: 'Feature',
+          properties: { w: p.w },
+          geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        })),
+      };
+    }
+
+    function updateParticles() {
+      ensureParticleLayer();
+      if (map.getSource('pdr-particles')) {
+        map.getSource('pdr-particles').setData(particleData());
+      }
+    }
+
     function renderEstimate(est) {
       if (!est) return;
       currentEstimate = est;
@@ -1720,6 +1772,7 @@
         map.getSource('location-radius').setData(
           turf.circle(ll, Math.max(1, est.accuracyM), { steps: 64, units: 'meters' }));
       }
+      updateParticles();
       // 3D: the same estimate as a blocky avatar extrusion on the selected
       // floor (DOM markers cannot be lifted). 2D keeps the DOM pin and the
       // flat accuracy/heading layers.
@@ -1856,7 +1909,7 @@
     /** 2D: DOM pin + flat circles. 3D: the floor-pinned avatar extrusions. */
     function applyLiveMode() {
       if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
-      for (const id of ['location-radius', 'location-radius-outline', 'location-heading-outline']) {
+      for (const id of ['location-radius', 'location-radius-outline', 'location-heading-outline', 'pdr-particles']) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'none' : 'visible');
       }
       for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {

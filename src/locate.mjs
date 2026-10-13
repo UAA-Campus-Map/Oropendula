@@ -30,6 +30,17 @@ function gaussian() {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+/** Gaussian draw clamped to +/- `maxAbs` (a bounded prior, e.g. heading noise). */
+function gaussianClamped(sigma, maxAbs) {
+  return Math.max(-maxAbs, Math.min(maxAbs, gaussian() * sigma));
+}
+
+/** Distance in metres between two lon/lat points. */
+function distM(lon1, lat1, lon2, lat2) {
+  const mpd = metresPerDegree((lat1 + lat2) / 2);
+  return Math.hypot((lon2 - lon1) * mpd.lon, (lat2 - lat1) * mpd.lat);
+}
+
 /** Offset a lon/lat by (east, north) metres. */
 function offsetLL(lon, lat, eastM, northM) {
   const mpd = metresPerDegree(lat);
@@ -253,7 +264,9 @@ export class HeadingDriftCalibrator {
  */
 export class ParticleFilter {
   constructor({ isWalkable, nearestWalkable, count = DEFAULT_COUNT, headingNoiseDeg = 8,
-    distanceNoise = 0.12, lateralNoiseM = 0.05, roughenM = 0.05 } = {}) {
+    distanceNoise = 0.12, lateralNoiseM = 0.05, roughenM = 0.05,
+    segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
+    stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5 } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
     this.count = count;
@@ -261,6 +274,18 @@ export class ParticleFilter {
     this.distanceNoise = distanceNoise;
     this.lateralNoiseM = lateralNoiseM;
     this.roughenM = roughenM;
+    // Segment-collision sampling pitch. Matches navgraph's 0.1 m cell so a
+    // ~0.3 m doorway channel is never falsely blocked.
+    this.segmentStepM = segmentStepM;
+    // Rear-hemisphere particles are down-weighted (not killed) this much.
+    this.behindWeight = behindWeight;
+    // A measured heading swing this large is an intentional U-turn.
+    this.reversal = reversalDeg * Math.PI / 180;
+    // Stall guard: if the mean won't advance for this many steps while the
+    // walker keeps stepping, relax the priors briefly so the cloud re-diffuses.
+    this.stallEpsM = stallEpsM;
+    this.stallSteps = stallSteps;
+    this.relaxSteps = relaxSteps;
     this.lon = new Float64Array(count);
     this.lat = new Float64Array(count);
     this.heading = new Float64Array(count);
@@ -273,6 +298,12 @@ export class ParticleFilter {
     this.freeRoam = false;
     this.freeRoamAllowed = null;
     this.initialized = false;
+    this.lastHeading = null;   // measured heading at the previous step
+    this.reversed = false;     // this step followed a ~180 deg U-turn
+    this.accuracyM = Infinity; // the arbiter's trusted accuracy radius
+    this.stallCount = 0;
+    this.relaxLeft = 0;
+    this._prevMean = null;
   }
 
   /**
@@ -289,6 +320,9 @@ export class ParticleFilter {
 
   /** Reset the cloud around a known point (a manual anchor). */
   seed([lon, lat], { spreadM = 2.5, heading = null, headingSpreadDeg = 180 } = {}) {
+    // The compass cannot be more than ~90 deg off, so a KNOWN heading bounds
+    // the spread to +/-90 deg; only an unknown heading keeps the full circle.
+    const spreadDeg = heading == null ? null : Math.min(headingSpreadDeg, 90);
     for (let i = 0; i < this.count; i++) {
       const e = gaussian() * spreadM, n = gaussian() * spreadM;
       const [plon, plat] = offsetLL(lon, lat, e, n);
@@ -297,33 +331,114 @@ export class ParticleFilter {
           : (this.nearestWalkable?.([plon, plat]) ?? [plon, plat]);
       this.lon[i] = fixed[0];
       this.lat[i] = fixed[1];
-      const h = heading == null ? Math.random() * 2 * Math.PI
-        : heading + gaussian() * headingSpreadDeg * Math.PI / 180;
+      const h = spreadDeg == null ? Math.random() * 2 * Math.PI
+        : heading + gaussianClamped(spreadDeg * DEG, Math.PI / 2);
       this.heading[i] = h;
     }
     this.weight.fill(1 / this.count);
     this.initialized = true;
     this._lastStepM = 0;
+    this.lastHeading = null;
+    this.reversed = false;
+    this.stallCount = 0;
+    this.relaxLeft = 0;
+    this._prevMean = null;
   }
 
   /** Advance every particle one step along its heading. */
-  predict(stepLengthM, headingRad) {
+  predict(stepLengthM, headingRad, { accuracyM = Infinity } = {}) {
     if (!this.initialized) return;
+    this.accuracyM = accuracyM;
+
+    // A ~180 deg swing in the measured heading is an intentional U-turn. This
+    // step must not punish the (now-behind) particles or the cloud would
+    // starve, so flag it - the next _update lifts the rear penalty and cap.
+    this.reversed = this.lastHeading != null
+      && Math.abs(shortestDelta(this.lastHeading, headingRad)) > this.reversal;
+    this.lastHeading = headingRad;
+
     for (let i = 0; i < this.count; i++) {
-      const h = headingRad + this.headingBias + gaussian() * this.headingNoise;
+      const h = headingRad + this.headingBias +
+        gaussianClamped(this.headingNoise, Math.PI / 2);
       const d = Math.max(0.05, stepLengthM * (1 + gaussian() * this.distanceNoise));
       const e = Math.sin(h) * d + gaussian() * this.lateralNoiseM;
       const n = Math.cos(h) * d;
-      const [plon, plat] = offsetLL(this.lon[i], this.lat[i], e, n);
-      this.lon[i] = plon;
-      this.lat[i] = plat;
+      if (this.freeRoam) {
+        const [plon, plat] = offsetLL(this.lon[i], this.lat[i], e, n);
+        this.lon[i] = plon;
+        this.lat[i] = plat;
+      } else {
+        this._move(i, e, n, h, d);
+      }
       this.heading[i] = h;
     }
-    this._update();
+    this._update(headingRad);
+    this._trackStall();
   }
 
-  /** Weight particles by walkability, then resample if they are collapsing. */
-  _update() {
+  /**
+   * Move particle `i` by (eastM, northM). The intended step is swept for wall
+   * collisions (`_advance`); if a wall blocks most of it, the particle fans out
+   * at increasing angles and takes the alternative that advances furthest.
+   * Every alternative is swept too, so none can cross a wall - this does NOT
+   * reopen tunnelling. It is what lets a particle pressed against a wall slide
+   * along it to the doorway and spread to the next room, instead of freezing.
+   */
+  _move(i, eastM, northM, heading, dist) {
+    const fromLon = this.lon[i], fromLat = this.lat[i];
+    const straight = this._advance(fromLon, fromLat,
+      ...offsetLL(fromLon, fromLat, eastM, northM));
+    let moved = distM(fromLon, fromLat, straight[0], straight[1]);
+    if (moved < dist * 0.9) {
+      const slid = this._slide(fromLon, fromLat, heading, dist);
+      const slidMoved = distM(fromLon, fromLat, slid[0], slid[1]);
+      if (slidMoved > moved) { moved = slidMoved; [this.lon[i], this.lat[i]] = slid; }
+      else { [this.lon[i], this.lat[i]] = straight; }
+    } else {
+      [this.lon[i], this.lat[i]] = straight;
+    }
+  }
+
+  /** Fan out around `heading` and return the walkable step that advances most. */
+  _slide(fromLon, fromLat, heading, dist) {
+    let best = [fromLon, fromLat], bestMoved = -1;
+    for (const deg of [15, -15, 30, -30, 45, -45, 60, -60, 75, -75]) {
+      const h = heading + deg * DEG;
+      const p = this._advance(fromLon, fromLat,
+        ...offsetLL(fromLon, fromLat, Math.sin(h) * dist, Math.cos(h) * dist));
+      const moved = distM(fromLon, fromLat, p[0], p[1]);
+      if (moved > bestMoved) {
+        best = p; bestMoved = moved;
+        if (moved >= dist * 0.9) return best;   // least deviation that gets through
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Walk from a (walkable) point toward (toLon,toLat), stopping at the last
+   * walkable sample. Prevents stepping across a wall.
+   */
+  _advance(fromLon, fromLat, toLon, toLat) {
+    const len = distM(fromLon, fromLat, toLon, toLat);
+    if (len <= this.segmentStepM) {
+      return this.isWalkable([toLon, toLat]) ? [toLon, toLat] : [fromLon, fromLat];
+    }
+    const steps = Math.ceil(len / this.segmentStepM);
+    let lastLon = fromLon, lastLat = fromLat;
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      const x = fromLon + (toLon - fromLon) * t;
+      const y = fromLat + (toLat - fromLat) * t;
+      if (!this.isWalkable([x, y])) break;
+      lastLon = x; lastLat = y;
+    }
+    return [lastLon, lastLat];
+  }
+
+  /** Weight particles by walkability, apply the priors, then resample. */
+  _update(forwardHeading = null) {
+    const relaxed = this.relaxLeft > 0;
     // Free roam (outdoors). With no predicate every particle is equally
     // plausible; with one (outside all buildings on this floor) the forbidden
     // footprints are down-weighted and resampled away, so the cloud flows
@@ -342,9 +457,11 @@ export class ParticleFilter {
       }
       if (total <= 0) return;
       for (let i = 0; i < this.count; i++) this.weight[i] /= total;
+      this._applyPriors(forwardHeading, relaxed);
       let sumSq = 0;
       for (let i = 0; i < this.count; i++) sumSq += this.weight[i] * this.weight[i];
       if (sumSq > 2 / this.count) this._resample();
+      if (relaxed) this.relaxLeft--;
       return;
     }
     let total = 0, live = 0;
@@ -358,12 +475,80 @@ export class ParticleFilter {
     for (let i = 0; i < this.count; i++) this.weight[i] /= total;
 
     // Nearly everything died: recover by snapping to the nearest free cell.
-    if (live < 0.1 * this.count && this.nearestWalkable) { this._recover(); return; }
+    if (live < 0.1 * this.count && this.nearestWalkable) {
+      this._recover();
+      if (relaxed) this.relaxLeft--;
+      return;
+    }
+
+    this._applyPriors(forwardHeading, relaxed);
 
     // Resample when the effective sample size (1/sum(w^2)) drops below half.
     let sumSq = 0;
     for (let i = 0; i < this.count; i++) sumSq += this.weight[i] * this.weight[i];
     if (sumSq > 2 / this.count) this._resample();
+    if (relaxed) this.relaxLeft--;
+  }
+
+  /**
+   * The two directional/spatial priors, applied after walkability weighting:
+   *   - forward hemisphere: particles behind the measured heading are
+   *     implausible while walking, so they are down-weighted (kept, weakly, so
+   *     a real U-turn is still detectable);
+   *   - accuracy radius: the arbiter's accuracy is trusted, so nothing lives
+   *     farther than `accuracyM` from the cloud's own mean.
+   * A U-turn step or a stall-recovery step lifts both so the cloud can move.
+   */
+  _applyPriors(forwardHeading, relaxed) {
+    const mean = this._weightedMean();
+    if (!mean) return;
+    const mpd = metresPerDegree(mean.lat);
+    const fe = forwardHeading == null ? 0 : Math.sin(forwardHeading);
+    const fn = forwardHeading == null ? 0 : Math.cos(forwardHeading);
+    const useRear = forwardHeading != null && !relaxed && !this.reversed;
+    const useCap = !relaxed && isFinite(this.accuracyM);
+    const cap2 = this.accuracyM * this.accuracyM;
+    for (let i = 0; i < this.count; i++) {
+      const de = (this.lon[i] - mean.lon) * mpd.lon;
+      const dn = (this.lat[i] - mean.lat) * mpd.lat;
+      if (useCap && de * de + dn * dn > cap2) { this.weight[i] = 0; continue; }
+      if (useRear && de * fe + dn * fn < 0) this.weight[i] *= this.behindWeight;
+    }
+    let total = 0;
+    for (let i = 0; i < this.count; i++) total += this.weight[i];
+    if (total <= 0) { this.weight.fill(1 / this.count); return; }
+    for (let i = 0; i < this.count; i++) this.weight[i] /= total;
+  }
+
+  /** Weighted-mean position of the cloud, or null if it carries no weight. */
+  _weightedMean() {
+    let lon = 0, lat = 0, wsum = 0;
+    for (let i = 0; i < this.count; i++) {
+      const w = this.weight[i];
+      wsum += w; lon += this.lon[i] * w; lat += this.lat[i] * w;
+    }
+    if (wsum <= 0) return null;
+    return { lon: lon / wsum, lat: lat / wsum };
+  }
+
+  /**
+   * Stall guard. The walker keeps stepping but the mean will not advance (e.g.
+   * the cloud is misplaced and every step is wall-blocked): relax the priors
+   * for a few steps so the natural noise re-diffuses the cloud until a particle
+   * finds the doorway. Never lets particles cross a wall - collision stays on.
+   */
+  _trackStall() {
+    const mean = this._weightedMean();
+    if (mean && this._prevMean) {
+      const moved = distM(this._prevMean.lon, this._prevMean.lat, mean.lon, mean.lat);
+      if (moved < this.stallEpsM) this.stallCount++;
+      else this.stallCount = 0;
+      if (this.stallCount >= this.stallSteps) {
+        this.relaxLeft = this.relaxSteps;
+        this.stallCount = 0;
+      }
+    }
+    this._prevMean = mean;
   }
 
   _resample() {
@@ -401,20 +586,49 @@ export class ParticleFilter {
    */
   estimate() {
     if (!this.initialized) return null;
+    // With the floor plan in play the reported point must be walkable: a cloud
+    // straddling a thin wall averages INTO the wall, so average only the
+    // walkable particles. If even that mean lands in a wall, report the
+    // heaviest walkable particle (never a spiral snap that could cross one).
+    // Free roam skips the constraint (off-raster spaces).
+    const snap = !this.freeRoam && typeof this.isWalkable === 'function';
     let lon = 0, lat = 0, wsum = 0, sin = 0, cos = 0;
+    let bestW = -1, bestLon = 0, bestLat = 0, bestHeading = 0;
     for (let i = 0; i < this.count; i++) {
       const w = this.weight[i];
+      if (snap && !this.isWalkable([this.lon[i], this.lat[i]])) continue;
       wsum += w;
       lon += this.lon[i] * w;
       lat += this.lat[i] * w;
       sin += Math.sin(this.heading[i]) * w;
       cos += Math.cos(this.heading[i]) * w;
+      if (w > bestW) { bestW = w; bestLon = this.lon[i]; bestLat = this.lat[i]; bestHeading = this.heading[i]; }
     }
-    if (wsum <= 0) return null;
-    lon /= wsum; lat /= wsum;
+    let denom = wsum;
+    if (wsum <= 0) {
+      // Everything is off-plan: fall back to the raw weighted mean so there is
+      // still a report (an anchor / GPS fix / the stall guard recovers).
+      for (let i = 0; i < this.count; i++) {
+        const w = this.weight[i];
+        denom += w;
+        lon += this.lon[i] * w;
+        lat += this.lat[i] * w;
+        sin += Math.sin(this.heading[i]) * w;
+        cos += Math.cos(this.heading[i]) * w;
+      }
+      if (denom <= 0) return null;
+      lon /= denom; lat /= denom;
+    } else {
+      lon /= wsum; lat /= wsum;
+      if (snap && !this.isWalkable([lon, lat])) {
+        lon = bestLon; lat = bestLat;
+        sin = Math.sin(bestHeading); cos = Math.cos(bestHeading);
+      }
+    }
     const mpd = metresPerDegree(lat);
     let varSum = 0;
     for (let i = 0; i < this.count; i++) {
+      if (snap && !this.isWalkable([this.lon[i], this.lat[i]])) continue;
       const e = (this.lon[i] - lon) * mpd.lon;
       const n = (this.lat[i] - lat) * mpd.lat;
       varSum += this.weight[i] * (e * e + n * n);
@@ -422,7 +636,7 @@ export class ParticleFilter {
     return {
       lon, lat,
       heading: Math.atan2(sin, cos),
-      spreadM: Math.sqrt(varSum / wsum),
+      spreadM: Math.sqrt(varSum / denom),
     };
   }
 
@@ -430,6 +644,19 @@ export class ParticleFilter {
   snap(point) {
     if (this.isWalkable(point)) return point;
     return this.nearestWalkable?.(point) ?? point;
+  }
+
+  /**
+   * The cloud as plain `{lon, lat, w}` records (w = normalised weight), for
+   * on-map debug rendering. Empty until the filter is seeded.
+   */
+  points() {
+    if (!this.initialized) return [];
+    const out = [];
+    for (let i = 0; i < this.count; i++) {
+      out.push({ lon: this.lon[i], lat: this.lat[i], w: this.weight[i] });
+    }
+    return out;
   }
 
   /** Nudge the shared heading bias (e.g. from a corridor axis observation). */

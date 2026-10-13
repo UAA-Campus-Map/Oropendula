@@ -120,7 +120,10 @@ export class PositionArbiter {
   step({ stepLengthM, headingRad }) {
     if (headingRad != null) this.heading = headingRad;
     if (!this.filter.initialized) return;
-    this.filter.predict(stepLengthM, headingRad ?? this.heading ?? 0);
+    // The PDR accuracy is the trusted radius the filter confines its cloud to
+    // (particles never live farther than this from their own mean).
+    this.filter.predict(stepLengthM, headingRad ?? this.heading ?? 0,
+      { accuracyM: this.pdrAccuracy() });
     this.metresSinceCorrection += stepLengthM;
   }
 

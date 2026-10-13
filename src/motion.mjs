@@ -45,18 +45,23 @@ export function clamp(v, lo, hi) {
 /**
  * Step detector.
  *
- * Uses the scalar acceleration magnitude `|a|`, which - unlike any single
- * device axis - is orientation-independent: it tracks the component of
- * acceleration along gravity (the vertical gait signal) no matter how the
- * phone is held. A slow low-pass estimates the baseline (gravity + the DC
- * bias of the step pulses); subtracting it leaves the walking waveform. A step
- * is a local maximum of that waveform that clears a dynamic threshold derived
- * from a decaying envelope of recent peaks.
+ * Measures movement ALONG GRAVITY, not the raw acceleration magnitude. A slow
+ * low-pass of the raw accelerometer vector gives the gravity direction in the
+ * device frame (walking is ~1.8 Hz, far above this); the gait signal is the
+ * signed component of acceleration along that direction, referenced to the
+ * orientation-invariant magnitude `|a|`. Subtracting `|a|`'s slow baseline
+ * leaves the vertical walking waveform.
  *
- * Why not subtract gravity per-axis and take the magnitude? A train of
- * unipolar step pulses has a non-zero mean, and per-axis gravity tracking
- * leaks its lag back into the signal, leaving a baseline that swamps light
- * gait. The scalar high-pass above avoids that.
+ * Why not the scalar magnitude `|a|`, which is orientation-independent? Because
+ * it is NOT motion-independent: rotating or waving the phone adds centripetal/
+ * tangential acceleration to `|a|`, which fires the detector as if steps were
+ * taken. Projecting onto gravity (and referencing to `|a|`'s low-pass) rejects
+ * horizontal/rotational hand motion - the device axes and gravity sweep around
+ * during a tilt, but the component along gravity stays ~constant - while real
+ * vertical gait oscillation survives.
+ *
+ * A step is a local maximum of that waveform that clears a dynamic threshold
+ * derived from a decaying envelope of recent peaks.
  *
  * A peak alone is not a step: shifting the phone or shifting weight produces
  * isolated peaks too. So a peak only counts once a *walking rhythm* is
@@ -75,6 +80,7 @@ export class StepDetector {
     minIntervalMs = 280,
     maxIntervalMs = 2000,
     baselineAlpha = 0.02,  // slow baseline low-pass (~0.16 Hz at 50 Hz)
+    gravityAlpha = 0.02,   // slow gravity-direction low-pass (tracks orientation)
     smoothAlpha = 0.4,     // fast smoothing of the waveform
     minThreshold = 0.35,   // dynamic-threshold noise floor, m/s^2
     minPeakMps2 = 0.8,     // ABSOLUTE minimum peak intensity to count a step
@@ -85,7 +91,7 @@ export class StepDetector {
     rhythmHi = 2.0,        // ...and <= this multiple
   } = {}) {
     Object.assign(this, {
-      minIntervalMs, maxIntervalMs, baselineAlpha, smoothAlpha,
+      minIntervalMs, maxIntervalMs, baselineAlpha, gravityAlpha, smoothAlpha,
       minThreshold, minPeakMps2, peakFraction, envelopeDecay, qualifySteps, rhythmLo, rhythmHi,
     });
     this.reset();
@@ -97,6 +103,9 @@ export class StepDetector {
     this.prev = 0;
     this.prev2 = 0;
     this.envelope = 0;
+    this.gx = 0;             // low-passed gravity vector (device frame)
+    this.gy = 0;
+    this.gz = 0;
     this.lastPeakT = -Infinity;
     this.prevInterval = null;
     this.pending = [];       // peaks not yet confirmed as a walk
@@ -108,14 +117,28 @@ export class StepDetector {
   push({ t, ax, ay, az }) {
     const mag = Math.sqrt(ax * ax + ay * ay + az * az);
     if (!this.initialized) {
+      this.gx = ax; this.gy = ay; this.gz = az;
       this.baseline = mag;
       this.initialized = true;
       this.lastPeakT = t;
       return [];
     }
 
+    // Track the gravity DIRECTION with a slow low-pass of the vector (gait is
+    // ~1.8 Hz, far above this, so the estimate stays on gravity). The step
+    // signal is the signed component of acceleration ALONG gravity, referenced
+    // to the orientation-invariant magnitude. Rotating/tilting the phone moves
+    // gravity across the device axes but leaves this component ~0, so only
+    // genuine vertical movement produces a waveform - whereas the raw
+    // magnitude happily fires on hand rotation and horizontal shoving.
+    this.gx += this.gravityAlpha * (ax - this.gx);
+    this.gy += this.gravityAlpha * (ay - this.gy);
+    this.gz += this.gravityAlpha * (az - this.gz);
+    const gnorm = Math.sqrt(this.gx * this.gx + this.gy * this.gy + this.gz * this.gz) || 1;
+    const vertical = (ax * this.gx + ay * this.gy + az * this.gz) / gnorm;
+
     this.baseline += this.baselineAlpha * (mag - this.baseline);
-    const wave = mag - this.baseline;
+    const wave = vertical - this.baseline;
     this.smoothed += this.smoothAlpha * (wave - this.smoothed);
 
     this.envelope *= this.envelopeDecay;

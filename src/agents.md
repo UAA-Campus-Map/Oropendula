@@ -401,12 +401,20 @@ PWA (Chrome Android / iOS Safari / Firefox). No CV — the camera was excluded
 and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 4-5 m target. No ML either: the floor plan does the heavy lifting.
 
-- **Step detection lesson 1**: remove the baseline with a *scalar* high-pass on
-  `|a|`, not per-axis gravity subtraction + magnitude. A train of unipolar step
+- **Step detection lesson 1**: measure movement ALONG GRAVITY, not the scalar
+  magnitude `|a|`. The magnitude is orientation-invariant but NOT
+  motion-invariant: rotating/waving the phone adds centripetal/tangential
+  acceleration to `|a|` and fires the detector as though steps were taken.
+  `StepDetector` low-passes the raw accelerometer VECTOR to estimate the gravity
+  direction (walking ~1.8 Hz is far above that filter), projects the sample onto
+  it, and references it to `|a|`'s slow baseline - so a tilt sweeps gravity
+  across the device axes but leaves the vertical component ~constant, while
+  real gait oscillation survives. Do NOT go back to `mag - baseline`. (Why not
+  plain per-axis gravity subtraction + magnitude? A train of unipolar step
   pulses has a non-zero mean, and per-axis gravity tracking leaks its lag back
-  into the signal, leaving a baseline that swamps light gait. The shipped
-  detector (`StepDetector`) uses a dynamic envelope threshold, so it is robust
-  across cadence 1.2-2.4 Hz, acceleration amplitude 1.5-4 m/s² and noise.
+  into the signal, swamping light gait - hence the projection/reference above.)
+  The detector uses a dynamic envelope threshold, so it is robust across cadence
+  1.2-2.4 Hz, acceleration amplitude 1.5-4 m/s² and noise.
 - **Step detection lesson 2 (the "counts when I move a bit" bug)**: a peak is
   not a step. Shifting the phone / shifting weight produces isolated peaks too.
   `StepDetector` now requires a *walking rhythm* before counting: a run of
@@ -597,6 +605,41 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   arbiter also seeds on the first plausible GPS fix. Without this, steps are
   counted and heading is fine but the marker never moves (the "PDR not
   implemented" bug).
+- **The filter trusts the compass (≤90° off) and the arbiter's accuracy.**
+  `ParticleFilter` now enforces, on top of the existing soft wall weighting
+  (non-walkable = 0.02) and resampling:
+  - **No tunnelling** (`predict` -> `_advance`): a step is swept and stops at
+    the last walkable sample (`segmentStepM = 0.1 m`, matching navgraph's cell
+    so a ~0.3 m doorway channel is never falsely blocked). A particle that hits
+    a wall parks against it instead of landing in the next room.
+  - **Wall-slide through doorways** (`_move`/`_slide`): when the intended step
+    is wall-blocked, the particle fans out at increasing angles (±15..75°) and
+    takes the swept alternative that advances furthest. Every alternative is
+    swept too, so tunnelling stays closed, but a particle pressed against a wall
+    now slides along it to a doorway and spreads into the next room instead of
+    freezing. This is what makes doorways work when the cloud is offset from the
+    opening (a straight-line-only filter pins the particles at the jamb). The
+    failure case left is only a cloud so misplaced that no particle is within
+    sliding reach of any opening - the stall guard below covers that.
+  - **Heading prior**: a known heading seeds within ±90° (`seed` clamps
+    `headingSpreadDeg`; per-step noise is clamped at ±90°).
+  - **Forward-hemisphere prior** (`_applyPriors`): particles behind the mean
+    relative to the measured heading are multiplied by `behindWeight = 0.05`
+    (kept, weakly, so a genuine U-turn is still detectable), not killed.
+  - **Accuracy radius**: nothing lives farther than the arbiter's
+    `accuracyM` from the cloud's own mean (`arbiter.step` passes
+    `pdrAccuracy()`); a U-turn step (`reversalDeg = 120`) or a stall-recovery
+    step lifts this.
+  - **Stall guard** (`_trackStall`): if the walker keeps stepping but the mean
+    won't advance (`stallEpsM`, for `stallSteps`), the priors relax for
+    `relaxSteps` so the noise re-diffuses the cloud toward a doorway — never
+    letting it cross a wall.
+  - **`estimate()` is walkable**: it averages the walkable particles (a cloud
+    straddling a thin wall otherwise averages INTO it) and, if even that mean
+    lands in a wall, reports the heaviest walkable particle — never a spiral
+    snap that could pick the wrong side. Free roam (outdoors) skips the
+    walkability parts (tunnelling test and snap), keeping the heading/accuracy
+    priors.
 - Prod ships no telemetry; all tuning/overlays live in `locate-test.html`.
 
 ## Testing
@@ -875,4 +918,11 @@ is not registered in `buildings-config.json`, so it is not searchable.
   (between buttons, and beside the shorter ones under the wide search row) used
   to swallow taps and pinch/rotate gestures, so map gestures did not work in
   those areas. Any new overlay must follow the same pattern.
+- The PDR **particle cloud is drawn on the map** (`pdr-particles` circle layer,
+  fed by `ParticleFilter.points()`): one dot per particle, larger/darker with
+  weight, so map-matching is visible as the cloud squeezing into corridors.
+  **Gated on `?dev=1`** (the same flag as "Find Path"), created lazily in
+  `ensureParticleLayer()` (retried while the style loads) and refreshed from
+  `renderEstimate`, for both GPS and PDR sources. 2D only - flat dots sit at
+  ground level and read wrong under a pitched 3D view.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.
