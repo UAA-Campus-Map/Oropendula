@@ -45,23 +45,25 @@ export function clamp(v, lo, hi) {
 /**
  * Step detector.
  *
- * Measures movement ALONG GRAVITY, not the raw acceleration magnitude. A slow
- * low-pass of the raw accelerometer vector gives the gravity direction in the
- * device frame (walking is ~1.8 Hz, far above this); the gait signal is the
- * signed component of acceleration along that direction, referenced to the
- * orientation-invariant magnitude `|a|`. Subtracting `|a|`'s slow baseline
- * leaves the vertical walking waveform.
+ * Pipeline: gravity-projected, band-passed, then peak-detected with hysteresis.
  *
- * Why not the scalar magnitude `|a|`, which is orientation-independent? Because
- * it is NOT motion-independent: rotating or waving the phone adds centripetal/
- * tangential acceleration to `|a|`, which fires the detector as if steps were
- * taken. Projecting onto gravity (and referencing to `|a|`'s low-pass) rejects
- * horizontal/rotational hand motion - the device axes and gravity sweep around
- * during a tilt, but the component along gravity stays ~constant - while real
- * vertical gait oscillation survives.
- *
- * A step is a local maximum of that waveform that clears a dynamic threshold
- * derived from a decaying envelope of recent peaks.
+ * 1. GRAVITY PROJECTION. A slow low-pass of the raw accelerometer vector gives
+ *    the gravity direction in the device frame (walking ~1.8 Hz is far above
+ *    it); the signal is the component of acceleration along that direction.
+ *    Unlike the raw magnitude `|a|`, this is inert to rotating/waving the phone
+ *    (the device axes and gravity sweep around, but the component along gravity
+ *    stays ~constant).
+ * 2. BAND-PASS (0.5-3.5 Hz). A time-based high-pass removes slow drift/orient-
+ *    ation while a low-pass removes fast jitter, leaving the gait band. Time-
+ *    based coefficients (`exp(-dt/tau)`) keep it frame-rate independent.
+ * 3. SCHMITT + PROMINENCE. A step is a local maximum above a threshold that
+ *    also stands `minProminence` above the valley since the last step; after a
+ *    step the detector will not fire again until the signal falls `releaseMps2`
+ *    below it. This kills the double-bumps/ripple that a plain local-max picks
+ *    up, which is the "occasional extra step" while walking.
+ * 4. ADAPTIVE FLOOR. While not moving, a slow EMA of the band-passed magnitude
+ *    estimates the ambient noise; the gate rises with it (capped), so a noisy
+ *    device/hold counts less without a fixed floor that would miss light gait.
  *
  * A peak alone is not a step: shifting the phone or shifting weight produces
  * isolated peaks too. So a peak only counts once a *walking rhythm* is
@@ -77,32 +79,45 @@ export function clamp(v, lo, hi) {
  */
 export class StepDetector {
   constructor({
-    minIntervalMs = 280,
+    minIntervalMs = 300,   // refractory: ignore peaks closer than this
     maxIntervalMs = 2000,
-    baselineAlpha = 0.02,  // slow baseline low-pass (~0.16 Hz at 50 Hz)
     gravityAlpha = 0.02,   // slow gravity-direction low-pass (tracks orientation)
-    smoothAlpha = 0.4,     // fast smoothing of the waveform
+    hpTauS = 0.32,         // band-pass high-pass time constant (~0.5 Hz)
+    lpTauS = 0.045,        // band-pass low-pass time constant (~3.5 Hz)
     minThreshold = 0.35,   // dynamic-threshold noise floor, m/s^2
     minPeakMps2 = 0.8,     // ABSOLUTE minimum peak intensity to count a step
     peakFraction = 0.5,    // a peak must reach this fraction of the envelope
+    minProminence = 0.3,   // peak must stand this far above the intervening valley
+    releaseMps2 = 0.3,     // hysteresis: fall this far below a peak to arm the next
     envelopeDecay = 0.99,  // per-sample decay of the peak envelope
+    noiseAlpha = 0.05,     // slow EMA of ambient noise (while not walking)
+    noiseGateGain = 2,     // gate = this * noise (capped at noiseCeil)
+    noiseCeil = 1.6,       // never let the adaptive gate exceed this
     qualifySteps = 3,      // rhythmic peaks needed before counting a walk
-    rhythmLo = 0.5,        // interval must be >= this fraction of the previous
-    rhythmHi = 2.0,        // ...and <= this multiple
+    rhythmLo = 0.6,        // interval must be >= this fraction of the previous
+    rhythmHi = 1.7,        // ...and <= this multiple
   } = {}) {
     Object.assign(this, {
-      minIntervalMs, maxIntervalMs, baselineAlpha, gravityAlpha, smoothAlpha,
-      minThreshold, minPeakMps2, peakFraction, envelopeDecay, qualifySteps, rhythmLo, rhythmHi,
+      minIntervalMs, maxIntervalMs, gravityAlpha, hpTauS, lpTauS,
+      minThreshold, minPeakMps2, peakFraction, minProminence, releaseMps2,
+      envelopeDecay, noiseAlpha, noiseGateGain, noiseCeil,
+      qualifySteps, rhythmLo, rhythmHi,
     });
     this.reset();
   }
 
   reset() {
-    this.baseline = 0;
-    this.smoothed = 0;
-    this.prev = 0;
+    this.prev = 0;           // band-passed signal, one and two samples ago
     this.prev2 = 0;
+    this.hpPrevIn = 0;       // high-pass state
+    this.hpPrevOut = 0;
+    this.lp = 0;             // low-pass state
     this.envelope = 0;
+    this.valley = Infinity;  // running min since the last peak
+    this.armed = true;       // hysteresis: ready to accept a peak
+    this.lastPeakVal = 0;
+    this.noiseFloor = 0;
+    this.lastT = null;
     this.gx = 0;             // low-passed gravity vector (device frame)
     this.gy = 0;
     this.gz = 0;
@@ -115,50 +130,64 @@ export class StepDetector {
   }
 
   push({ t, ax, ay, az }) {
-    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
     if (!this.initialized) {
       this.gx = ax; this.gy = ay; this.gz = az;
-      this.baseline = mag;
+      // Seed the high-pass input with the resting projection (|a|) so it starts
+      // at 0 instead of ringing down from a 9.8 m/s^2 step.
+      this.hpPrevIn = Math.sqrt(ax * ax + ay * ay + az * az);
+      this.lastT = t;
       this.initialized = true;
       this.lastPeakT = t;
       return [];
     }
 
-    // Track the gravity DIRECTION with a slow low-pass of the vector (gait is
-    // ~1.8 Hz, far above this, so the estimate stays on gravity). The step
-    // signal is the signed component of acceleration ALONG gravity, referenced
-    // to the orientation-invariant magnitude. Rotating/tilting the phone moves
-    // gravity across the device axes but leaves this component ~0, so only
-    // genuine vertical movement produces a waveform - whereas the raw
-    // magnitude happily fires on hand rotation and horizontal shoving.
+    // --- 1. project onto the (slowly tracked) gravity direction ------------
     this.gx += this.gravityAlpha * (ax - this.gx);
     this.gy += this.gravityAlpha * (ay - this.gy);
     this.gz += this.gravityAlpha * (az - this.gz);
     const gnorm = Math.sqrt(this.gx * this.gx + this.gy * this.gy + this.gz * this.gz) || 1;
     const vertical = (ax * this.gx + ay * this.gy + az * this.gz) / gnorm;
 
-    this.baseline += this.baselineAlpha * (mag - this.baseline);
-    const wave = vertical - this.baseline;
-    this.smoothed += this.smoothAlpha * (wave - this.smoothed);
+    // --- 2. time-based band-pass (0.5-3.5 Hz) ------------------------------
+    let dt = (t - this.lastT) / 1000;
+    if (!(dt > 0)) dt = 1 / 50;              // bad/duplicate timestamp
+    if (dt > 0.2) dt = 0.2;                  // app was backgrounded; don't overreact
+    this.lastT = t;
+    const aHp = Math.exp(-dt / this.hpTauS);
+    const hp = aHp * (this.hpPrevOut + vertical - this.hpPrevIn);
+    this.hpPrevIn = vertical;
+    this.hpPrevOut = hp;
+    this.lp += (1 - Math.exp(-dt / this.lpTauS)) * (hp - this.lp);
+    const s = this.lp;
 
+    // --- 3+4. thresholds and Schmitt/prominence peak detection -------------
     this.envelope *= this.envelopeDecay;
-    // A step must clear the dynamic envelope threshold AND an absolute intensity
-    // floor: holding still (small jostles, hand tremor, a table bump) produces
-    // peaks that used to slip through the low noise floor and register as
-    // steps, drifting PDR while standing. Real gait peaks clear 1.5-4 m/s^2.
-    const threshold = Math.max(this.minThreshold, this.minPeakMps2,
+    // Ambient noise, learned only when the signal is quiet (never from gait, or
+    // the gate would ratchet up during the buffering phase and deadlock).
+    if (!this.walking && Math.abs(s) < this.minPeakMps2) {
+      this.noiseFloor += this.noiseAlpha * (Math.abs(s) - this.noiseFloor);
+    }
+    const adaptive = Math.min(this.noiseCeil, this.noiseGateGain * this.noiseFloor);
+    const threshold = Math.max(this.minThreshold, this.minPeakMps2, adaptive,
       this.peakFraction * this.envelope);
 
-    // `prev` is a local maximum if the waveform has started falling and it
-    // cleared the thresholds.
     let emits = [];
-    if (this.smoothed < this.prev && this.prev >= this.prev2 && this.prev > threshold) {
-      this.envelope = Math.max(this.envelope, this.prev);
-      emits = this._onPeak(t);
+    if (this.armed) {
+      this.valley = Math.min(this.valley, s);
+      if (s < this.prev && this.prev >= this.prev2 && this.prev > threshold &&
+          this.prev - this.valley >= this.minProminence) {
+        this.armed = false;                  // require a release before the next peak
+        this.lastPeakVal = this.prev;
+        this.envelope = Math.max(this.envelope, this.prev);
+        emits = this._onPeak(t);
+      }
+    } else if (s < this.lastPeakVal - this.releaseMps2) {
+      this.armed = true;
+      this.valley = s;
     }
 
     this.prev2 = this.prev;
-    this.prev = this.smoothed;
+    this.prev = s;
     this.steps += emits.length;
     return emits;
   }

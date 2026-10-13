@@ -406,23 +406,36 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   motion-invariant: rotating/waving the phone adds centripetal/tangential
   acceleration to `|a|` and fires the detector as though steps were taken.
   `StepDetector` low-passes the raw accelerometer VECTOR to estimate the gravity
-  direction (walking ~1.8 Hz is far above that filter), projects the sample onto
-  it, and references it to `|a|`'s slow baseline - so a tilt sweeps gravity
-  across the device axes but leaves the vertical component ~constant, while
-  real gait oscillation survives. Do NOT go back to `mag - baseline`. (Why not
-  plain per-axis gravity subtraction + magnitude? A train of unipolar step
-  pulses has a non-zero mean, and per-axis gravity tracking leaks its lag back
-  into the signal, swamping light gait - hence the projection/reference above.)
-  The detector uses a dynamic envelope threshold, so it is robust across cadence
-  1.2-2.4 Hz, acceleration amplitude 1.5-4 m/s² and noise.
+  direction (walking ~1.8 Hz is far above that filter) and takes the component
+  of acceleration along it, so a tilt sweeps gravity across the device axes but
+  leaves the component ~constant while real gait oscillation survives. Do NOT go
+  back to `mag - baseline`.
+  **Lesson 1b (the front-end)**: that projection then goes through a
+  **time-based band-pass (0.5-3.5 Hz)** - a high-pass (`hpTauS` ~0.32 s) that
+  replaces the old baseline subtraction, and a low-pass (`lpTauS` ~0.045 s) that
+  replaces the old one-pole smoothing. Time-based coefficients
+  (`exp(-dt/tau)`) keep it frame-rate independent. This rejects both slow
+  orientation drift and fast hand vibration; smoke checks 8 Hz jitter riding on
+  a walk does not inflate the count.
+  **Lesson 1c (hysteresis/prominence - the "occasional extra step" fix)**: a
+  plain single-sample local maximum fires twice on a double-bump (footfall +
+  hand). `StepDetector` now requires a peak to stand `minProminence` (0.3) above
+  the valley since the last step and, after a step, will not fire again until
+  the signal falls `releaseMps2` (0.3) below it (a Schmitt trigger). It also
+  learned an **adaptive noise floor**: while the signal is quiet, a slow EMA of
+  the band-passed magnitude raises the gate (gain `noiseGateGain`, capped at
+  `noiseCeil`), so a noisy hold counts less without a fixed floor that would
+  miss light gait. The old fixed absolute gate (`minPeakMps2`, 0.8 m/s²) is the
+  fallback when the environment is quiet.
 - **Step detection lesson 2 (the "counts when I move a bit" bug)**: a peak is
   not a step. Shifting the phone / shifting weight produces isolated peaks too.
   `StepDetector` now requires a *walking rhythm* before counting: a run of
-  `qualifySteps` peaks whose spacing stays within `rhythmLo..rhythmHi` of the
-  previous interval. While unconfirmed, peaks are buffered and flushed the
-  moment a walk is confirmed (so no real steps are lost); a gap past
-  `maxIntervalMs` ends the walk. `push()` therefore returns an **array** of
-  step timestamps (possibly several on confirmation), not a boolean.
+  `qualifySteps` peaks whose spacing stays within `rhythmLo..rhythmHi` (now
+  0.6..1.7, was 0.5..2.0) of the previous interval. While unconfirmed, peaks
+  are buffered and flushed the moment a walk is confirmed (so no real steps are
+  lost); a gap past `maxIntervalMs` ends the walk. `push()` therefore returns an
+  **array** of step timestamps (possibly several on confirmation), not a
+  boolean. The refractory is 300 ms.
   **Lesson 3 (the "too sensitive holding still" bug)**: rhythm alone is not
   enough - hand tremor, a foot tap on the phone or a shaky table can be
   rhythmic yet far too weak to be gait. `StepDetector` therefore also enforces

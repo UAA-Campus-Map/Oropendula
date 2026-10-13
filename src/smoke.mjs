@@ -1660,6 +1660,59 @@ function runSteps(det, samples) {
   const vert = runSteps(new StepDetector(), shove(true)).length;
   check('...but the same rhythm along gravity still counts', vert > 5,
     `detected ${vert}`);
+
+  // Band-pass: high-frequency jitter (hand vibration) riding on a real walk is
+  // rejected, so the count tracks the gait, not the vibration.
+  {
+    const hfWalk = [];
+    const dtMs = 20, cadence = 1.8, period = 1000 / cadence, steps = 16, leadMs = 700;
+    const total = leadMs + steps * period + 500;
+    for (let t = 0; t <= total; t += dtMs) {
+      let az = 9.80665;
+      for (let k = 0; k < steps; k++) {
+        const d = (t - (leadMs + k * period + period / 2)) / 1000;
+        az += 2.5 * Math.exp(-(d * d) / (2 * 0.08 * 0.08));
+      }
+      az += 1.0 * Math.sin(2 * Math.PI * 8 * (t / 1000));   // 8 Hz vibration
+      hfWalk.push({ t, ax: (Math.random() - 0.5) * 0.05, ay: (Math.random() - 0.5) * 0.05, az });
+    }
+    const c = runSteps(new StepDetector(), hfWalk).length;
+    check('high-frequency jitter on a walk is filtered out', Math.abs(c - steps) <= 3,
+      `detected ${c}/${steps}`);
+  }
+
+  // Hysteresis/envelope: a step with a secondary bump 300 ms later (a "double
+  // bump" from footfall + hand) counts once, not twice.
+  {
+    const doubleWalk = [];
+    const dtMs = 20, cadence = 1.8, period = 1000 / cadence, steps = 16, leadMs = 700;
+    const total = leadMs + steps * period + 500;
+    for (let t = 0; t <= total; t += dtMs) {
+      let az = 9.80665;
+      for (let k = 0; k < steps; k++) {
+        const e = leadMs + k * period + period / 2;
+        const d1 = (t - e) / 1000;
+        az += 2.5 * Math.exp(-(d1 * d1) / (2 * 0.08 * 0.08));
+        const d2 = (t - (e + 300)) / 1000;
+        az += 1.1 * Math.exp(-(d2 * d2) / (2 * 0.05 * 0.05));   // 44% secondary bump
+      }
+      doubleWalk.push({ t, ax: (Math.random() - 0.5) * 0.05, ay: (Math.random() - 0.5) * 0.05, az });
+    }
+    const c = runSteps(new StepDetector(), doubleWalk).length;
+    check('a double-bump counts as one step', Math.abs(c - steps) <= 3, `detected ${c}/${steps}`);
+  }
+
+  // A held movement with ripple is not a walk.
+  {
+    const plateau = [];
+    for (let i = 0, tt = 0; i < 150; i++, tt += 20) {
+      const hold = tt > 600 && tt < 1400 ? 2.5 : 0;
+      plateau.push({ t: tt, ax: 0, ay: 0,
+        az: 9.80665 + hold + 0.6 * Math.sin(2 * Math.PI * 10 * (tt / 1000)) });
+    }
+    const c = runSteps(new StepDetector(), plateau).length;
+    check('a held movement with ripple is not counted', c <= 1, `detected ${c}`);
+  }
 }
 
 {
