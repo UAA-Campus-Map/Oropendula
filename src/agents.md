@@ -415,6 +415,15 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   moment a walk is confirmed (so no real steps are lost); a gap past
   `maxIntervalMs` ends the walk. `push()` therefore returns an **array** of
   step timestamps (possibly several on confirmation), not a boolean.
+  **Lesson 3 (the "too sensitive holding still" bug)**: rhythm alone is not
+  enough - hand tremor, a foot tap on the phone or a shaky table can be
+  rhythmic yet far too weak to be gait. `StepDetector` therefore also enforces
+  an **absolute peak-intensity gate** (`minPeakMps2`, 0.8 m/s^2) on top of the
+  dynamic envelope threshold. Without it those light peaks registered as steps
+  and dead reckoning drifted while standing (which then looked like a jump on
+  the first real step after a pause). Real gait peaks clear 1.5-4 m/s^2.
+  Smoke covers light rhythmic jostling (0 steps) vs the same rhythm at step
+  intensity (counts).
 - **Heading** is trusted from a calibrated compass (the user's call), with gyro
   bridging through magnetic disturbances and a captured bias. Wall-point
   calibration: stand at a known anchor, point at a known wall, set the bias so
@@ -428,7 +437,36 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   the frame's offset from true north. (2) The magnetometer jitters several
   degrees per sample, so `HeadingTracker` low-passes it with a **time-based**
   blend (`1-exp(-dt/tau)`, tau 0.5 s, frame-rate independent) and the gyro only
-  bridges when the compass is stale (`gyroBridgeAfterMs`).
+  bridges when the compass is stale (`gyroBridgeAfterMs`). (3) The Heading panel
+  has a **compass-trim slider (±45°)** for the "compass points a bit off"
+  case: the trim is composed with the calibration bias
+  (`HeadingTracker.bias = base + trim`), applied live while dragging and
+  persisted as `pdr-heading-trim`. The calibration walk is authoritative - it
+  absorbs the trim into the base and recentres the slider - so the two can
+  never double-count.
+- **Hallway heading-drift correction** (`HeadingDriftCalibrator`, wired in
+  `index.html`'s `onStep`). The compass drifts indoors; a person walking a
+  narrow hallway walks parallel to the walls, so the floor plan can correct it.
+  Once the walker has gone **6 consecutive near-straight steps** (per-step
+  change ≤6°, net over the streak ≤15°) in a clearly elongated space, a small
+  proportional correction (`gain 0.4`, clamped to 3°/step, 3° deadband) is
+  added each step to `baseHeadingBias` -> `applyHeadingTrim()`, i.e. the SAME
+  bias the compass arrow, PDR and trim slider share (so one fix corrects all
+  three; the filter's own `headingBias` is left alone to avoid double-counting).
+  It keeps correcting until an **intentional turn** (a >25° step or >35° net
+  over 3 steps), then re-arms after another 6 straight steps. Corrections are
+  **session-only** - they are deliberately NOT written to `localStorage`, so a
+  reload returns to the walk-calibrated bias. A small on-map pill
+  (`#corridor-badge`) shows while it is active.
+  The axis comes from **`corridorAxis`** (locate.mjs), a runtime ray-cast from
+  the current PDR estimate over `navGraph.isWalkable`: it measures the full free
+  chord ALONG a candidate bearing vs the full chord ACROSS it and demands
+  **aspect ratio ≥ 9:1** (`maxM = 15 m` bounds the widest detectable hallway at
+  `2·maxM/9 ≈ 3.3 m`). The sum-of-opposite-rays geometry makes the gate honest:
+  open rooms/atria, wide lobbies, intersections (the cross-corridor blows up the
+  across-run) and L-corners (both chords long) all return `null`, so the heading
+  is only snapped where the axis is unambiguous. A coarse 24-direction sweep
+  finds the rough axis, a ±8° sweep at 1° refines it to ~1°; rays are memoised.
 - **GPS and PDR run simultaneously** — no indoor/outdoor mode flag. The arbiter
   picks the smaller uncertainty with hysteresis. Critical: indoor GPS accuracy
   is often optimistically small *and wrong*, so fixes landing in a wall (when
@@ -449,11 +487,14 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   with no floor at this level stays free. PDR drives the estimate there; GPS
   overrides the displayed source only with a **very good fix,
   `gpsOverrideAccuracyM = 3` m**. The cloud is re-anchored from an outdoor fix
-  when it is the **first fix of an outdoor episode** (up to
-  `gpsSeedAccuracyM = 20` m - the app may have snapped the cloud into a
-  building) or whenever the fix is **more accurate than the PDR estimate**
-  (`fix.accuracy < pdrAccuracy()`); otherwise it just dead-reckons. Indoor
-  fixes never re-seed. Free-roam toggles per fix, so an exit frees as soon as
+  when it is the **first outdoor fix of the session** (once per
+  locator/arbiter, up to `gpsSeedAccuracyM = 20` m - the app may have snapped
+  the cloud into a building) or whenever the fix is **more accurate than the
+  PDR estimate** (`fix.accuracy < pdrAccuracy()`); otherwise it just
+  dead-reckons. Re-anchoring is deliberately NOT tied to every indoor<->
+  outdoor transition: a fix flickering at a doorway used to re-seed the cloud
+  each time it read outdoors and teleported the estimate (the "jumps 20 ft"
+  report). Indoor fixes never re-seed. Free-roam toggles per fix, so an exit frees as soon as
   a fix shows the doorway/outdoors.
 - **Live re-route**: with a route on screen, every position update re-routes
   from the current estimate to the same destination (`rerouteFromEstimate`,
@@ -829,4 +870,9 @@ is not registered in `buildings-config.json`, so it is not searchable.
   console (`pathBtn.click()`); the mode's code is unchanged.
 - If the OSM fetch fails the router still builds and works with straight-line
   outdoor legs — that path must keep working.
+- The overlay columns (`#controls`, `.top-controls`) are **`pointer-events:
+  none` with only their children set to `auto`**: the flex box's empty gaps
+  (between buttons, and beside the shorter ones under the wide search row) used
+  to swallow taps and pinch/rotate gestures, so map gestures did not work in
+  those areas. Any new overlay must follow the same pattern.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.

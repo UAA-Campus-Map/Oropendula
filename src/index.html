@@ -58,6 +58,37 @@
       align-items: flex-end;
       gap: 0.75rem;
       z-index: 10;
+      /* The column is shrink-to-fit, but its own box still spans the gaps
+         between buttons and the space beside the shorter ones - taps and
+         zoom/rotate gestures landing there used to be swallowed instead of
+         reaching the map. Only the actual controls receive pointer events. */
+      pointer-events: none;
+    }
+
+    #controls > * { pointer-events: auto; }
+    /* ...and the floor/search row has its own gaps - same treatment. */
+    #controls > .top-controls { pointer-events: none; }
+    .top-controls > * { pointer-events: auto; }
+
+    /* Non-interactive cue shown while the compass is being snapped to the
+       hallway axis (see HeadingDriftCalibrator). pointer-events:none so it
+       never blocks map gestures. */
+    #corridor-badge {
+      position: absolute;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      pointer-events: none;
+      background: rgba(30, 120, 200, 0.92);
+      color: #ffffff;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 0.3rem 0.75rem;
+      border-radius: 999px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      white-space: nowrap;
     }
 
     .control-btn {
@@ -368,7 +399,9 @@
 
 <body>
   <div id="map"></div>
-  
+
+  <div id="corridor-badge" hidden>Heading locked to hallway</div>
+
   <div id="controls">
     <div class="top-controls">
       <div class="floor-control" aria-label="Displayed floor">
@@ -461,6 +494,13 @@
     <div class="info-section">
       <div class="info-label">Heading</div>
       <div id="compass" class="info-value">0°</div>
+      <div class="cal-row">
+        <span>Compass trim</span>
+        <span id="heading-trim-val" class="cal-val">0°</span>
+      </div>
+      <input type="range" id="heading-trim" min="-45" max="45" step="1" value="0"
+             style="width:100%"
+             title="Drag to correct the compass heading (adds this offset to every reading)" />
     </div>
 
     <button id="cal-hide" class="cal-btn cal-primary" style="width:100%">Done &middot; Hide</button>
@@ -476,7 +516,7 @@
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
-    import { ParticleFilter } from './locate.mjs';
+    import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
@@ -557,6 +597,9 @@
     const calStartLabel = document.getElementById('cal-start-label');
     const calEndLabel = document.getElementById('cal-end-label');
     const calStateIcon = document.getElementById('cal-state-icon');
+    const headingTrimEl = document.getElementById('heading-trim');
+    const headingTrimValEl = document.getElementById('heading-trim-val');
+    const corridorBadgeEl = document.getElementById('corridor-badge');
     const autocalStatusEl = document.getElementById('autocal-status');
     const autocalGpsEl = document.getElementById('autocal-gps');
     const autocalStretchEl = document.getElementById('autocal-stretch');
@@ -650,6 +693,8 @@
       ensureLocator(ll, floorOfView());
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
       locator.arbiter.anchor(ll, { spreadM: 3 });
+      headingDriftCal.reset();
+      setCorridorBadge(false);
       renderEstimate(locator.arbiter.estimate(performance.now()));
       statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
     }
@@ -661,6 +706,15 @@
     calRunEndBtn.addEventListener('click', endCalibrationWalk);
     calApplyBtn.addEventListener('click', applyCalibration);
     calHideBtn.addEventListener('click', () => sidebar.classList.remove('visible'));
+    // Compass trim: drag to correct the heading live; persist on release.
+    headingTrimEl.addEventListener('input', () => {
+      headingTrimDeg = Math.max(-45, Math.min(45, parseInt(headingTrimEl.value, 10) || 0));
+      headingTrimValEl.textContent = `${headingTrimDeg > 0 ? '+' : ''}${headingTrimDeg}°`;
+      applyHeadingTrim();
+    });
+    headingTrimEl.addEventListener('change', () => {
+      try { localStorage.setItem('pdr-heading-trim', String(headingTrimDeg)); } catch (e) { /* ignore */ }
+    });
 
     function beginPlacement(which) {
       calibration.placing = which;
@@ -730,8 +784,13 @@
           const meanHeading = Math.atan2(calibration.headingSin, calibration.headingCos);
           const trueBearing = wrapAngle(turf.bearing(calibration.startLL, calibration.endLL) * Math.PI / 180);
           const delta = wrapAngle(trueBearing - meanHeading);
-          calibration.headingBias = wrapAngle(motion.heading.bias + delta);
-          motion.heading.calibrate(calibration.headingBias);
+          // The walk is authoritative: it absorbs any manual trim (the slider
+          // recentres) and becomes the new base bias.
+          calibration.headingBias = wrapAngle(baseHeadingBias + headingTrimDeg * Math.PI / 180 + delta);
+          baseHeadingBias = calibration.headingBias;
+          headingTrimDeg = 0;
+          syncHeadingTrim();
+          applyHeadingTrim();
           calHeadingEl.textContent = `${(calibration.headingBias * 180 / Math.PI).toFixed(1)}°`;
         }
 
@@ -760,6 +819,48 @@
         (calibration.headingBias != null ? ', heading calibrated' : '');
       calApplyBtn.disabled = true;
       updateAutocalUI();
+    }
+
+    // --- manual compass trim ------------------------------------------------
+    /** Paint the slider + its label from `headingTrimDeg`. */
+    function syncHeadingTrim() {
+      headingTrimEl.value = String(headingTrimDeg);
+      headingTrimValEl.textContent = `${headingTrimDeg > 0 ? '+' : ''}${headingTrimDeg}°`;
+    }
+
+    /** Apply base calibration bias + manual trim to the live heading tracker. */
+    function applyHeadingTrim() {
+      if (motion) {
+        motion.heading.calibrate(wrapAngle(baseHeadingBias + headingTrimDeg * Math.PI / 180));
+      }
+    }
+
+    // --- hallway compass-drift correction -----------------------------------
+    function setCorridorBadge(on) {
+      if (corridorBadgeEl) corridorBadgeEl.hidden = !on;
+    }
+
+    /**
+     * One step's worth of hallway heading correction. Only indoors on PDR: the
+     * floor plan provides the corridor axis, the walker provides the direction.
+     * `wantsAxis` gates the ray-cast so it is only paid while arming/active.
+     */
+    function applyCorridorHeading(est, headingRad) {
+      if (!locator || !est || est.source !== 'pdr' || locator.filter.freeRoam
+          || calibration.active) {
+        headingDriftCal.reset();
+        setCorridorBadge(false);
+        return;
+      }
+      const axis = headingDriftCal.wantsAxis
+        ? corridorAxis(locator.floor.navGraph.isWalkable, [est.lon, est.lat], CORRIDOR_OPTS)
+        : null;
+      const r = headingDriftCal.update(headingRad, axis);
+      if (r.correctionRad) {
+        baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
+        applyHeadingTrim();
+      }
+      setCorridorBadge(r.active);
     }
 
     // --- GPS auto-calibration state, indicator and panel --------------------
@@ -1463,6 +1564,18 @@
     let manualCalApplied = false;     // a known-distance calibration was applied
     let autoCalBaseApplied = null;    // last base the auto-calibrator wrote
     let storedAutoCal = null;         // last certified auto-calibration (persisted)
+    // Manual compass trim (degrees, -45..45) the user drags to correct the
+    // heading; composed with the walk-calibration bias (heading bias = base +
+    // trim) so the slider never has to know about the relative-frame offset.
+    let headingTrimDeg = 0;
+    let baseHeadingBias = 0;
+    // Hallway compass-drift correction: while the walker goes straight down a
+    // clearly elongated (>9:1) corridor, nudge the heading bias toward the
+    // corridor axis; stop on an intentional turn. The correction is
+    // SESSION-ONLY - it deliberately does NOT touch localStorage, so a reload
+    // returns to the walk-calibrated bias.
+    const headingDriftCal = new HeadingDriftCalibrator();
+    const CORRIDOR_OPTS = { aspectRatio: 9, maxM: 15 };
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -1473,6 +1586,8 @@
       if (Number.isFinite(savedBias)) savedHeadingBias = savedBias;
       const savedMode = localStorage.getItem('pdr-heading-mode');
       if (savedMode === 'relative') savedHeadingMode = 'relative';
+      const savedTrim = parseFloat(localStorage.getItem('pdr-heading-trim'));
+      if (Number.isFinite(savedTrim)) headingTrimDeg = Math.max(-45, Math.min(45, savedTrim));
       storedAutoCal = JSON.parse(localStorage.getItem('pdr-step-auto') || 'null');
       if (!(storedAutoCal && storedAutoCal.confidencePct >= 90)) storedAutoCal = null;
       manualCalApplied = localStorage.getItem('pdr-step-manual') === '1'
@@ -1480,6 +1595,10 @@
     } catch (e) { /* ignore */ }
     // Paint the button dot + panel from the stored calibration (if any).
     updateAutocalUI();
+    // Paint the restored compass trim (the bias itself is applied in
+    // startMotion, once the sensor tracker exists).
+    headingTrimEl.value = String(headingTrimDeg);
+    syncHeadingTrim();
     let motion = null;
     let locator = null;    // { building, floor, filter, arbiter }
     let currentEstimate = null;
@@ -1551,6 +1670,8 @@
         || (centroid && g.nearestWalkable(centroid))
         || [lon, lat];
       filter.seed(seed, { spreadM: 4 });
+      headingDriftCal.reset();
+      setCorridorBadge(false);
     }
 
     // --- live re-routing ----------------------------------------------------
@@ -1769,12 +1890,15 @@
           gpsCal.addStep({ t });
           updateAutocalUIThrottled(t);
           if (!locator || !motion.heading.hasHeading) return;
-          locator.arbiter.setHeading(motion.heading.heading);
+          const heading = motion.heading.heading;
+          locator.arbiter.setHeading(heading);
           locator.arbiter.step({
             stepLengthM: stepModel.lengthFor(cadenceHz),
-            headingRad: motion.heading.heading,
+            headingRad: heading,
           });
-          renderEstimate(locator.arbiter.estimate(t));
+          const est = locator.arbiter.estimate(t);
+          applyCorridorHeading(est, heading);
+          renderEstimate(est);
         },
         onHeading: ({ heading }) => {
           // During the calibration walk, accumulate the heading so we can
@@ -1791,11 +1915,13 @@
           if (type === 'permission-denied') statusText.textContent = 'Motion sensor access denied';
         },
       });
-      // Restore a heading calibration done earlier (relative frame + offset).
+      // Restore the heading calibration (relative frame + offset) and the
+      // manual compass trim, composed as one bias (base + trim).
       if (savedHeadingMode === 'relative') {
         motion.setHeadingMode('relative');
-        if (savedHeadingBias != null) motion.heading.calibrate(savedHeadingBias);
+        if (savedHeadingBias != null) baseHeadingBias = savedHeadingBias;
       }
+      applyHeadingTrim();
       motion.start();
     }
 

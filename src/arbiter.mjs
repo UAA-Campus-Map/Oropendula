@@ -61,7 +61,7 @@ export class PositionArbiter {
       gpsStalenessS, gpsMaxAccuracyM, gpsSeedAccuracyM, gpsOverrideAccuracyM, gpsHoldS,
       hysteresisS, pdrBaseAccM, pdrDriftPerM, buildingZoneM,
     });
-    this._outdoor = false;
+    this._seededOutdoors = false;
     this.gpsFix = null;
     this.heldGps = null;         // last good fix, held through a source switch
     this.metresSinceCorrection = 0;
@@ -93,23 +93,25 @@ export class PositionArbiter {
     // free-roam on every believable outdoor fix - constrained to outside every
     // building that has a plan on this floor, so PDR cannot cut through one.
     this.filter.setFreeRoam?.(outdoor, this.isOutsideBuildings);
-    const justWentOutdoor = outdoor && !this._outdoor;
-    this._outdoor = outdoor;
-    // Outdoors the cloud is re-anchored from a fix when it is the first of an
-    // outdoor episode (the app may have snapped the cloud into a building,
-    // up to gpsSeedAccuracyM) or whenever the fix is more accurate than the
-    // PDR estimate itself. A very good fix (gpsOverrideAccuracyM) also wins
-    // the displayed source via estimate().
+    // Outdoors the cloud is re-anchored from a fix when it has never been
+    // seeded outdoors (the app may have snapped it into a building; up to
+    // gpsSeedAccuracyM) or whenever the fix is more accurate than the PDR
+    // estimate itself. Only ONCE per session for the first case: re-anchoring
+    // on every indoor<->outdoor flicker near a doorway teleported the estimate
+    // (the reported "jumps 20 ft" bug).
     if (outdoor) {
-      const limit = justWentOutdoor ? this.gpsSeedAccuracyM : this.gpsOverrideAccuracyM;
+      const firstOutdoor = !this._seededOutdoors;
       const betterThanPdr = fix.accuracy < this.pdrAccuracy();
-      if (!this.filter.initialized || fix.accuracy <= limit || betterThanPdr) {
+      if (!this.filter.initialized ||
+          (firstOutdoor && fix.accuracy <= this.gpsSeedAccuracyM) ||
+          betterThanPdr) {
         this.filter.seed([fix.lon, fix.lat], {
           spreadM: Math.max(1.0, Math.min(fix.accuracy, 8)),
           heading: this.heading,
           headingSpreadDeg: this.heading == null ? 180 : 25,
         });
         this.metresSinceCorrection = 0;
+        this._seededOutdoors = true;
       }
     }
   }

@@ -14,7 +14,7 @@ import { convexHull, hullSamples, bestFitRigid } from './align.mjs';
 import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
 import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
-import { ParticleFilter, corridorAxis } from './locate.mjs';
+import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
 import { PositionArbiter } from './arbiter.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
@@ -301,6 +301,66 @@ console.log('\nPDR particle filter:');
     ax == null ? 'null' : `${(ax * 180 / Math.PI).toFixed(0)} deg`);
   check('corridorAxis returns null in an open room', corridorAxis(() => true, [lon0, lat0]) === null);
 
+  // The 9:1 aspect gate rejects a merely squarish space.
+  const squat = (p) => Math.abs((p[0] - lon0) * mpd.lon) < 2 && Math.abs((p[1] - lat0) * mpd.lat) < 1;
+  check('corridorAxis rejects a 2:1 space', corridorAxis(squat, [lon0, lat0]) === null);
+
+  // A 1.5 m wide corridor whose axis is 20 degrees off north resolves to it.
+  const rot = 20 * Math.PI / 180;
+  const rotWalkable = (p) => {
+    const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+    return Math.abs(e * Math.cos(rot) - n * Math.sin(rot)) < 0.75;
+  };
+  const axr = corridorAxis(rotWalkable, [lon0, lat0]);
+  check('corridorAxis resolves a rotated corridor',
+    axr != null && Math.abs(wrapAngle(axr - rot)) < 3 * Math.PI / 180,
+    axr == null ? 'null' : `${(axr * 180 / Math.PI).toFixed(1)} deg`);
+
+  // Hallway heading-drift corrector: arm after 6 straight steps, pull a biased
+  // heading back to the corridor axis, and stop on an intentional turn.
+  {
+    const DEG = Math.PI / 180;
+    const axis = corridorAxis(corridorWalkable, [lon0, lat0]);
+    let bias = 12 * DEG;
+    const cal = new HeadingDriftCalibrator();
+    let firstActive = -1;
+    for (let k = 0; k < 20; k++) {
+      const heading = wrapAngle(Math.PI / 2 + bias);
+      const r = cal.update(heading, axis);
+      if (r.active && firstActive < 0) firstActive = k;
+      bias = wrapAngle(bias + r.correctionRad);
+    }
+    check('hallway correction arms only after 6 straight steps', firstActive === 5, `first active @${firstActive}`);
+    check('hallway correction converges the heading bias', Math.abs(bias) < 3 * DEG,
+      `${(bias / DEG).toFixed(1)} deg left`);
+
+    const noAxis = new HeadingDriftCalibrator();
+    let activeNoAxis = false;
+    for (let k = 0; k < 12; k++) {
+      if (noAxis.update(wrapAngle(Math.PI / 2 + 10 * DEG), null).active) activeNoAxis = true;
+    }
+    check('no hallway correction without a corridor axis', !activeNoAxis);
+
+    const turnCal = new HeadingDriftCalibrator();
+    for (let k = 0; k < 8; k++) turnCal.update(Math.PI / 2, axis);
+    const turned = turnCal.update(Math.PI, axis);            // 90 deg step
+    check('an intentional turn disarms hallway correction',
+      !turned.active && turned.reason === 'turn', turned.reason);
+    let rearmed = false;
+    for (let k = 0; k < 7; k++) { if (turnCal.update(Math.PI, 0).active) rearmed = true; }
+    check('hallway correction re-arms after a turn', rearmed);
+
+    const mismatch = new HeadingDriftCalibrator();
+    for (let k = 0; k < 6; k++) mismatch.update(0, 0);
+    const bad = mismatch.update(0, 80 * DEG);
+    check('a large heading/axis mismatch is distrusted',
+      !bad.active && bad.reason === 'mismatch', bad.reason);
+
+    const curve = new HeadingDriftCalibrator();
+    for (let k = 0; k < 8; k++) curve.update(k * 4 * DEG, 0);
+    check('a slow curve resets the straight streak', curve.streak < 6, `streak ${curve.streak}`);
+  }
+
   // Free-space kinematics: 10 x 0.7 m north should integrate to ~7 m north.
   const free = new ParticleFilter({ isWalkable: () => true, count: 400, headingNoiseDeg: 5, distanceNoise: 0.05, lateralNoiseM: 0.02 });
   free.seed([lon0, lat0], { spreadM: 0.5, heading: 0, headingSpreadDeg: 5 });
@@ -483,6 +543,22 @@ console.log('\nGPS/PDR arbiter:');
   rsArb.gps({ lon: glon, lat: glat, accuracy: rsPdrAcc - 1, t: 2000 });
   check('an outdoor fix better than the PDR estimate re-seeds',
     rsArb.metresSinceCorrection === 0, `PDR ±${rsPdrAcc.toFixed(1)} m`);
+
+  // A fix flickering indoor<->outdoor near a doorway must not re-anchor the
+  // cloud every time it reads outdoors (the "jumps 20 ft" report).
+  const flArb = new PositionArbiter({
+    filter: new ParticleFilter({ isWalkable, nearestWalkable, count: 100 }),
+    isWalkable, nearestWalkable,
+  });
+  flArb.gps({ lon: glon, lat: glat, accuracy: 4, t: 0 });      // first outdoor fix: seeds
+  flArb.anchor(toLL(0, 0), { spreadM: 1 });
+  for (let k = 0; k < 5; k++) flArb.step({ stepLengthM: 0.7, headingRad: 0 });
+  const driftFlicker = flArb.metresSinceCorrection;
+  flArb.gps({ lon: ilon, lat: ilat, accuracy: 4, t: 1000 });   // indoor flicker
+  flArb.gps({ lon: glon, lat: glat, accuracy: 12, t: 2000 });  // outdoors again (mediocre)
+  check('an indoor/outdoor fix flicker does not re-anchor the cloud',
+    flArb.metresSinceCorrection === driftFlicker,
+    `${driftFlicker} -> ${flArb.metresSinceCorrection} m`);
 
   // A first plausible fix (even a coarse one) must seed the filter so PDR is
   // live - otherwise steps are counted but never move anything (the index.html
@@ -1395,6 +1471,26 @@ function runSteps(det, samples) {
   }
   const jit = runSteps(new StepDetector(), jitter).length;
   check('non-rhythmic jitter does not count as steps', jit === 0, `detected ${jit}`);
+
+  // Holding still with light RHYTHMIC jostling (hand tremor, a foot tap on the
+  // phone, a shaky table): peaks below the absolute intensity gate must not
+  // register even though the spacing is walk-like. This is the "too sensitive
+  // when holding still" bug - spurious steps drift PDR while standing.
+  const jostle = (amp) => {
+    const out = [];
+    for (let i = 0, tt = 0; i < 400; i++, tt += 20) {
+      const ph = (i % 25) / 25;
+      out.push({ t: tt, ax: 0, ay: 0,
+        az: 9.80665 + amp * Math.exp(-((ph - 0.5) ** 2) / 0.02) });
+    }
+    return out;
+  };
+  const lightJostle = runSteps(new StepDetector(), jostle(0.5)).length;
+  check('light rhythmic jostling does not count as steps', lightJostle === 0,
+    `detected ${lightJostle}`);
+  const strongWalk = runSteps(new StepDetector(), jostle(2.5)).length;
+  check('...but the same rhythm at step intensity still counts', strongWalk > 5,
+    `detected ${strongWalk}`);
 }
 
 {

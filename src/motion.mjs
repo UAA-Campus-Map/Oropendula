@@ -76,7 +76,8 @@ export class StepDetector {
     maxIntervalMs = 2000,
     baselineAlpha = 0.02,  // slow baseline low-pass (~0.16 Hz at 50 Hz)
     smoothAlpha = 0.4,     // fast smoothing of the waveform
-    minThreshold = 0.35,   // noise floor, m/s^2
+    minThreshold = 0.35,   // dynamic-threshold noise floor, m/s^2
+    minPeakMps2 = 0.8,     // ABSOLUTE minimum peak intensity to count a step
     peakFraction = 0.5,    // a peak must reach this fraction of the envelope
     envelopeDecay = 0.99,  // per-sample decay of the peak envelope
     qualifySteps = 3,      // rhythmic peaks needed before counting a walk
@@ -85,7 +86,7 @@ export class StepDetector {
   } = {}) {
     Object.assign(this, {
       minIntervalMs, maxIntervalMs, baselineAlpha, smoothAlpha,
-      minThreshold, peakFraction, envelopeDecay, qualifySteps, rhythmLo, rhythmHi,
+      minThreshold, minPeakMps2, peakFraction, envelopeDecay, qualifySteps, rhythmLo, rhythmHi,
     });
     this.reset();
   }
@@ -118,10 +119,15 @@ export class StepDetector {
     this.smoothed += this.smoothAlpha * (wave - this.smoothed);
 
     this.envelope *= this.envelopeDecay;
-    const threshold = Math.max(this.minThreshold, this.peakFraction * this.envelope);
+    // A step must clear the dynamic envelope threshold AND an absolute intensity
+    // floor: holding still (small jostles, hand tremor, a table bump) produces
+    // peaks that used to slip through the low noise floor and register as
+    // steps, drifting PDR while standing. Real gait peaks clear 1.5-4 m/s^2.
+    const threshold = Math.max(this.minThreshold, this.minPeakMps2,
+      this.peakFraction * this.envelope);
 
     // `prev` is a local maximum if the waveform has started falling and it
-    // cleared the dynamic threshold.
+    // cleared the thresholds.
     let emits = [];
     if (this.smoothed < this.prev && this.prev >= this.prev2 && this.prev > threshold) {
       this.envelope = Math.max(this.envelope, this.prev);

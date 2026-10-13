@@ -17,9 +17,10 @@
  */
 
 import { metresPerDegree } from './geo.mjs';
-import { wrapAngle } from './motion.mjs';
+import { wrapAngle, shortestDelta, clamp } from './motion.mjs';
 
 const DEFAULT_COUNT = 200;
+const DEG = Math.PI / 180;
 
 function gaussian() {
   // Box-Muller; enough for particle noise.
@@ -37,41 +38,205 @@ function offsetLL(lon, lat, eastM, northM) {
 
 /**
  * Estimate the local corridor axis at a point by ray-casting the walkable
- * area with `isWalkable`. Returns the bearing (radians, cw-from-north) of the
- * corridor if the space is clearly elongated, else null (an open room has no
- * meaningful axis and must not snap the heading).
+ * area with `isWalkable`.
+ *
+ * A corridor is a *narrow* free space, so we require a large aspect ratio: the
+ * free run ALONG the axis must be at least `aspectRatio` times the free run
+ * ACROSS it. We measure both as the full chord through the point (the two
+ * opposite rays summed), which makes the ratio honest - a corridor narrower
+ * than `2*maxM/aspectRatio` is the widest space that can ever qualify.
+ *
+ * This "very elongated" gate is what keeps the caller from snapping the heading
+ * in an open room, a wide lobby, at an intersection (the cross-corridor blows
+ * up the across-run) or at an L-corner (both chords are long). An elongated
+ * space that passes is unambiguous: its axis is parallel to the walls.
+ *
+ * Runtime cost is bounded: a coarse sweep finds the rough axis, then a fine
+ * sweep refines it to ~1 deg. Rays are memoised, so opposite/perpendicular
+ * directions - which the coarse sweep reuses - are cast once.
+ *
+ * Returns the bearing (radians, cw-from-north, in [0, PI)) of the corridor if
+ * one is found, else null.
  */
 export function corridorAxis(isWalkable, [lon, lat], {
-  directions = 16,
   stepM = 0.25,
-  maxM = 6.0,
-  minClearM = 1.5,
-  elongation = 1.8,
+  maxM = 15.0,
+  aspectRatio = 9.0,
+  minLengthM = 3.0,
+  minWidthM = 0.4,
+  coarseSteps = 24,
+  refineStepDeg = 1,
+  refineSpanDeg = 8,
 } = {}) {
-  const n = directions;
-  const clear = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const bearing = (i / n) * 2 * Math.PI;
+  const cache = new Map();
+  // Distance to the first blocked cell along `bearing`, capped at maxM.
+  const cast = (bearing) => {
+    const key = bearing.toFixed(6);
+    let len = cache.get(key);
+    if (len !== undefined) return len;
     const east = Math.sin(bearing), north = Math.cos(bearing);
-    let len = 0;
+    len = 0;
     for (let d = stepM; d <= maxM; d += stepM) {
-      const p = offsetLL(lon, lat, east * d, north * d);
-      if (!isWalkable(p)) break;
+      if (!isWalkable(offsetLL(lon, lat, east * d, north * d))) break;
       len = d;
     }
-    clear[i] = len;
-  }
-  const half = n / 2;
+    cache.set(key, len);
+    return len;
+  };
+  // Full free chord along `bearing` and the full chord across it.
+  const measure = (bearing) => ({
+    length: cast(bearing) + cast(wrapAngle(bearing + Math.PI)),
+    width: cast(wrapAngle(bearing + Math.PI / 2)) + cast(wrapAngle(bearing - Math.PI / 2)),
+  });
+  const passes = (m) => m.length >= minLengthM && m.width >= minWidthM &&
+    m.length / m.width >= aspectRatio;
+
   let best = null;
-  for (let i = 0; i < half; i++) {
-    const along = Math.min(clear[i], clear[i + half]);   // the two opposite rays
-    const perp = Math.max(clear[(i + half / 2) % n], clear[(i + (3 * half) / 2) % n]);
-    if (along >= minClearM && along >= elongation * Math.max(perp, 0.01)) {
-      const score = along;
-      if (!best || score > best.score) best = { score, axis: (i / n) * 2 * Math.PI };
-    }
+  for (let i = 0; i < coarseSteps; i++) {
+    const bearing = (i / coarseSteps) * 2 * Math.PI;
+    const m = measure(bearing);
+    if (passes(m) && (!best || m.length > best.length)) best = { bearing, length: m.length };
   }
-  return best ? best.axis : null;
+  if (!best) return null;
+
+  // Refine around the coarse winner at ~1 deg, keeping the longest qualifying
+  // chord (the ratio is flat near the true axis, so length picks the centre).
+  let axis = best.bearing, axisLen = best.length;
+  for (let k = -refineSpanDeg; k <= refineSpanDeg; k += refineStepDeg) {
+    if (k === 0) continue;
+    const bearing = wrapAngle(best.bearing + k * DEG);
+    const m = measure(bearing);
+    if (passes(m) && m.length > axisLen) { axisLen = m.length; axis = bearing; }
+  }
+  return wrapAngle(axis);
+}
+
+/**
+ * Walks-straight-down-a-hallway compass-drift corrector.
+ *
+ * The floor plan knows the hallway axis (from `corridorAxis`); a walking human
+ * knows which way they are going. When the two say different things, the
+ * compass has drifted. This class watches the heading stream and, once the
+ * walker has gone 6 consecutive near-straight steps in a clearly elongated
+ * (corridor) space, emits a small proportional correction toward the axis each
+ * step - and keeps emitting until an *intentional* turn (a sharp step, or a
+ * quick net rotation) ends the run.
+ *
+ * It is pure and frame-agnostic: the caller feeds the smoothed heading and the
+ * axis (or null) and applies the returned `correctionRad` to whatever bias it
+ * owns. `wantsAxis` lets the caller ray-cast only once arming is imminent.
+ *
+ * @param {number} [straightSteps=6]   consecutive low-turn steps to arm
+ * @param {number} [straightTurnDeg=6] per-step change still counted as straight
+ * @param {number} [netTurnDeg=15]     net change over the streak that breaks it
+ * @param {number} [turnStepDeg=25]    one-step change = intentional turn
+ * @param {number} [turnWindowSteps=3] window for the net-turn test
+ * @param {number} [turnWindowDeg=35]  net change over that window = turn
+ * @param {number} [deadbandDeg=3]     ignore errors smaller than this
+ * @param {number} [maxErrDeg=50]      a larger mismatch = distrust the axis
+ * @param {number} [gain=0.4]          fraction of the error corrected per step
+ * @param {number} [maxCorrDegPerStep=3] per-step correction clamp
+ */
+export class HeadingDriftCalibrator {
+  constructor({
+    straightSteps = 6,
+    straightTurnDeg = 6,
+    netTurnDeg = 15,
+    turnStepDeg = 25,
+    turnWindowSteps = 3,
+    turnWindowDeg = 35,
+    deadbandDeg = 3,
+    maxErrDeg = 50,
+    gain = 0.4,
+    maxCorrDegPerStep = 3,
+  } = {}) {
+    Object.assign(this, {
+      straightSteps,
+      straightTurn: straightTurnDeg * DEG,
+      netTurn: netTurnDeg * DEG,
+      turnStep: turnStepDeg * DEG,
+      turnWindowSteps,
+      turnWindow: turnWindowDeg * DEG,
+      deadband: deadbandDeg * DEG,
+      maxErr: maxErrDeg * DEG,
+      gain,
+      maxCorr: maxCorrDegPerStep * DEG,
+    });
+    this.reset();
+  }
+
+  reset() {
+    this.prevHeading = null;
+    this.streak = 0;
+    this.streakHeading = null;   // heading at the start of the current streak
+    this.window = [];            // recent headings (intentional-turn test)
+    this.active = false;
+  }
+
+  /** True once a corridor axis for the NEXT step is worth ray-casting. */
+  get wantsAxis() {
+    return this.streak >= this.straightSteps - 1;
+  }
+
+  /**
+   * @param {number} headingRad current smoothed heading
+   * @param {number|null} axisRad corridor axis from `corridorAxis`, or null
+   * @returns {{active:boolean, correctionRad:number, errRad:number|null,
+   *            streak:number, reason:string}}
+   */
+  update(headingRad, axisRad) {
+    const idle = (reason) => ({ active: false, correctionRad: 0, errRad: null,
+      streak: this.streak, reason });
+    if (headingRad == null || !isFinite(headingRad)) return idle('no-heading');
+
+    const delta = this.prevHeading == null ? 0 : shortestDelta(this.prevHeading, headingRad);
+    this.prevHeading = headingRad;
+
+    this.window.push(headingRad);
+    if (this.window.length > this.turnWindowSteps) this.window.shift();
+    const windowNet = this.window.length >= 2
+      ? Math.abs(shortestDelta(this.window[0], headingRad)) : 0;
+    if (Math.abs(delta) > this.turnStep || windowNet > this.turnWindow) {
+      const wasActive = this.active;
+      this._newStreak(headingRad);
+      this.active = false;
+      return idle(wasActive ? 'turn' : 'turn-early');
+    }
+
+    if (this.streakHeading == null) {
+      this._newStreak(headingRad);
+    } else {
+      const net = Math.abs(shortestDelta(this.streakHeading, headingRad));
+      if (Math.abs(delta) <= this.straightTurn && net <= this.netTurn) this.streak++;
+      else this._newStreak(headingRad);
+    }
+
+    // No corridor here (open room, wide lobby, intersection, corner): pause,
+    // but keep counting straightness so walking into a corridor arms quickly.
+    if (axisRad == null) { this.active = false; return idle('no-axis'); }
+    if (this.streak < this.straightSteps) { this.active = false; return idle('arming'); }
+
+    // The axis is undirected, so fold the error into (-90, 90]: never flip the
+    // walker around, only trim drift. `err` is (axis - heading); adding
+    // `gain*err` to the heading turns it toward the axis.
+    let err = shortestDelta(headingRad, axisRad);
+    if (err > Math.PI / 2) err -= Math.PI;
+    else if (err <= -Math.PI / 2) err += Math.PI;
+
+    if (Math.abs(err) > this.maxErr) { this.active = false; return idle('mismatch'); }
+
+    this.active = true;
+    const correctionRad = Math.abs(err) > this.deadband
+      ? clamp(this.gain * err, -this.maxCorr, this.maxCorr) : 0;
+    return { active: true, correctionRad, errRad: err, streak: this.streak,
+      reason: correctionRad ? 'correcting' : 'locked' };
+  }
+
+  _newStreak(headingRad) {
+    this.streak = 1;
+    this.streakHeading = headingRad;
+    this.window = [headingRad];
+  }
 }
 
 /**
