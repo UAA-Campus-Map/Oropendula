@@ -1389,6 +1389,23 @@
     // would depth-reject everything behind it and read as solid; splitting by
     // level lets each upper floor blend over the lower ones (true x-ray).
     let structureLevels = [];
+    /**
+     * The structure layer a 3D overlay (the route ribbon, the live avatar) must
+     * be inserted BEFORE. This build's fill-extrusion painter writes depth even
+     * in the translucent pass, so an overlay added on top is depth-rejected
+     * behind the first wall and vanishes. Drawn before the wall layers, the
+     * translucent walls blend over it instead. (The walls are built at boot but
+     * the route is added lazily on the first route, so without this the route
+     * lands on top and disappears.)
+     */
+    function structureOverlayAnchor() {
+      if (map.getLayer('campus-3d-top-outline')) return 'campus-3d-top-outline';
+      for (const level of structureLevels) {
+        const id = `campus-3d-level-${level}`;
+        if (map.getLayer(id)) return id;
+      }
+      return undefined;
+    }
     // Walls darker than the floor plate. The top displayed level (the
     // selected one) gets slightly darker walls instead of the old blue
     // highlight - it is the top of the stack, not a starring role. Floor
@@ -1538,60 +1555,65 @@
 
     /** (Re)draw the route: 3D raised ribbons + a filtered 2D line. */
     function renderRoute() {
-      // --- 3D: raised ribbons + vertical risers (whole route) ---
-      const features = [];
-      for (const s of lastRoute?.segments ?? []) {
-        const color = routeColorFor(s);
-        if (s.polyline) {
-          // A cross-floor skybridge is drawn at the higher of its two ends so
-          // it does not cut through the lower floor's stack.
-          const base = (s.tier === 'outdoor' ? 0
-            : s.tier === 'skybridge'
-              ? Math.max(floorBase(s.fromFloor ?? s.floor), floorBase(s.toFloor ?? s.floor))
-              : floorBase(s.floor)) + 0.1;
-          for (let i = 1; i < s.polyline.length; i++) {
-            const ring = segmentQuad(s.polyline[i - 1], s.polyline[i], ROUTE_WIDTH_M);
-            if (ring) features.push({
-              type: 'Feature', properties: { color, base, top: base + 0.5 },
-              geometry: { type: 'Polygon', coordinates: [ring] },
+      // --- 3D: raised ribbons + vertical risers (whole route). Built ONLY in
+      // 3D; in 2D the layer is hidden, so rebuilding every ribbon polygon and
+      // re-uploading the source on each floor change was pure main-thread waste
+      // (a long route is thousands of segmentQuad polygons).
+      if (is3D) {
+        const features = [];
+        for (const s of lastRoute?.segments ?? []) {
+          const color = routeColorFor(s);
+          if (s.polyline) {
+            // A cross-floor skybridge is drawn at the higher of its two ends so
+            // it does not cut through the lower floor's stack.
+            const base = (s.tier === 'outdoor' ? 0
+              : s.tier === 'skybridge'
+                ? Math.max(floorBase(s.fromFloor ?? s.floor), floorBase(s.toFloor ?? s.floor))
+                : floorBase(s.floor)) + 0.1;
+            for (let i = 1; i < s.polyline.length; i++) {
+              const ring = segmentQuad(s.polyline[i - 1], s.polyline[i], ROUTE_WIDTH_M);
+              if (ring) features.push({
+                type: 'Feature', properties: { color, base, top: base + 0.5 },
+                geometry: { type: 'Polygon', coordinates: [ring] },
+              });
+            }
+          } else if ((s.tier === 'elevator' || s.tier === 'stairs') && s.ll) {
+            const b0 = floorBase(s.fromFloor), b1 = floorBase(s.toFloor);
+            // Connector-coloured riser between the landings.
+            features.push({
+              type: 'Feature',
+              properties: { color, base: Math.min(b0, b1), top: Math.max(b0, b1) },
+              geometry: { type: 'Polygon', coordinates: [squareRing(s.ll, 0.6)] },
             });
           }
-        } else if ((s.tier === 'elevator' || s.tier === 'stairs') && s.ll) {
-          const b0 = floorBase(s.fromFloor), b1 = floorBase(s.toFloor);
-          // Connector-coloured riser between the landings.
+        }
+        // Destination pin: a raised block at the destination floor's base (0
+        // outdoors) so the marker sits on the correct floor, not the basemap.
+        if (destinationMarker) {
+          const {lng, lat} = destinationMarker.getLngLat();
+          const base = (destinationFloor ? floorBase(destinationFloor) : 0) + 0.1;
           features.push({
-            type: 'Feature',
-            properties: { color, base: Math.min(b0, b1), top: Math.max(b0, b1) },
-            geometry: { type: 'Polygon', coordinates: [squareRing(s.ll, 0.6)] },
+            type: 'Feature', properties: { color: '#3FB1CE', base, top: base + 1.6 },
+            geometry: { type: 'Polygon', coordinates: [squareRing([lng, lat], 0.5)] },
           });
         }
-      }
-      // Destination pin: a raised block at the destination floor's base (0
-      // outdoors) so the marker sits on the correct floor, not the basemap.
-      if (destinationMarker) {
-        const {lng, lat} = destinationMarker.getLngLat();
-        const base = (destinationFloor ? floorBase(destinationFloor) : 0) + 0.1;
-        features.push({
-          type: 'Feature', properties: { color: '#3FB1CE', base, top: base + 1.6 },
-          geometry: { type: 'Polygon', coordinates: [squareRing([lng, lat], 0.5)] },
-        });
-      }
-      const data = { type: 'FeatureCollection', features };
-      if (!map.getSource('campus-3d-route')) {
-        map.addSource('campus-3d-route', { type: 'geojson', data });
-        map.addLayer({
-          id: 'campus-3d-route',
-          type: 'fill-extrusion',
-          source: 'campus-3d-route',
-          paint: {
-            'fill-extrusion-color': ['get', 'color'],
-            'fill-extrusion-base': ['get', 'base'],
-            'fill-extrusion-height': ['get', 'top'],
-            'fill-extrusion-opacity': 1,
-          },
-        });
-      } else {
-        map.getSource('campus-3d-route').setData(data);
+        const data = { type: 'FeatureCollection', features };
+        if (!map.getSource('campus-3d-route')) {
+          map.addSource('campus-3d-route', { type: 'geojson', data });
+          map.addLayer({
+            id: 'campus-3d-route',
+            type: 'fill-extrusion',
+            source: 'campus-3d-route',
+            paint: {
+              'fill-extrusion-color': ['get', 'color'],
+              'fill-extrusion-base': ['get', 'base'],
+              'fill-extrusion-height': ['get', 'top'],
+              'fill-extrusion-opacity': 1,
+            },
+          }, structureOverlayAnchor());
+        } else {
+          map.getSource('campus-3d-route').setData(data);
+        }
       }
 
       // Connector dots: one per vertical leg of the CURRENT route, so stairs/
@@ -2470,6 +2492,9 @@
 
     /** Re-place the avatar after a floor change (no new estimate needed). */
     function refreshLive3D() {
+      // The avatar is a 3D-only extrusion; computing it (polygons + turf.circle)
+      // in 2D uploaded to a hidden layer - skip it entirely off-mode.
+      if (!is3D) return;
       if (currentEstimate && map.getSource('campus-3d-live')) {
         map.getSource('campus-3d-live').setData(live3DData(currentEstimate));
       }
@@ -3231,8 +3256,25 @@
       f._layersAdded = true;
     }
 
+    // Last applied floor/mode. A floor change only needs to touch the layers
+    // that actually change; re-setting layout/paint on every floor's layers
+    // (and rebuilding the hidden 3D avatar) on every tap was the delay.
+    let floorFilterState = { floorId: null, is3D: null, findPathMode: null };
     function applyFloorFilter(floorId) {
       if (!floorId) return;
+      // Create the selected floor's plan layers on first display (a no-op once
+      // added).
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          if (f.floorId === floorId && (!is3D || findPathMode)) ensureFloorLayers(f);
+        }
+      }
+      if (floorFilterState.floorId === floorId
+          && floorFilterState.is3D === is3D
+          && floorFilterState.findPathMode === findPathMode) {
+        return;   // nothing changed - do not churn the style
+      }
+      floorFilterState = { floorId, is3D, findPathMode };
       // 2D: show the selected floor's flat walls + labels + connector dots
       // (the original plan view). 3D: those are hidden; the extruded structure
       // carries the geometry, and room labels appear only while picking a
@@ -3240,11 +3282,8 @@
       // floor's layers are ever visible.
       for (const b of buildings) {
         for (const f of b.floors) {
-          const selected = f.floorId === floorId;
-          // Only add the plan when it will actually be drawn (2D, or 3D while
-          // picking a route for its labels).
-          if (selected && (!is3D || findPathMode)) ensureFloorLayers(f);
           if (!f._layersAdded) continue;
+          const selected = f.floorId === floorId;
           const wallsVisible = !is3D && selected;
           map.setLayoutProperty(f.wallLayerId, 'visibility', wallsVisible ? 'visible' : 'none');
           if (map.getLayer(f.roomLayerId)) {
