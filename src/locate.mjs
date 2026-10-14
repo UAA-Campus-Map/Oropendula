@@ -264,16 +264,21 @@ export class HeadingDriftCalibrator {
  */
 export class ParticleFilter {
   constructor({ isWalkable, nearestWalkable, count = DEFAULT_COUNT, headingNoiseDeg = 8,
-    distanceNoise = 0.12, lateralNoiseM = 0.05, roughenM = 0.05,
+    headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.20, roughenM = 0.20,
     segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
-    stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5 } = {}) {
+    stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3 } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
     this.count = count;
     this.headingNoise = headingNoiseDeg * Math.PI / 180;
+    // Uniform random heading jitter applied to every particle each step.
+    this.headingJitter = headingJitterDeg * Math.PI / 180;
     this.distanceNoise = distanceNoise;
     this.lateralNoiseM = lateralNoiseM;
     this.roughenM = roughenM;
+    // Where a wall-killed particle's replacement is spawned (spread around the
+    // cloud mean).
+    this.respawnSpreadM = respawnSpreadM;
     // Segment-collision sampling pitch. Matches navgraph's 0.1 m cell so a
     // ~0.3 m doorway channel is never falsely blocked.
     this.segmentStepM = segmentStepM;
@@ -358,17 +363,20 @@ export class ParticleFilter {
     this.lastHeading = headingRad;
 
     for (let i = 0; i < this.count; i++) {
-      const h = headingRad + this.headingBias +
-        gaussianClamped(this.headingNoise, Math.PI / 2);
+      // Uniform random heading jitter in +/- headingJitter (default +/-35 deg).
+      const h = headingRad + this.headingBias + (Math.random() * 2 - 1) * this.headingJitter;
       const d = Math.max(0.05, stepLengthM * (1 + gaussian() * this.distanceNoise));
-      const e = Math.sin(h) * d + gaussian() * this.lateralNoiseM;
-      const n = Math.cos(h) * d;
+      // Lateral jitter PERPENDICULAR to the travel direction (not on the east
+      // axis), so the cloud spreads across the corridor rather than along it.
+      const lat = gaussian() * this.lateralNoiseM;
+      const e = Math.sin(h) * d + Math.cos(h) * lat;
+      const n = Math.cos(h) * d - Math.sin(h) * lat;
       if (this.freeRoam) {
         const [plon, plat] = offsetLL(this.lon[i], this.lat[i], e, n);
         this.lon[i] = plon;
         this.lat[i] = plat;
       } else {
-        this._move(i, e, n, h, d);
+        this._move(i, e, n, d, h);
       }
       this.heading[i] = h;
     }
@@ -384,35 +392,49 @@ export class ParticleFilter {
    * reopen tunnelling. It is what lets a particle pressed against a wall slide
    * along it to the doorway and spread to the next room, instead of freezing.
    */
-  _move(i, eastM, northM, heading, dist) {
+  /**
+   * Move particle `i` by (eastM, northM). The step is swept for wall
+   * collisions (`_advance`); a particle whose step a wall blocks is a wrong
+   * guess, so it is destroyed immediately and replaced by a fresh random one
+   * (`_respawn`) - it never piles up against the wall.
+   */
+  _move(i, eastM, northM, dist, heading) {
     const fromLon = this.lon[i], fromLat = this.lat[i];
     const straight = this._advance(fromLon, fromLat,
       ...offsetLL(fromLon, fromLat, eastM, northM));
-    let moved = distM(fromLon, fromLat, straight[0], straight[1]);
-    if (moved < dist * 0.9) {
-      const slid = this._slide(fromLon, fromLat, heading, dist);
-      const slidMoved = distM(fromLon, fromLat, slid[0], slid[1]);
-      if (slidMoved > moved) { moved = slidMoved; [this.lon[i], this.lat[i]] = slid; }
-      else { [this.lon[i], this.lat[i]] = straight; }
-    } else {
-      [this.lon[i], this.lat[i]] = straight;
+    const moved = distM(fromLon, fromLat, straight[0], straight[1]);
+    if (moved < dist * 0.9 || !this.isWalkable([straight[0], straight[1]])) {
+      this._respawn(i, heading);
+      return;
     }
+    this.lon[i] = straight[0];
+    this.lat[i] = straight[1];
   }
 
-  /** Fan out around `heading` and return the walkable step that advances most. */
-  _slide(fromLon, fromLat, heading, dist) {
-    let best = [fromLon, fromLat], bestMoved = -1;
-    for (const deg of [15, -15, 30, -30, 45, -45, 60, -60, 75, -75]) {
-      const h = heading + deg * DEG;
-      const p = this._advance(fromLon, fromLat,
-        ...offsetLL(fromLon, fromLat, Math.sin(h) * dist, Math.cos(h) * dist));
-      const moved = distM(fromLon, fromLat, p[0], p[1]);
-      if (moved > bestMoved) {
-        best = p; bestMoved = moved;
-        if (moved >= dist * 0.9) return best;   // least deviation that gets through
-      }
+  /**
+   * Replace particle `i` with a fresh one. Its POSITION is inherited from a
+   * random SURVIVING particle (plus a small jitter) - never a fresh random
+   * point, which could sit in another room behind a wall the walker could not
+   * have reached. Its heading is the step heading (measured +/- jitter).
+   */
+  _respawn(i, heading) {
+    const src = this._pickSurvivor();
+    const bx = src >= 0 ? this.lon[src] : this.lon[i];
+    const by = src >= 0 ? this.lat[src] : this.lat[i];
+    const [plon, plat] = offsetLL(bx, by,
+      gaussian() * this.respawnSpreadM, gaussian() * this.respawnSpreadM);
+    if (this.freeRoam || this.isWalkable([plon, plat])) { this.lon[i] = plon; this.lat[i] = plat; }
+    else { this.lon[i] = bx; this.lat[i] = by; }
+    this.heading[i] = heading;
+  }
+
+  /** Index of a random particle that still carries weight, or -1. */
+  _pickSurvivor() {
+    for (let t = 0; t < 12; t++) {
+      const j = (Math.random() * this.count) | 0;
+      if (this.weight[j] > 0) return j;
     }
-    return best;
+    return -1;
   }
 
   /**

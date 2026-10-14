@@ -623,17 +623,26 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   (non-walkable = 0.02) and resampling:
   - **No tunnelling** (`predict` -> `_advance`): a step is swept and stops at
     the last walkable sample (`segmentStepM = 0.1 m`, matching navgraph's cell
-    so a ~0.3 m doorway channel is never falsely blocked). A particle that hits
-    a wall parks against it instead of landing in the next room.
-  - **Wall-slide through doorways** (`_move`/`_slide`): when the intended step
-    is wall-blocked, the particle fans out at increasing angles (±15..75°) and
-    takes the swept alternative that advances furthest. Every alternative is
-    swept too, so tunnelling stays closed, but a particle pressed against a wall
-    now slides along it to a doorway and spreads into the next room instead of
-    freezing. This is what makes doorways work when the cloud is offset from the
-    opening (a straight-line-only filter pins the particles at the jamb). The
-    failure case left is only a cloud so misplaced that no particle is within
-    sliding reach of any opening - the stall guard below covers that.
+    so a ~0.3 m doorway channel is never falsely blocked).
+  - **Blocked -> destroyed and re-spawned.** A particle whose step a wall blocks
+    is a wrong guess: it is immediately REMOVED and replaced by a fresh one
+    (`_respawn`). Its POSITION is inherited from a random **surviving** particle
+    (plus a small `respawnSpreadM = 0.3` jitter), NOT a fresh random point -
+    which could sit in another room behind a wall the walker could never have
+    reached. Its heading is the step heading. There is no sliding; the cloud
+    cannot pile up in a line against a wall. Doorways work for particles whose
+    step threads the opening.
+  - **Heading jitter is an OFFSET of the measured heading.** Every step a
+    particle draws `h = measuredHeading + headingBias + uniform(-jitter, +jitter)`
+    with `headingJitterDeg = 35` - a random +/-35 deg around the measured
+    heading, never a full-circle random heading.
+  - **Along-track and cross-track jitter.** Along-track step jitter
+    (`distanceNoise = 0.22`; heavy tails cover a mismatch between the model's
+    step length and the walker's - some particles always take the right
+    cumulative distance) and a **perpendicular** lateral jitter
+    (`lateralNoiseM = 0.20`, applied across the travel direction, not on the
+    east axis). Post-resample roughening (`roughenM = 0.20`) re-inflates the
+    cloud in every direction after resampling collapses it.
   - **Heading prior**: a known heading seeds within ±90° (`seed` clamps
     `headingSpreadDeg`; per-step noise is clamped at ±90°).
   - **Forward-hemisphere prior** (`_applyPriors`): particles behind the mean

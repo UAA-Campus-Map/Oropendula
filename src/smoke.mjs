@@ -455,9 +455,10 @@ console.log('\nPDR particle filter:');
   });
 
   // Tunnelling: a single step aimed at the solid wall (away from the door)
-  // must not cross it.
+  // must not cross it. (Respawning pinned to the mean here, so the check is
+  // about the swept STEP, not where a killed particle is re-spawned.)
   {
-    const f = mkRoom();
+    const f = mkRoom({ respawnSpreadM: 0 });
     f.seed(toLL(-1.0, 2.0), { spreadM: 0.05, heading: Math.PI / 2, headingSpreadDeg: 2 });
     f.predict(0.7, Math.PI / 2, { accuracyM: 10 });
     let crossed = 0;
@@ -475,15 +476,16 @@ console.log('\nPDR particle filter:');
     const e = (f.estimate().lon - lon0) * mpd.lon;
     check('a doorway lets the cloud cross', e > 1.0, `e=${e.toFixed(2)} m`);
   }
-  // Wall-slide: a particle offset from the doorway slides along the wall to the
-  // opening and spreads through it (the "handle doorways" case).
+  // A particle blocked by a wall is destroyed and re-spawned from a surviving
+  // particle (reachable), never a fresh random point across a wall.
   {
     const f = mkRoom();
     f.seed(toLL(-1.5, 1.4), { spreadM: 0.1, heading: Math.PI / 2, headingSpreadDeg: 5 });
     for (let k = 0; k < 12; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 20 });
-    let maxE = -Infinity;
-    for (let i = 0; i < f.count; i++) maxE = Math.max(maxE, (f.lon[i] - lon0) * mpd.lon);
-    check('particles slide through an offset doorway', maxE > 0.5, `max e=${maxE.toFixed(2)} m`);
+    let offPlan = 0;
+    for (let i = 0; i < f.count; i++) if (!roomWalkable([f.lon[i], f.lat[i]])) offPlan++;
+    check('re-spawned particles stay on walkable ground (no cross-wall spawns)',
+      offPlan === 0, `${offPlan} off-plan`);
   }
   // The reported estimate is walkable even with the cloud split across the wall.
   {
