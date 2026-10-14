@@ -1,0 +1,77 @@
+# HTML entry points
+
+The project has no build step and no npm dependencies: each page is a single
+HTML file with inline CSS, markup and a `<script type="module">` that imports the
+`src/*.mjs` modules. Serve the `src/` folder statically (e.g.
+`python3 -m http.server 8765`) and open a page.
+
+## `app.html` — the modern "Navigator" frontend
+
+A single-page, mobile-first reskin of the demo using the **same modules and
+logic** as `index.html`, with a redesigned presentation layer: glass surfaces,
+CSS custom properties, light/dark via `prefers-color-scheme`, safe-area insets, a
+top bar (search + floor stepper + status chip), right-edge icon buttons,
+bottom-left action pills, a branded splash, and subtle haptics.
+
+- **Route preview** is a top-anchored expandable card (`showRoute` →
+  `routePreviewSteps`/`routeStepEl`) with tappable legs that fly the map to where
+  each step happens, instead of the older bottom pill.
+- **Calibration** is a **modal** (phone-only; hidden on desktop) that replaces the
+  old line-walk panel. It offers three ways to set the step length: *estimate from
+  height*, *calibrate from GPS (outside)* — the `autocal.mjs` flow — and a
+  *guided indoor walk*. The splash mirrors the live status line while booting.
+- **The guided indoor walk** asks the user to stand outside a doorway and type the
+  room they are in; `findRoom` resolves it, `roomDoorViaRoute` confirms the room's
+  egress door by routing, and `pickIndoorTarget` chooses a same-floor room a short
+  walk away reachable **without passing through another room's door**. Start and
+  end are marked with flags (a green pin and a checkered flag); the route is
+  framed on the map. `recordIndoorWalk` computes `distance / steps` and applies
+  it.
+- **Step-length refinement (experimental, off by default).** A toggle in the
+  calibration modal's *Compass & graph* screen enables the multi-hypothesis
+  mixture in `locate.mjs` (`STEP_HYPOTHESES`, migration). The particle clouds are
+  **colour-coded per candidate step length** (a legend is shown), and a **gated,
+  relative** update nudges `stepModel.base` after enough constrained walking.
+  `?refine=1` enables it at boot for desktop inspection.
+
+### Units
+Internal math is metric. The **UI shows Imperial**: `distanceText` (feet, miles
+past ¼ mile), `stepLenText` (inches), `speedText` (ft/s), and the height
+estimator defaults to **ft·in** with a cm toggle.
+
+### Notable internals
+- The particle cloud is the production position indicator (`pdr-particles`),
+  drawn from `ParticleFilter.points()`; colour comes from each particle's
+  hypothesis `g` when refinement is on.
+- `positionSeeded` suppresses the live marker and re-routing until an absolute
+  source (GPS, "I'm Here", or a finished calibration) has seeded the cloud — the
+  boot seed at the map centre is a guess and must not move the map.
+- Map layers: `campus-3d*` (extruded structure/route/avatar), `pdr-particles`,
+  `location-heading`, `portals`, plus the OSM basemap.
+
+## `index.html` — the original demo
+
+The older desktop-friendly UI, same pipeline. It retains the line-walk
+"Calibrate walking model" panel and gained the same **step-length refinement
+toggle** (in the sidebar) and **colour-coded clouds**. `?dev=1` reveals the
+developer "Find Path" button and the on-map particle overlay.
+
+## `import.html` — the authoring tool
+
+Loads a DXF floor, places it with `geo.mjs`, aligns stacked floors with
+`align.mjs`, tags portals, and writes the floor JSON + the `buildings-config.json`
+registration (including the cached portal set). **Buildings are added through this
+tool, never by hand-editing `index.html`.**
+
+## `locate-test.html` — a positioning testbed
+
+A test-only live map for PDR: loads floor plans + basemap, draws the GPS fix and
+the GPS/PDR estimate with an uncertainty circle, heading arrow and breadcrumb
+trail, and lets you tap to place an anchor. It imports the real modules, so it is
+a convenient place to observe the filter without sensors.
+
+## See also
+
+- [`tooling.md`](tooling.md) — the test suite that verifies the shared logic.
+- [`locate.md`](locate.md), [`autocal.md`](autocal.md) — the algorithms the
+  calibration flows drive.

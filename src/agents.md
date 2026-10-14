@@ -8,6 +8,11 @@ build step, no npm dependencies in the app itself.
 > changed files** (see [Deployment](#deployment)). The live site must always
 > match the working tree.
 
+> **Per-module documentation lives in [`../docs/`](../docs/README.md)** — one page
+> per module explaining what it does, why it is built that way, and its
+> implementation invariants. This file stays the single narrative of hard-won
+> context; the module pages expand it.
+
 ## Architecture
 
 - `navgraph.mjs` — **frozen; only additive changes are permitted.** `buildGraph(

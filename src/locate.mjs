@@ -267,8 +267,6 @@ export class ParticleFilter {
     headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.20, roughenM = 0.20,
     segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
     stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3,
-    adaptive = false, maxCount = count, minCount = Math.max(64, Math.floor(count / 8)),
-    binM = 1.0, binHeadingDeg = 30, kldEpsilon = 0.02, kldZ = 2.33,
     persistentHeadingDeg = 0,
     // --- multi-hypothesis step length (optional; null = classic single cloud)
     // `hypotheses` is an array of multipliers on `stepLengthM` (e.g.
@@ -281,18 +279,8 @@ export class ParticleFilter {
     hypRespawn = true, hypMigrate = false, hypMut = 0.02 } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
-    // The filter can RESIZE. It starts at `count`; when `adaptive`, every
-    // resample chooses a KLD-sampled count in [minCount, maxCount], so a global
-    // (campus-wide) prior can start huge and shed particles as each step prunes
-    // the hypothesis set. Non-adaptive keeps a fixed count (arrays = count).
+    // Fixed particle count (arrays are sized to it).
     this.count = count;
-    this.maxCount = Math.max(count, maxCount);
-    this.minCount = adaptive ? Math.max(1, Math.min(minCount, this.maxCount)) : count;
-    this.adaptive = !!adaptive && this.maxCount > this.minCount;
-    this.binM = binM;
-    this.binHeading = binHeadingDeg * Math.PI / 180;
-    this.kldEpsilon = kldEpsilon;
-    this.kldZ = kldZ;
     this.headingNoise = headingNoiseDeg * Math.PI / 180;
     // Uniform random heading jitter applied to every particle each step.
     this.headingJitter = headingJitterDeg * Math.PI / 180;
@@ -314,7 +302,7 @@ export class ParticleFilter {
     this.stallEpsM = stallEpsM;
     this.stallSteps = stallSteps;
     this.relaxSteps = relaxSteps;
-    const cap = this.maxCount;
+    const cap = count;
     this.lon = new Float64Array(cap);
     this.lat = new Float64Array(cap);
     this.heading = new Float64Array(cap);
@@ -332,10 +320,6 @@ export class ParticleFilter {
     this.persistentHeading = persistentHeadingDeg * DEG;
     this._hOff = new Float64Array(cap);
     this._hOff2 = new Float64Array(cap);
-    this._bins = this.adaptive ? new Set() : null;
-    this._binRefLon = null;
-    this._binRefLat = null;
-    this.lastK = 0;
     this._pt = [0, 0];   // scratch lon/lat (avoids per-sample allocation)
     this._mpd = metresPerDegree(0);   // per-step metres-per-degree cache
     // Steps at most this long may use the 2-sample fast path in `_advance`
@@ -352,7 +336,6 @@ export class ParticleFilter {
     this.lastHeading = null;   // measured heading at the previous step
     this.reversed = false;     // this step followed a ~180 deg U-turn
     this.accuracyM = Infinity; // the arbiter's trusted accuracy radius
-    this._globalMode = false;  // no positional prior (global / no-georeference)
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
@@ -427,7 +410,7 @@ export class ParticleFilter {
     }
     this.lambdas = Float64Array.from(lambdas);
     this.K = this.lambdas.length;
-    const cap = this.maxCount;
+    const cap = this.count;
     this._group2 = new Int8Array(cap);
     this.group = new Int8Array(cap);
     this._gLive = new Int32Array(this.K);
@@ -449,7 +432,7 @@ export class ParticleFilter {
   /** Distribute particles over hypotheses in a round-robin (even start). */
   _assignGroups() {
     if (!this.lambdas || !this.group) return;
-    for (let i = 0; i < this.maxCount; i++) this.group[i] = i % this.K;
+    for (let i = 0; i < this.count; i++) this.group[i] = i % this.K;
   }
 
   /** groupW = softmax(groupLogW + priorLog); refresh groupW in place. */
@@ -556,67 +539,9 @@ export class ParticleFilter {
     this.version++;
   }
 
-  /** Set the active particle count (clamped to [1, maxCount]). */
-  resetCount(n = this.maxCount) {
-    this.count = Math.max(1, Math.min(this.maxCount, n | 0));
-    return this.count;
-  }
-
-  /**
-   * GLOBAL localization seed: scatter particles UNIFORMLY over the walkable
-   * area of a lon/lat box - or an ARRAY of boxes (e.g. one per same-level
-   * building, which raises the acceptance rate and spreads the cloud across all
-   * of them). No positional prior at all: every walkable cell equally likely,
-   * every heading possible. Pure rejection (never snaps a rejected point - a
-   * spiral search per reject would be catastrophic when most of a campus bbox
-   * is empty space).
-   *
-   * @param {{minLon,maxLon,minLat,maxLat}|Array} boxOrBoxes
-   * @param {{count?:number, samples?:number}} [opts]
-   */
-  seedUniform(boxOrBoxes, { count = this.count, samples } = {}) {
-    this.resetCount(count);
-    const boxes = Array.isArray(boxOrBoxes) ? boxOrBoxes : [boxOrBoxes];
-    const tries = samples ?? this.count * 20 + 1000;
-    let i = 0, t = 0;
-    while (i < this.count && t < tries) {
-      t++;
-      const box = boxes[(Math.random() * boxes.length) | 0];
-      const lon = box.minLon + Math.random() * (box.maxLon - box.minLon);
-      const lat = box.minLat + Math.random() * (box.maxLat - box.minLat);
-      if (!this.isWalkable([lon, lat])) continue;
-      this.lon[i] = lon;
-      this.lat[i] = lat;
-      this.heading[i] = Math.random() * 2 * Math.PI;
-      this._hOff[i] = this.persistentHeading
-        ? gaussianClamped(this.persistentHeading, Math.PI / 2) : 0;
-      i++;
-    }
-    this.count = i;   // fewer if the box(es) had little walkable area
-    if (this.count === 0) { this.initialized = false; return this.count; }
-    const w = 1 / this.count;
-    for (let j = 0; j < this.count; j++) this.weight[j] = w;
-    this.initialized = true;
-    this.lastHeading = null;
-    this.reversed = false;
-    this.stallCount = 0;
-    this.relaxLeft = 0;
-    this._prevMean = null;
-    if (this.lambdas) { this._assignGroups(); this.resetStepHypotheses(); }
-    const b0 = boxes[0];
-    this._binRefLon = (b0.minLon + b0.maxLon) / 2;
-    this._binRefLat = (b0.minLat + b0.maxLat) / 2;
-    this.version++;
-    return this.count;
-  }
-
-  predict(stepLengthM, headingRad, { accuracyM = Infinity, globalMode = false } = {}) {
+  predict(stepLengthM, headingRad, { accuracyM = Infinity } = {}) {
     if (!this.initialized) return;
     this.accuracyM = accuracyM;
-    // Global mode: no positional prior at all (no accuracy cap, no forward
-    // hemisphere) - the cloud is a set of "where could I be" hypotheses and has
-    // no trusted mean, so confining it to the mean would collapse it.
-    this._globalMode = globalMode;
 
     // A ~180 deg swing in the measured heading is an intentional U-turn. This
     // step must not punish the (now-behind) particles or the cloud would
@@ -827,7 +752,7 @@ export class ParticleFilter {
     // Step-length hypotheses: award each hypothesis its live-fraction evidence.
     // Skipped on a U-turn / relaxed / global step (the geometry is uninformative
     // or the cloud is deliberately unconstrained), and outdoors.
-    if (trackGroups && !this._globalMode && !this.reversed && !relaxed) {
+    if (trackGroups && !this.reversed && !relaxed) {
       if (this.hypMigrate) {
         // Migration mode: particles physically move between hypotheses, so the
         // population share IS the belief (no separate log-weight update).
@@ -861,8 +786,8 @@ export class ParticleFilter {
     const mpd = metresPerDegree(mean.lat);
     const fe = forwardHeading == null ? 0 : Math.sin(forwardHeading);
     const fn = forwardHeading == null ? 0 : Math.cos(forwardHeading);
-    const useRear = forwardHeading != null && !relaxed && !this.reversed && !this._globalMode;
-    const useCap = !relaxed && isFinite(this.accuracyM) && !this._globalMode;
+    const useRear = forwardHeading != null && !relaxed && !this.reversed;
+    const useCap = !relaxed && isFinite(this.accuracyM);
     const cap2 = this.accuracyM * this.accuracyM;
     for (let i = 0; i < this.count; i++) {
       const de = (this.lon[i] - mean.lon) * mpd.lon;
@@ -907,18 +832,6 @@ export class ParticleFilter {
     this._prevMean = mean;
   }
 
-  /**
-   * Kullback-Leibler divergence sample size (Fox 2003), given `k` occupied
-   * bins. Grows with the spread of the (resampled) belief.
-   */
-  _kldCount(k) {
-    if (k <= 1) return this.minCount;
-    const e = this.kldEpsilon, z = this.kldZ;
-    const a = 2 / (9 * (k - 1));
-    const t = 1 - a + Math.sqrt(a) * z;
-    return Math.ceil(((k - 1) / (2 * e)) * t * t * t);
-  }
-
   _resample() {
     if (this.lambdas) return this._resampleHypotheses();
     const n = this.count;
@@ -926,13 +839,7 @@ export class ParticleFilter {
     const sLon = this._lon2, sLat = this._lat2, sH = this._h2, sHO = this._hOff2;
     const step = 1 / n;
     let r = Math.random() * step, c = weight[0], idx = 0;
-    const bins = this.adaptive ? this._bins : null;
-    if (bins) bins.clear();
-    if (this._binRefLon === null) { this._binRefLon = this.lon[0]; this._binRefLat = this.lat[0]; }
-    const mpd = metresPerDegree(this._binRefLat);
-    const invBinX = mpd.lon / this.binM, invBinY = mpd.lat / this.binM;
-    const invH = 1 / this.binHeading;
-    let k = 0;
+    const mpd = metresPerDegree(this.lat[0]);
     for (let i = 0; i < n; i++) {
       const u = r + i * step;
       while (u > c && idx < n - 1) { idx++; c += weight[idx]; }
@@ -941,13 +848,6 @@ export class ParticleFilter {
       const plon = this.lon[idx] + re / mpd.lon, plat = this.lat[idx] + rn / mpd.lat;
       const h = this.heading[idx] + gaussian() * this.headingNoise * 0.5;
       sLon[i] = plon; sLat[i] = plat; sH[i] = h; sHO[i] = this._hOff[idx];
-      if (bins) {
-        const bx = Math.round((plon - this._binRefLon) * invBinX) + 2048;
-        const by = Math.round((plat - this._binRefLat) * invBinY) + 2048;
-        const bh = Math.round(h * invH) & 63;
-        const key = bx * 1048576 + by * 64 + bh;
-        if (!bins.has(key)) { bins.add(key); k++; }
-      }
     }
     // Ping-pong: swap the scratch buffers in as the live ones.
     let tmp;
@@ -955,11 +855,6 @@ export class ParticleFilter {
     tmp = this.lat; this.lat = this._lat2; this._lat2 = tmp;
     tmp = this.heading; this.heading = this._h2; this._h2 = tmp;
     tmp = this._hOff; this._hOff = this._hOff2; this._hOff2 = tmp;
-    // Shrink (never grow past what we resampled from) to the KLD count.
-    this.count = this.adaptive
-      ? Math.max(this.minCount, Math.min(n, this._kldCount(k)))
-      : n;
-    this.lastK = k;   // occupied bins of the last resample (diagnostics)
     const w = 1 / this.count;
     for (let i = 0; i < this.count; i++) this.weight[i] = w;
   }
@@ -977,34 +872,14 @@ export class ParticleFilter {
    * can never collapse to nothing); particles are reallocated to hypotheses in
    * proportion to the mixture weights. Within a hypothesis the usual
    * walkability-weighted systematic resampling applies, so localisation still
-   * works per hypothesis. The adaptive KLD target count is derived from the
-   * current cloud's occupied bins.
+   * works per hypothesis.
    */
   _resampleHypotheses() {
     const K = this.K;
     const n0 = this.count;
     const weight = this.weight, group = this.group;
-    const cap = this.maxCount;
-
-    // Target count (adaptive only): KLD over the CURRENT cloud's occupied bins.
-    let target = n0;
-    if (this.adaptive) {
-      const bins = this._bins;
-      bins.clear();
-      if (this._binRefLon === null) { this._binRefLon = this.lon[0]; this._binRefLat = this.lat[0]; }
-      const mpd = metresPerDegree(this._binRefLat);
-      const invBinX = mpd.lon / this.binM, invBinY = mpd.lat / this.binM, invH = 1 / this.binHeading;
-      let occ = 0;
-      for (let i = 0; i < n0; i++) {
-        const bx = Math.round((this.lon[i] - this._binRefLon) * invBinX) + 2048;
-        const by = Math.round((this.lat[i] - this._binRefLat) * invBinY) + 2048;
-        const bh = Math.round(this.heading[i] * invH) & 63;
-        const key = bx * 1048576 + by * 64 + bh;
-        if (!bins.has(key)) { bins.add(key); occ++; }
-      }
-      this.lastK = occ;
-      target = Math.max(this.minCount, Math.min(n0, this._kldCount(occ)));
-    }
+    const cap = n0;
+    const target = n0;
 
     // Allocate the target population across hypotheses by mixture weight.
     const alloc = new Int32Array(K);
@@ -1019,7 +894,7 @@ export class ParticleFilter {
     const sLon = this._lon2, sLat = this._lat2, sH = this._h2, sHO = this._hOff2, sG = this._group2;
     const idxs = new Int32Array(n0);
     const cw = new Float64Array(n0);
-    const mpd = metresPerDegree(this._binRefLat ?? (this.lat[0] || 0));
+    const mpd = metresPerDegree(this.lat[0] || 0);
     let out = 0;
     for (let k = 0; k < K && out < cap; k++) {
       let m = 0, csum = 0;

@@ -823,15 +823,6 @@
         <circle cx="12" cy="10" r="2.7"/>
       </svg>
     </button>
-    <button id="campus-btn" class="control-btn icon-btn"
-            title="Seed particles across the whole floor (no georeference)"
-            aria-label="Global campus seed">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9"/>
-        <path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/>
-      </svg>
-    </button>
     <button id="menu-btn" class="control-btn icon-btn" title="Step length calibration"
             aria-label="Calibrate walking model">
       <span id="cal-state-icon" class="cal-state-icon" aria-label="Not calibrated">!</span>
@@ -1182,7 +1173,6 @@
     const menuBtn = document.getElementById('menu-btn');
     const locationBtn = document.getElementById('location-btn');
     const anchorBtn = document.getElementById('anchor-btn');
-    const campusBtn = document.getElementById('campus-btn');
     const viewBtn = document.getElementById('view-btn');
     const followBtn = document.getElementById('follow-btn');
     const floorDown = document.getElementById('floor-down');
@@ -1248,7 +1238,6 @@
     });
 
     locationBtn.addEventListener('click', startLiveLocate);
-    campusBtn.addEventListener('click', seedCampus);
     viewBtn.addEventListener('click', () => { is3D = !is3D; applyViewMode(); });
     searchGo.addEventListener('click', runSearch);
     searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
@@ -1308,15 +1297,12 @@
     });
 
     function anchorAt(ll) {
-      // Leaving global mode: "I'm Here" is an explicit absolute anchor.
-      globalSeedActive = false;
       positionSeeded = true;   // an explicit fix - the live position is real now
       // The floor currently displayed is authoritative ("I'm Here" on the 3rd
       // floor must bind to the 3rd floor, not whichever floor's centroid is
       // marginally nearest - stacked floors share a footprint).
       ensureLocator(ll, floorOfView());
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
-      locator.arbiter.suppressReseed = false;
       locator.arbiter.anchor(ll, { spreadM: 3 });
       headingDriftCal.reset();
       setCorridorBadge(false);
@@ -2925,15 +2911,12 @@
     syncHeadingTrim();
     let motion = null;
     let locator = null;    // { building, floor, filter, arbiter }
-    // True while the "Campus" global seed is active: GPS is ignored so the
-    // deliberately diffuse cloud is not seeded/collapsed by a poor fix.
-    let globalSeedActive = false;
     let currentEstimate = null;
     // Whether the live position is authoritative yet. The boot locator seeds a
     // cloud at the map centre purely so PDR can run - it is NOT the user's real
     // location, so the estimate must not move the marker or re-plan the route
-    // until an absolute source (GPS, "I'm Here", Campus seed, or a completed
-    // calibration) has seeded it.
+    // until an absolute source (GPS, "I'm Here", or a completed calibration)
+    // has seeded it.
     let positionSeeded = false;
 
     function floorCentroid(floor) {
@@ -2955,11 +2938,6 @@
       }
       return best;
     }
-
-    // Particle count for the "Campus" global seed: spread this many particles
-    // evenly over every walkable cell of the current floor level (no
-    // georeference). Normal PDR uses 1000; this is only the capacity/global cap.
-    const GLOBAL_SEED = 40000;
 
     // Bind the locator to a building/floor. The DISPLAYED floor wins when it
     // is known ("I'm Here" passes `floorOfView()`): stacked floors share a
@@ -3055,12 +3033,8 @@
       // through a building, while a gap between buildings, or a bridge passing
       // over a building with no floor here, stays usable.
       const isOutsideBuildings = (ll) => !isWalkable(ll);
-      // `count` stays 1000 (fixed) so normal PDR is unchanged; `maxCount` is the
-      // CAPACITY, so the "Campus" global seed can raise the count to GLOBAL_SEED
-      // and let KLD shrink it back toward minCount as the belief narrows.
       const filter = new ParticleFilter({
-        isWalkable: pdrWalkable, nearestWalkable,
-        count: 1000, adaptive: true, maxCount: GLOBAL_SEED, minCount: 1000,
+        isWalkable: pdrWalkable, nearestWalkable, count: 1000,
       });
       // Keep the experimental step-length mixture on across a floor re-bind.
       if (stepRefineOn) filter.setStepHypotheses(STEP_HYPOTHESES, { migrate: true, mut: 0.02 });
@@ -3083,65 +3057,6 @@
       filter.seed(seed, { spreadM: 4 });
       headingDriftCal.reset();
       setCorridorBadge(false);
-    }
-
-    /**
-     * GLOBAL (no-georeference) seed: spread GLOBAL_SEED particles EVENLY over
-     * the walkable area of every plan on the displayed floor level, then let the
-     * PDR steps + KLD shrink the cloud. Uses the locator's union walkability, so
-     * the cloud covers all same-level buildings, not just the bound one.
-     */
-    function seedCampus() {
-      if (calWizard.armed) return;
-      const level = currentFloorId();
-      // One lon/lat box per plan at this level (even spread across buildings),
-      // plus their union for the fitBounds, plus a bind point on the floor.
-      const boxes = [];
-      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
-      let bindPoint = null;
-      for (const b of buildings) {
-        const f = b.floors.find((x) => x.floorId === level);
-        if (!f) continue;
-        if (!bindPoint) bindPoint = floorCentroid(f);
-        let bMinLon = Infinity, bMaxLon = -Infinity, bMinLat = Infinity, bMaxLat = -Infinity;
-        for (const seg of f.obstacleLines ?? []) {
-          for (const [lon, lat] of seg) {
-            if (lon < bMinLon) bMinLon = lon; if (lon > bMaxLon) bMaxLon = lon;
-            if (lat < bMinLat) bMinLat = lat; if (lat > bMaxLat) bMaxLat = lat;
-          }
-        }
-        if (!isFinite(bMinLon)) continue;
-        boxes.push({ minLon: bMinLon, maxLon: bMaxLon, minLat: bMinLat, maxLat: bMaxLat });
-        if (bMinLon < minLon) minLon = bMinLon; if (bMaxLon > maxLon) maxLon = bMaxLon;
-        if (bMinLat < minLat) minLat = bMinLat; if (bMaxLat > maxLat) maxLat = bMaxLat;
-      }
-      if (!boxes.length) { statusText.textContent = 'No plans on this floor'; return; }
-      // The cloud only MOVES when step events arrive, and steps only arrive once
-      // the motion pipeline is running - so start it (and the marker/heading
-      // layers) even if the user never pressed "My Location". Without this the
-      // global seed sits perfectly still.
-      if (!motion || !livePosMarker) ensureLiveSetup();
-      if (!motion) startMotion();
-      // Bind the locator (its union walkability) to THIS floor level.
-      if (!locator || locator.floor.floorId !== level) {
-        ensureLocator(bindPoint ?? [map.getCenter().lng, map.getCenter().lat], level);
-      }
-      if (!locator || !locator.filter) { statusText.textContent = 'No floor plan loaded'; return; }
-      // Global mode: block GPS from seeding/free-roaming the cloud until the
-      // user leaves it (My Location / I'm Here), so one optimistic fix cannot
-      // collapse it.
-      globalSeedActive = true;
-      locator.arbiter.suppressReseed = true;
-      const n = locator.filter.seedUniform(boxes,
-        { count: GLOBAL_SEED, samples: GLOBAL_SEED * 12 });
-      // The estimate now comes straight from the global cloud.
-      locator.arbiter.source = 'pdr';
-      map.fitBounds([[minLon, minLat], [maxLon, maxLat]],
-        { padding: 40, duration: 700, maxZoom: 18 });
-      positionSeeded = true;   // an explicit seed - show the global cloud
-      renderEstimate(locator.arbiter.estimate(performance.now()));
-      updateParticles(true);
-      statusText.textContent = `Seeded ${n} particles across floor ${level}`;
     }
 
     // --- live re-routing ----------------------------------------------------
@@ -3242,7 +3157,7 @@
       const filter = locator?.filter;
       // A GPS-only estimate (or a repeated render) does not move the PDR
       // cloud; skip the O(count) rebuild + map upload unless it changed (or a
-      // caller forces it, e.g. the global seed).
+      // caller forces it, e.g. toggling step-length refinement).
       if (!force && filter && filter.version === lastParticleVersion) return;
       const now = performance.now();
       if (!force && now - lastParticlePaint < PARTICLE_PAINT_MS) return;
@@ -3539,10 +3454,9 @@
       // renderEstimate refreshes from the filter.)
 
       // Feed GPS to the arbiter too; if PDR is currently more accurate the
-      // marker will be re-rendered from the filter instead. In global mode GPS
-      // must not re-bind the locator (a fix elsewhere would re-seed the cloud).
+      // marker will be re-rendered from the filter instead.
       const t = performance.now();
-      if (!globalSeedActive) ensureLocator(posLonLat);
+      ensureLocator(posLonLat);
       if (locator) {
         locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
         renderEstimate(locator.arbiter.estimate(t));
@@ -3649,9 +3563,6 @@
       locationBtn.classList.add('active');
       statusText.textContent = 'Locating...';
       didAutoCenter = false;   // fly to the next fix again
-      // Leaving global mode: "My Location" wants GPS to seed/override again.
-      globalSeedActive = false;
-      if (locator) locator.arbiter.suppressReseed = false;
 
       ensureLiveSetup();
 

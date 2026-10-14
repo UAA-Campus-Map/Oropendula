@@ -62,7 +62,6 @@ export class PositionArbiter {
       hysteresisS, pdrBaseAccM, pdrDriftPerM, buildingZoneM,
     });
     this._seededOutdoors = false;
-    this.suppressReseed = false;   // global (no-georeference) mode: block cloud seeding
     this.gpsFix = null;
     this.heldGps = null;         // last good fix, held through a source switch
     this.metresSinceCorrection = 0;
@@ -86,12 +85,6 @@ export class PositionArbiter {
   /** A geolocation fix. `accuracy` in metres. */
   gps(fix) {
     this.gpsFix = fix;
-    // GLOBAL (no-georeference) mode: the particle cloud was deliberately spread
-    // over the whole floor, so a fix must NOT seed it or free it from the plan -
-    // a single optimistic (and wrong) indoor fix was collapsing the cloud to a
-    // point "immediately". Keep the fix as a candidate for the source switch,
-    // but do not let it touch the cloud until global mode is left.
-    if (this.suppressReseed) return;
     const plausible = this.isPlausible(fix);
     const indoor = this.insideBuilding(fix);
     const outdoor = plausible && !indoor;
@@ -128,14 +121,9 @@ export class PositionArbiter {
     if (headingRad != null) this.heading = headingRad;
     if (!this.filter.initialized) return;
     // The PDR accuracy is the trusted radius the filter confines its cloud to
-    // (particles never live farther than this from their own mean). In GLOBAL
-    // mode the cloud is deliberately spread over the whole floor, so BOTH priors
-    // are lifted - the accuracy cap would kill every particle beyond ~2.5 m of
-    // the mean and resample onto the survivors, and the forward-hemisphere
-    // penalty would bias it forward - collapsing the cloud instantly.
+    // (particles never live farther than this from their own mean).
     this.filter.predict(stepLengthM, headingRad ?? this.heading ?? 0,
-      { accuracyM: this.suppressReseed ? Infinity : this.pdrAccuracy(),
-        globalMode: this.suppressReseed });
+      { accuracyM: this.pdrAccuracy() });
     this.metresSinceCorrection += stepLengthM;
   }
 
@@ -203,7 +191,7 @@ export class PositionArbiter {
   estimate(t) {
     // Global (no-georeference) mode ignores GPS entirely: the estimate is the
     // PDR cloud's own mean, with nothing to seed or override it.
-    const g = this.suppressReseed ? null : this.gpsCandidate(t);
+    const g = this.gpsCandidate(t);
     if (g) this.heldGps = { ...g, t };
     const pdr = this.filter.initialized ? this.filter.estimate() : null;
     const pdrAcc = this.pdrAccuracy();
