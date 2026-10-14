@@ -1,0 +1,3345 @@
+<!-- PMTiles + MapLibre Navigation Demo -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Navigator — Indoor Navigation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+  
+  <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+
+  <!-- Start the critical downloads while the HTML is still parsing: the
+       MapLibre bundle is the module graph's first import, and both JSONs are
+       fetched at boot. Floor JSONs are prefetched in parallel by the script. -->
+  <link rel="modulepreload" href="/maplibre-gl.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-shared.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-worker.mjs" />
+  <link rel="preload" as="fetch" href="/buildings-config.json" crossorigin />
+  <link rel="preload" as="fetch" href="/osm-paths.json" crossorigin />
+  
+  <style>
+    :root {
+      --accent: #2563eb;
+      --accent-2: #7c3aed;
+      --accent-ink: #ffffff;
+      --warn: #f59e0b;
+      --ok: #16a34a;
+      --bg: #eef1f6;
+      --surface: rgba(255, 255, 255, 0.72);
+      --surface-solid: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: rgba(15, 23, 42, 0.10);
+      --shadow: 0 14px 40px -12px rgba(15, 23, 42, 0.35);
+      --shadow-sm: 0 4px 16px -6px rgba(15, 23, 42, 0.28);
+      --r: 20px;
+      --gap: 10px;
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-l: env(safe-area-inset-left, 0px);
+      --safe-r: env(safe-area-inset-right, 0px);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f16;
+        --surface: rgba(17, 24, 39, 0.72);
+        --surface-solid: #0f1622;
+        --ink: #eef2f8;
+        --muted: #93a1b5;
+        --line: rgba(255, 255, 255, 0.13);
+        --shadow: 0 16px 44px -12px rgba(0, 0, 0, 0.7);
+        --shadow-sm: 0 6px 18px -8px rgba(0, 0, 0, 0.7);
+      }
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+        Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    /* ---- route preview card (top, expandable) --------------------------- */
+    #route-card {
+      position: absolute;
+      z-index: 22;
+      top: calc(126px + var(--safe-t));
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(94vw, 460px);
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(1.5);
+      -webkit-backdrop-filter: blur(18px) saturate(1.5);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: drop 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    @keyframes drop { from { opacity: 0; transform: translate(-50%, -12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    .route-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 12px 14px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .route-icon {
+      flex: none;
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      color: #fff;
+      background: var(--accent);
+    }
+    .route-body { flex: 1; min-width: 0; display: block; }
+    .route-title { display: block; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .route-meta { display: block; margin-top: 2px; font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .route-chevron { flex: none; width: 20px; height: 20px; color: var(--muted); transition: transform 0.25s ease; }
+    #route-card.expanded .route-chevron { transform: rotate(180deg); }
+    .route-steps {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+      border-top: 1px solid transparent;
+    }
+    #route-card.expanded .route-steps {
+      max-height: 46dvh;
+      overflow-y: auto;
+      border-top-color: var(--line);
+    }
+    .route-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      width: 100%;
+      padding: 11px 16px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+    }
+    .route-step + .route-step { border-top: 1px solid var(--line); }
+    .route-step.tappable { cursor: pointer; transition: background 0.15s; }
+    .route-step.tappable::after {
+      content: "›";
+      margin-left: auto;
+      align-self: center;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1;
+    }
+    .route-step.tappable:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    .route-step.tappable:active { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+    .step-dot {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+    .step-dot.muted { background: var(--muted); box-shadow: none; }
+    .step-text { font-size: 14px; font-weight: 700; }
+    .step-sub { margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+    @media (min-width: 900px) {
+      #route-card { top: calc(140px + var(--safe-t)); }
+    }
+
+    /* ---- splash --------------------------------------------------------- */
+    #splash {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+      color: #fff;
+      background: radial-gradient(120% 120% at 20% 0%, #1d4ed8 0%, #4f46e5 45%, #7c3aed 100%);
+      transition: opacity 0.5s ease, visibility 0.5s;
+    }
+    #splash.hide { opacity: 0; visibility: hidden; }
+    .splash-mark { font-size: 46px; line-height: 1; filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.35)); }
+    .splash-name { font-size: 27px; font-weight: 800; letter-spacing: -0.02em; }
+    .splash-sub { margin-bottom: 16px; font-size: 13px; opacity: 0.85; letter-spacing: 0.02em; }
+    .spinner {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.32);
+      border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Keep the basemap controls and attribution out of the way of the UI. */
+    .maplibregl-ctrl-bottom-left,
+    .maplibregl-ctrl-bottom-right { z-index: 5; }
+    /* Attribution tucked above the bottom-left action pills. */
+    .maplibregl-ctrl-bottom-right {
+      right: auto !important;
+      left: calc(8px + var(--safe-l));
+      bottom: calc(70px + var(--safe-b));
+    }
+    .maplibregl-ctrl-group {
+      border-radius: 999px !important;
+      box-shadow: var(--shadow-sm) !important;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--surface-solid);
+    }
+    .maplibregl-ctrl-attrib.maplibregl-compact {
+      border-radius: 999px;
+      background: var(--surface) !important;
+      backdrop-filter: blur(12px);
+    }
+
+    /* ---- top bar -------------------------------------------------------- */
+    #topbar {
+      position: absolute;
+      z-index: 20;
+      top: calc(8px + var(--safe-t));
+      left: calc(8px + var(--safe-l));
+      right: calc(8px + var(--safe-r));
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+      pointer-events: none;
+    }
+    #topbar > * { pointer-events: auto; }
+
+    .search-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 6px 6px 14px;
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(1.5);
+      -webkit-backdrop-filter: blur(18px) saturate(1.5);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+    }
+    .search-control:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+      box-shadow: var(--shadow), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .search-control .search-icon { flex: none; width: 20px; height: 20px; color: var(--muted); }
+    #search-input {
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 500;
+      padding: 12px 0;
+    }
+    #search-input::placeholder { color: var(--muted); font-weight: 400; }
+    #search-go {
+      flex: none;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent-ink);
+      background: var(--accent);
+      cursor: pointer;
+      transition: transform 0.12s ease, filter 0.2s;
+    }
+    #search-go:active { transform: scale(0.95); filter: brightness(1.05); }
+
+    .topbar-row { display: flex; align-items: center; gap: var(--gap); }
+
+    .floor-control {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 4px;
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(1.5);
+      -webkit-backdrop-filter: blur(18px) saturate(1.5);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: var(--shadow-sm);
+    }
+    .floor-btn {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--ink);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.12s;
+    }
+    .floor-btn:active { transform: scale(0.9); }
+    .floor-btn:hover { background: var(--line); }
+    .floor-btn:disabled { opacity: 0.25; }
+    .floor-label { min-width: 68px; text-align: center; font-size: 15px; font-weight: 700; }
+
+    #status-chip {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      max-width: 50vw;
+      padding: 10px 14px;
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(1.5);
+      -webkit-backdrop-filter: blur(18px) saturate(1.5);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: var(--shadow-sm);
+    }
+    #status-chip .dot {
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+    }
+    #status-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ---- corridor badge ------------------------------------------------- */
+    #corridor-badge {
+      position: absolute;
+      z-index: 15;
+      left: 50%;
+      bottom: calc(80px + var(--safe-b));
+      transform: translateX(-50%);
+      pointer-events: none;
+      padding: 7px 15px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: #fff;
+      background: var(--accent);
+      box-shadow: var(--shadow-sm);
+      white-space: nowrap;
+    }
+
+    /* ---- buttons -------------------------------------------------------- */
+    .control-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 50px;
+      padding: 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      backdrop-filter: blur(18px) saturate(1.5);
+      -webkit-backdrop-filter: blur(18px) saturate(1.5);
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .control-btn:active { transform: scale(0.93); }
+    .control-btn:focus-visible,
+    .floor-btn:focus-visible,
+    .cal-btn:focus-visible,
+    #search-go:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: 2px;
+    }
+    .control-btn.icon-btn { width: 52px; height: 52px; min-height: 52px; padding: 0; border-radius: 50%; }
+    .control-btn svg { width: 22px; height: 22px; }
+    .control-btn.active {
+      color: #fff;
+      border-color: transparent;
+      background: var(--accent);
+    }
+    .control-btn.paused { color: #fff; border-color: transparent; background: var(--warn); }
+    .control-btn[disabled] { opacity: 0.5; }
+
+    /* Right-edge floating stack (locate / anchor / calibrate). */
+    #controls {
+      position: absolute;
+      z-index: 20;
+      right: calc(10px + var(--safe-r));
+      bottom: calc(14px + var(--safe-b));
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--gap);
+      pointer-events: none;
+    }
+    #controls > * { pointer-events: auto; }
+
+    /* Bottom-left action pills (2D/3D, Follow). */
+    #bottom-bar {
+      position: absolute;
+      z-index: 20;
+      left: calc(10px + var(--safe-l));
+      bottom: calc(14px + var(--safe-b));
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      pointer-events: none;
+    }
+    #bottom-bar > * { pointer-events: auto; }
+
+    .cal-state-icon {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--warn) 18%, transparent);
+      color: var(--warn);
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .cal-state-icon.calibrated { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+
+    /* ---- bottom sheet (calibration) ------------------------------------- */
+    #sidebar {
+      position: absolute;
+      z-index: 30;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: 84dvh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 0 20px calc(24px + var(--safe-b));
+      background: var(--surface-solid);
+      border-top: 1px solid var(--line);
+      border-radius: 26px 26px 0 0;
+      box-shadow: 0 -18px 50px -14px rgba(15, 23, 42, 0.5);
+      transform: translateY(102%);
+      transition: transform 0.34s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    #sidebar.visible { transform: translateY(0); }
+    #sidebar-handle {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      height: 30px;
+      margin: 0 -20px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface-solid);
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #sidebar-handle::after {
+      content: "";
+      width: 44px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--line);
+    }
+    #sidebar h2 { margin: 6px 0 14px; font-size: 20px; letter-spacing: -0.01em; }
+
+    .info-section {
+      margin-top: 16px;
+      padding: 14px 16px;
+      background: color-mix(in srgb, var(--ink) 4%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .info-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .info-value { margin-top: 6px; font-size: 15px; font-weight: 600; }
+    .hint { margin: 6px 0 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+    .cal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 14px; }
+    .cal-val { font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .cal-btn {
+      min-height: 42px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-solid);
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .cal-btn.active { color: #fff; background: var(--accent); border-color: transparent; }
+    .cal-primary {
+      min-height: 50px;
+      border: 0;
+      color: #fff;
+      background: var(--accent);
+    }
+    #cal-apply:disabled { opacity: 0.45; }
+    input[type="range"] { accent-color: var(--accent); height: 32px; }
+
+    /* ---- desktop -------------------------------------------------------- */
+    @media (min-width: 900px) {
+      #topbar { max-width: 540px; }
+      #controls {
+        top: calc(12px + var(--safe-t));
+        bottom: auto;
+        flex-direction: row;
+      }
+      #bottom-bar { left: auto; right: calc(150px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); }
+      #sidebar {
+        left: 18px;
+        right: auto;
+        bottom: 18px;
+        width: 372px;
+        max-height: calc(100dvh - 36px);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        transform: translateY(calc(100% + 36px));
+      }
+      #sidebar.visible { transform: translateY(0); }
+      #sidebar-handle { display: none; }
+      #sidebar h2 { margin-top: 4px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition-duration: 0.01ms !important; }
+    }
+  </style>
+  <meta name="theme-color" content="#2563eb" />
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div id="splash">
+    <div class="splash-mark">◈</div>
+    <div class="splash-name">Navigator</div>
+    <div class="splash-sub">Indoor campus navigation</div>
+    <div class="spinner" aria-hidden="true"></div>
+  </div>
+
+  <header id="topbar">
+    <div class="search-control">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="M21 21l-4.3-4.3"></path>
+      </svg>
+      <input id="search-input" type="search" placeholder="Search — BMH 114A"
+             autocomplete="off" aria-label="Building code and room number" />
+      <button id="search-go" title="Route to room">Go</button>
+    </div>
+    <div class="topbar-row">
+      <div class="floor-control" aria-label="Displayed floor">
+        <button id="floor-down" class="floor-btn" title="Floor below">&minus;</button>
+        <span id="floor-label" class="floor-label">Floor 1</span>
+        <button id="floor-up" class="floor-btn" title="Floor above">+</button>
+      </div>
+      <div id="status-chip" role="status" aria-live="polite">
+        <span class="dot"></span>
+        <span id="status-text">Loading…</span>
+      </div>
+    </div>
+  </header>
+
+  <div id="corridor-badge" hidden>Heading locked to hallway</div>
+
+  <div id="route-card" hidden>
+    <button id="route-toggle" class="route-head" aria-expanded="false">
+      <span class="route-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11l18-8-8 18-2-8-8-2z"/>
+        </svg>
+      </span>
+      <span class="route-body">
+        <span id="route-title" class="route-title">Route</span>
+        <span id="route-meta" class="route-meta"></span>
+      </span>
+      <svg class="route-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </button>
+    <div id="route-steps" class="route-steps"></div>
+  </div>
+
+  <!-- Primary actions: mode + follow (text), locate / anchor / calibrate (icons). -->
+  <div id="bottom-bar">
+    <button id="view-btn" class="control-btn" title="Toggle 2D / 3D">2D</button>
+    <button id="follow-btn" class="control-btn"
+            title="Follow me (camera faces my heading)">Follow</button>
+  </div>
+
+  <div id="controls">
+    <button id="location-btn" class="control-btn icon-btn" title="My Location (GPS)"
+            aria-label="My Location">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+      </svg>
+    </button>
+    <button id="anchor-btn" class="control-btn icon-btn" title="I'm Here"
+            aria-label="I'm Here">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 21.5s7-6.4 7-11.5a7 7 0 1 0-14 0c0 5.1 7 11.5 7 11.5z"/>
+        <circle cx="12" cy="10" r="2.7"/>
+      </svg>
+    </button>
+    <button id="menu-btn" class="control-btn icon-btn" title="Step length calibration"
+            aria-label="Calibrate walking model">
+      <span id="cal-state-icon" class="cal-state-icon" aria-label="Not calibrated">!</span>
+    </button>
+  </div>
+
+  <div id="sidebar">
+    <div id="sidebar-handle" role="button" aria-label="Toggle panel"></div>
+    <h2>Calibrate walking model</h2>
+
+    <div class="info-section">
+      <div class="info-label">1 &middot; Mark the line</div>
+      <p class="hint">Place the start and end of a straight line you'll walk.</p>
+      <div class="cal-row">
+        <button id="cal-start-pt" class="cal-btn">Place start</button>
+        <span id="cal-start-label" class="cal-val">not set</span>
+      </div>
+      <div class="cal-row">
+        <button id="cal-end-pt" class="cal-btn">Place end</button>
+        <span id="cal-end-label" class="cal-val">not set</span>
+      </div>
+      <div class="cal-row">
+        <span>Distance</span><span id="cal-distance" class="cal-val">&mdash;</span>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <div class="info-label">2 &middot; Walk it</div>
+      <p class="hint">Press Start, walk the line to the end point, then press End.</p>
+      <div class="cal-row">
+        <button id="cal-run-start" class="cal-btn">Start</button>
+        <button id="cal-run-end" class="cal-btn">End</button>
+      </div>
+      <div class="cal-row"><span>Steps</span><span id="cal-steps" class="cal-val">0</span></div>
+      <div class="cal-row"><span>Your step length</span><span id="cal-result" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Heading offset</span><span id="cal-heading" class="cal-val">&mdash;</span></div>
+      <button id="cal-apply" class="cal-btn cal-primary" style="width:100%" disabled>Apply</button>
+    </div>
+
+    <div class="info-section">
+      <div class="info-label">Auto-calibration (GPS)</div>
+      <p class="hint">Keep GPS on while you walk: step length is measured
+        automatically from GPS speed, step rate and position. Nothing is
+        applied until the estimate is within &plusmn;6% at 90% confidence.
+        Turning around is fine - pause when you turn and each leg counts
+        separately.</p>
+      <div id="autocal-status" class="info-value">Turn on GPS and walk</div>
+      <div class="cal-row"><span>GPS now</span><span id="autocal-gps" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Current stretch</span><span id="autocal-stretch" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Last leg</span><span id="autocal-lastleg" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Step length</span><span id="autocal-length" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Confidence within &plusmn;6%</span><span id="autocal-conf" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>90% interval</span><span id="autocal-ci" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Speed / position</span><span id="autocal-mix" class="cal-val">&mdash;</span></div>
+      <div class="cal-row"><span>Data</span><span id="autocal-data" class="cal-val">&mdash;</span></div>
+    </div>
+
+    <div class="info-section">
+      <div class="info-label">Heading</div>
+      <div id="compass" class="info-value">0°</div>
+      <div class="cal-row">
+        <span>Compass trim</span>
+        <span id="heading-trim-val" class="cal-val">0°</span>
+      </div>
+      <input type="range" id="heading-trim" min="-45" max="45" step="1" value="0"
+             style="width:100%"
+             title="Drag to correct the compass heading (adds this offset to every reading)" />
+    </div>
+
+    <button id="cal-hide" class="cal-btn cal-primary" style="width:100%">Done &middot; Hide</button>
+    <div class="info-label" style="margin-top:14px">Graph</div>
+    <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
+  </div>
+
+  <script>
+    // Hide the splash once the app reports it is ready (or gives up).
+    (function () {
+      var splash = document.getElementById('splash');
+      var status = document.getElementById('status-text');
+      var done = false;
+      function hide() {
+        if (done || !splash) return;
+        done = true;
+        splash.classList.add('hide');
+        setTimeout(function () { splash.remove(); }, 600);
+      }
+      if (status && !window.MutationObserver) { setTimeout(hide, 4000); return; }
+      if (status) {
+        new MutationObserver(function () {
+          if (/ready|fail|no walls|error/i.test(status.textContent)) hide();
+        }).observe(status, { childList: true, characterData: true, subtree: true });
+      }
+      setTimeout(hide, 20000); // never trap the user behind the splash
+    })();
+
+    // Drag the bottom sheet down to dismiss (mobile). The handle is hidden on
+    // desktop, so this only engages where the sheet is a bottom panel.
+    (function () {
+      var sheet = document.getElementById('sidebar');
+      var handle = document.getElementById('sidebar-handle');
+      if (!sheet || !handle) return;
+      var startY = 0, dy = 0, dragging = false, moved = false;
+      handle.addEventListener('pointerdown', function (e) {
+        dragging = true; startY = e.clientY; dy = 0; moved = false;
+        sheet.style.transition = 'none';
+        try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      handle.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        dy = Math.max(0, e.clientY - startY);
+        if (dy > 8) moved = true;
+        sheet.style.transform = 'translateY(' + dy + 'px)';
+      });
+      function end() {
+        if (!dragging) return;
+        dragging = false;
+        sheet.style.transition = '';
+        sheet.style.transform = '';
+        if (dy > 110) sheet.classList.remove('visible');
+        if (moved) {
+          // Swallow the synthetic click so the module's tap-toggle doesn't
+          // immediately reopen the sheet we just dragged closed.
+          var stop = function (ev) {
+            ev.stopImmediatePropagation(); ev.preventDefault();
+            handle.removeEventListener('click', stop, true);
+          };
+          handle.addEventListener('click', stop, true);
+        }
+      }
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    })();
+
+    // Expand / collapse the route preview card.
+    (function () {
+      var card = document.getElementById('route-card');
+      var toggle = document.getElementById('route-toggle');
+      if (!card || !toggle) return;
+      toggle.addEventListener('click', function () {
+        var open = card.classList.toggle('expanded');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    })();
+
+    // Subtle haptic tick on primary controls (no-op where unsupported).
+    (function () {
+      if (!navigator.vibrate) return;
+      document.addEventListener('pointerdown', function (e) {
+        var t = e.target.closest && e.target.closest('.control-btn, .cal-btn, #search-go, .floor-btn');
+        if (t) navigator.vibrate(8);
+      }, { passive: true });
+    })();
+  </script>
+
+  <script type="module">
+    import * as maplibregl from '/maplibre-gl.mjs';
+    import { buildGraph, graphFromState } from './navgraph.mjs';
+    import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments } from './campus.mjs';
+    import { loadOsmShapes } from './osm.mjs';
+    import { metresPerDegree, makeToLL } from './geo.mjs';
+    import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
+    import { GpsStepCalibrator } from './autocal.mjs';
+    import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
+    import { PositionArbiter } from './arbiter.mjs';
+    maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
+    
+    // Protocol registration
+    const protocol = new pmtiles.Protocol({ metadata: true });
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    // Map initialization. Starts in 2D (flat, north-up); the 2D/3D toggle
+    // enables pitch/rotation and the extruded campus.
+    const map = new maplibregl.Map({
+      container: 'map',
+      zoom: 17,
+      center: [-149.832240, 61.189856],
+      pitch: 0,
+      style: 'https://navigator.cheeseverse.net/style.json',
+      touchZoomRotate: true,
+      dragPan: true,
+      dragRotate: false,
+      pitchWithRotate: false,
+      maxPitch: 75,
+    });
+
+    // State
+    let campusRouter = null;
+    let buildings = [];
+    let destinationMarker = null;
+    let destinationFloor = null;   // floor the destination lands on (null = outdoors)
+    let isDefiningPath = false;
+    let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
+    let is3D = false;            // starts in 2D; toggled by the view button
+    let followMode = false;      // camera follows the live position
+    let followPaused = false;    // a manual gesture paused it; tap Follow to resume
+    let firstPathPoint = null;
+    let firstPathFloor = null;   // floor shown when the start was tapped
+
+    // PDR step-length calibration: mark a line, walk it, divide distance by
+    // steps counted.
+    const calibration = {
+      placing: null,   // 'start' | 'end' | null (next map tap sets that point)
+      startLL: null, endLL: null, distance: null,
+      active: false, steps: 0, result: null,
+      // heading accumulation during the walk (circular sums)
+      headingSin: 0, headingCos: 0, headingSamples: 0, headingBias: null,
+    };
+    let calStartMarker = null, calEndMarker = null;
+
+    // UI Elements
+    const menuBtn = document.getElementById('menu-btn');
+    const locationBtn = document.getElementById('location-btn');
+    const anchorBtn = document.getElementById('anchor-btn');
+    const viewBtn = document.getElementById('view-btn');
+    const followBtn = document.getElementById('follow-btn');
+    const floorDown = document.getElementById('floor-down');
+    const floorUp = document.getElementById('floor-up');
+    const floorLabel = document.getElementById('floor-label');
+    const searchInput = document.getElementById('search-input');
+    const searchGo = document.getElementById('search-go');
+
+    const sidebar = document.getElementById('sidebar');
+    const sidebarHandle = document.getElementById('sidebar-handle');
+    const compassDisplay = document.getElementById('compass');
+    const statusText = document.getElementById('status-text');
+    const graphStats = document.getElementById('graph-stats');
+    const calStartPtBtn = document.getElementById('cal-start-pt');
+    const calEndPtBtn = document.getElementById('cal-end-pt');
+    const calRunStartBtn = document.getElementById('cal-run-start');
+    const calRunEndBtn = document.getElementById('cal-run-end');
+    const calApplyBtn = document.getElementById('cal-apply');
+    const calHideBtn = document.getElementById('cal-hide');
+    const calDistanceEl = document.getElementById('cal-distance');
+    const calStepsEl = document.getElementById('cal-steps');
+    const calResultEl = document.getElementById('cal-result');
+    const calHeadingEl = document.getElementById('cal-heading');
+    const calStartLabel = document.getElementById('cal-start-label');
+    const calEndLabel = document.getElementById('cal-end-label');
+    const calStateIcon = document.getElementById('cal-state-icon');
+    const headingTrimEl = document.getElementById('heading-trim');
+    const headingTrimValEl = document.getElementById('heading-trim-val');
+    const corridorBadgeEl = document.getElementById('corridor-badge');
+    const autocalStatusEl = document.getElementById('autocal-status');
+    const autocalGpsEl = document.getElementById('autocal-gps');
+    const autocalStretchEl = document.getElementById('autocal-stretch');
+    const autocalLastlegEl = document.getElementById('autocal-lastleg');
+    const autocalLengthEl = document.getElementById('autocal-length');
+    const autocalConfEl = document.getElementById('autocal-conf');
+    const autocalCiEl = document.getElementById('autocal-ci');
+    const autocalMixEl = document.getElementById('autocal-mix');
+    const autocalDataEl = document.getElementById('autocal-data');
+
+    // Event listeners
+    menuBtn.addEventListener('click', toggleSidebar);
+    sidebarHandle.addEventListener('click', toggleSidebar);
+
+    locationBtn.addEventListener('click', startLiveLocate);
+    viewBtn.addEventListener('click', () => { is3D = !is3D; applyViewMode(); });
+    searchGo.addEventListener('click', runSearch);
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+
+    // Follow is active only while engaged and not paused by a gesture.
+    function followActive() { return followMode && !followPaused; }
+
+    /**
+     * Rotation gestures: available in 3D only, and never while Follow owns
+     * the bearing - a gesture would fight the follow loop every frame.
+     */
+    function applyRotationMode() {
+      if (is3D && !followActive()) {
+        map.dragRotate?.enable?.();
+        map.touchZoomRotate?.enableRotation?.();
+      } else {
+        map.dragRotate?.disable?.();
+        map.touchZoomRotate?.disableRotation?.();
+      }
+    }
+
+    /** Switch between the flat 2D plan and the extruded 3D stack. */
+    function applyViewMode() {
+      viewBtn.textContent = is3D ? '3D' : '2D';
+      viewBtn.classList.toggle('active', is3D);
+      if (is3D) {
+        map.easeTo({ pitch: 50, bearing: map.getBearing(), duration: 500 });
+      } else {
+        map.easeTo({ pitch: 0, bearing: 0, duration: 500 });
+      }
+      applyRotationMode();
+      applyFloorFilter(currentFloorId());
+      applyLiveMode();
+      if (is3D) { ensureLive3D(); refreshLive3D(); }
+      renderRoute();
+    }
+    floorDown.addEventListener('click', () => { setFloor(floorLevel - 1); rebindLocatorToView(); });
+    floorUp.addEventListener('click', () => { setFloor(floorLevel + 1); rebindLocatorToView(); });
+
+    // The floor a tap is read on: whatever the picker currently shows.
+    const floorOfView = () => currentFloorId();
+
+    // Manual anchor: press "I'm Here", then tap the map to place your
+    // location. Re-seeds the particle cloud and resets PDR drift - the
+    // zero-hardware calibration point.
+    let placingAnchor = false;
+    anchorBtn.addEventListener('click', () => {
+      // "I'm Here" corrects a wrong fix, so it CANCELS GPS instead of
+      // starting it: a live (wrong) fix would win the arbitration again
+      // seconds after the anchor. PDR + the manual anchor take over;
+      // "My Location" turns GPS back on.
+      stopGps();
+      ensureLiveSetup();
+      placingAnchor = true;
+      anchorBtn.classList.add('active');
+      statusText.textContent = 'Tap the map where you are';
+    });
+
+    function anchorAt(ll) {
+      // The floor currently displayed is authoritative ("I'm Here" on the 3rd
+      // floor must bind to the 3rd floor, not whichever floor's centroid is
+      // marginally nearest - stacked floors share a footprint).
+      ensureLocator(ll, floorOfView());
+      if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
+      locator.arbiter.anchor(ll, { spreadM: 3 });
+      headingDriftCal.reset();
+      setCorridorBadge(false);
+      renderEstimate(locator.arbiter.estimate(performance.now()));
+      statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
+    }
+
+    /**
+     * A manual floor change (the +/- picker) is also a statement of which floor
+     * the walker is on, so re-bind the live locator to it - exactly like
+     * "I'm Here" treats the displayed floor as authoritative. Without this the
+     * cloud kept dead-reckoning on the floor it was FIRST bound to: stacked
+     * floors share a footprint, so the boot/GPS centroid pick can be the wrong
+     * one, and changing the picker only moved the plan under a stale cloud (the
+     * "similar problems after changing floors" report). Only rebinds to a floor
+     * that actually has a plan under the estimate, and re-seeds there.
+     */
+    function rebindLocatorToView() {
+      if (!locator || !campusRouter) return;
+      const ll = currentEstimate ? [currentEstimate.lon, currentEstimate.lat]
+                                 : [map.getCenter().lng, map.getCenter().lat];
+      const floorId = currentFloorId();
+      const hit = campusRouter.buildingAt(ll, floorId);
+      if (!hit || hit.floor === locator.floor) return;
+      ensureLocator(ll, floorId);
+      renderEstimate(locator.arbiter.estimate(performance.now()));
+    }
+
+    // --- step-length calibration -------------------------------------------
+    calStartPtBtn.addEventListener('click', () => beginPlacement('start'));
+    calEndPtBtn.addEventListener('click', () => beginPlacement('end'));
+    calRunStartBtn.addEventListener('click', startCalibrationWalk);
+    calRunEndBtn.addEventListener('click', endCalibrationWalk);
+    calApplyBtn.addEventListener('click', applyCalibration);
+    calHideBtn.addEventListener('click', () => sidebar.classList.remove('visible'));
+    // Compass trim: drag to correct the heading live; persist on release.
+    headingTrimEl.addEventListener('input', () => {
+      headingTrimDeg = Math.max(-45, Math.min(45, parseInt(headingTrimEl.value, 10) || 0));
+      headingTrimValEl.textContent = `${headingTrimDeg > 0 ? '+' : ''}${headingTrimDeg}°`;
+      applyHeadingTrim();
+    });
+    headingTrimEl.addEventListener('change', () => {
+      try { localStorage.setItem('pdr-heading-trim', String(headingTrimDeg)); } catch (e) { /* ignore */ }
+    });
+
+    function beginPlacement(which) {
+      calibration.placing = which;
+      calStartPtBtn.classList.toggle('active', which === 'start');
+      calEndPtBtn.classList.toggle('active', which === 'end');
+      statusText.textContent = `Tap the map to place the ${which} point`;
+    }
+
+    function setCalPoint(which, ll) {
+      if (which === 'start') {
+        calibration.startLL = ll;
+        calStartLabel.textContent = `${ll[1].toFixed(5)}, ${ll[0].toFixed(5)}`;
+        if (calStartMarker) calStartMarker.setLngLat(ll);
+        else calStartMarker = new maplibregl.Marker({ color: '#2ecc71' }).setLngLat(ll).addTo(map);
+      } else {
+        calibration.endLL = ll;
+        calEndLabel.textContent = `${ll[1].toFixed(5)}, ${ll[0].toFixed(5)}`;
+        if (calEndMarker) calEndMarker.setLngLat(ll);
+        else calEndMarker = new maplibregl.Marker({ color: '#e74c3c' }).setLngLat(ll).addTo(map);
+      }
+      calibration.placing = null;
+      calStartPtBtn.classList.remove('active');
+      calEndPtBtn.classList.remove('active');
+      // Straight-line distance between the two marks (metres).
+      if (calibration.startLL && calibration.endLL) {
+        calibration.distance = turf.distance(calibration.startLL, calibration.endLL, { units: 'meters' });
+        calDistanceEl.textContent = `${calibration.distance.toFixed(1)} m`;
+      }
+      statusText.textContent = `${which === 'start' ? 'Start' : 'End'} point set`;
+    }
+
+    function startCalibrationWalk() {
+      if (!calibration.startLL || !calibration.endLL) {
+        statusText.textContent = 'Place both points first';
+        return;
+      }
+      // Sensors must be running to count steps (this also requests permission).
+      if (motion) motion.start(); else startMotion();
+      // Walk the known line in the RELATIVE heading frame: its offset from
+      // true north is measurable here and every later heading inherits it.
+      motion.setHeadingMode('relative');
+      motion.heading.reset();
+      calibration.active = true;
+      calibration.steps = 0;
+      calibration.result = null;
+      calibration.headingSin = 0;
+      calibration.headingCos = 0;
+      calibration.headingSamples = 0;
+      calibration.headingBias = null;
+      calStepsEl.textContent = '0';
+      calResultEl.textContent = '—';
+      calHeadingEl.textContent = '—';
+      calApplyBtn.disabled = true;
+      statusText.textContent = 'Walk to the end point, then press End';
+    }
+
+    function endCalibrationWalk() {
+      calibration.active = false;
+      if (calibration.steps > 0 && calibration.distance > 0) {
+        calibration.result = calibration.distance / calibration.steps;
+        calResultEl.textContent = `${calibration.result.toFixed(3)} m/step`;
+
+        // The line's true bearing is the device orientation during the walk, so
+        // the offset between it and the measured mean heading calibrates the
+        // relative frame to north.
+        if (calibration.headingSamples > 0) {
+          const meanHeading = Math.atan2(calibration.headingSin, calibration.headingCos);
+          const trueBearing = wrapAngle(turf.bearing(calibration.startLL, calibration.endLL) * Math.PI / 180);
+          const delta = wrapAngle(trueBearing - meanHeading);
+          // The walk is authoritative: it absorbs any manual trim (the slider
+          // recentres) and becomes the new base bias.
+          calibration.headingBias = wrapAngle(baseHeadingBias + headingTrimDeg * Math.PI / 180 + delta);
+          baseHeadingBias = calibration.headingBias;
+          headingTrimDeg = 0;
+          syncHeadingTrim();
+          applyHeadingTrim();
+          calHeadingEl.textContent = `${(calibration.headingBias * 180 / Math.PI).toFixed(1)}°`;
+        }
+
+        calApplyBtn.disabled = false;
+        statusText.textContent =
+          `${calibration.result.toFixed(3)} m/step over ${calibration.steps} steps · ${calibration.distance.toFixed(1)} m`;
+      } else {
+        statusText.textContent = 'No steps recorded - press Start, then walk';
+      }
+    }
+
+    function applyCalibration() {
+      if (!calibration.result) return;
+      stepModel.base = calibration.result;
+      manualCalApplied = true;
+      autoCalBaseApplied = null;
+      try {
+        localStorage.setItem('pdr-step-base', String(calibration.result));
+        localStorage.setItem('pdr-step-manual', '1');
+        if (calibration.headingBias != null) {
+          localStorage.setItem('pdr-heading-bias', String(calibration.headingBias));
+          localStorage.setItem('pdr-heading-mode', 'relative');
+        }
+      } catch (e) { /* ignore */ }
+      statusText.textContent = `Step length set to ${calibration.result.toFixed(3)} m` +
+        (calibration.headingBias != null ? ', heading calibrated' : '');
+      calApplyBtn.disabled = true;
+      updateAutocalUI();
+    }
+
+    // --- manual compass trim ------------------------------------------------
+    /** Paint the slider + its label from `headingTrimDeg`. */
+    function syncHeadingTrim() {
+      headingTrimEl.value = String(headingTrimDeg);
+      headingTrimValEl.textContent = `${headingTrimDeg > 0 ? '+' : ''}${headingTrimDeg}°`;
+    }
+
+    /** Apply base calibration bias + manual trim to the live heading tracker. */
+    function applyHeadingTrim() {
+      if (motion) {
+        motion.heading.calibrate(wrapAngle(baseHeadingBias + headingTrimDeg * Math.PI / 180));
+      }
+    }
+
+    // --- hallway compass-drift correction -----------------------------------
+    function setCorridorBadge(on) {
+      if (corridorBadgeEl) corridorBadgeEl.hidden = !on;
+    }
+
+    /**
+     * One step's worth of hallway heading correction. Only indoors on PDR: the
+     * floor plan provides the corridor axis, the walker provides the direction.
+     * `wantsAxis` gates the ray-cast so it is only paid while arming/active.
+     */
+    function applyCorridorHeading(est, headingRad) {
+      if (!locator || !est || est.source !== 'pdr' || locator.filter.freeRoam
+          || calibration.active) {
+        headingDriftCal.reset();
+        setCorridorBadge(false);
+        return;
+      }
+      const axis = headingDriftCal.wantsAxis
+        ? corridorAxis(locator.isWalkable, [est.lon, est.lat], CORRIDOR_OPTS)
+        : null;
+      const r = headingDriftCal.update(headingRad, axis);
+      if (r.correctionRad) {
+        baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
+        applyHeadingTrim();
+      }
+      setCorridorBadge(r.active);
+    }
+
+    // --- GPS auto-calibration state, indicator and panel --------------------
+    /** The amber/green dot inside the "Calibrate walking model" button. */
+    function setCalStateIcon(calibrated) {
+      calStateIcon.textContent = calibrated ? '\u2713' : '!';
+      calStateIcon.classList.toggle('calibrated', calibrated);
+      calStateIcon.setAttribute('aria-label', calibrated ? 'Calibrated' : 'Not calibrated');
+    }
+
+    /** Human phrases for the calibrator's reject reasons (live panel). */
+    const AUTOCAL_REJECT = {
+      span: 'stretch too short',
+      steps: 'stretch too short',
+      distance: 'stretch too short',
+      gap: 'stopped mid-stretch',
+      cadence: 'wrong pace',
+      turn: 'turned without pausing',
+      coverage: 'not walking steadily',
+      speed: 'not walking steadily',
+      plausibility: 'reading implausible',
+    };
+
+    /** Live rows that update on every fix/step, even before any sample. */
+    function paintAutocalLive(live) {
+      autocalGpsEl.textContent = live.fixAccuracyM == null ? '\u2014'
+        : `\u00b1${live.fixAccuracyM.toFixed(0)} m`
+          + (live.fixSpeedMps != null ? ` \u00b7 ${live.fixSpeedMps.toFixed(2)} m/s` : '');
+      autocalStretchEl.textContent = live.stretch.steps > 0
+        ? `${live.stretch.steps} steps \u00b7 ${live.stretch.seconds.toFixed(1)} s`
+        : '\u2014';
+      autocalLastlegEl.textContent = !live.lastAttempt ? 'measuring\u2026'
+        : live.lastAttempt.ok
+          ? `accepted ${live.lastAttempt.baseM.toFixed(3)} m`
+          : `rejected: ${AUTOCAL_REJECT[live.lastAttempt.reason] ?? 'no usable stretch'}`;
+    }
+
+    let lastAutocalPaint = -Infinity;
+
+    /** Cheap throttle: steps arrive several times a second, fixes once. */
+    function updateAutocalUIThrottled(t) {
+      if (t - lastAutocalPaint < 500) return;
+      lastAutocalPaint = t;
+      updateAutocalUI();
+    }
+
+    /**
+     * Paint the panel stats and the button dot from the calibrator, and apply
+     * the estimate to the step model ONLY when it is certified (within +-6%
+     * at 90% confidence). Before any live data this session, a previously
+     * certified calibration is shown instead.
+     */
+    function updateAutocalUI() {
+      const s = gpsCal.stats();
+      let certified = s.calibrated;
+      paintAutocalLive(s.live);
+
+      if (s.baseM == null && storedAutoCal) {
+        autocalStatusEl.textContent =
+          `Auto-calibrated earlier (90% interval \u00b1${storedAutoCal.ci90RelPct.toFixed(1)}%)`;
+        autocalLengthEl.textContent = `${storedAutoCal.baseM.toFixed(3)} m`;
+        autocalConfEl.textContent = `${storedAutoCal.confidencePct.toFixed(0)}% (target 90%)`;
+        autocalCiEl.textContent =
+          `\u00b1${storedAutoCal.ci90RelPct.toFixed(1)}% (\u00b1${(storedAutoCal.baseM * storedAutoCal.ci90RelPct).toFixed(0)} cm)`;
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = 'stored';
+        certified = true;
+      } else if (s.status === 'idle') {
+        autocalStatusEl.textContent = 'Turn on GPS and walk to auto-calibrate';
+        autocalLengthEl.textContent = '\u2014';
+        autocalConfEl.textContent = '\u2014';
+        autocalCiEl.textContent = '\u2014';
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = '\u2014';
+      } else if (s.status === 'collecting') {
+        autocalStatusEl.textContent = s.live.walking
+          ? 'Measuring this walking stretch\u2026'
+          : 'Waiting for a straight walking stretch (pause when you turn)';
+        autocalLengthEl.textContent = '\u2014';
+        autocalConfEl.textContent = '\u2014';
+        autocalCiEl.textContent = '\u2014';
+        autocalMixEl.textContent = '\u2014';
+        autocalDataEl.textContent = '\u2014';
+      } else {
+        autocalStatusEl.textContent = s.calibrated
+          ? `Calibrated: 90% interval \u00b1${s.ci90RelPct.toFixed(1)}%`
+          : `Calibrating\u2026 ${s.confidencePct.toFixed(0)}% sure within \u00b16%`;
+        autocalLengthEl.textContent = `${s.baseM.toFixed(3)} m`;
+        autocalConfEl.textContent = `${s.confidencePct.toFixed(0)}% (target 90%)`;
+        autocalCiEl.textContent =
+          `\u00b1${s.ci90RelPct.toFixed(1)}% (\u00b1${(s.baseM * s.ci90RelPct).toFixed(0)} cm)`;
+        autocalMixEl.textContent =
+          `${s.samples.speedSharePct.toFixed(0)}% / ${(100 - s.samples.speedSharePct).toFixed(0)}%`;
+        autocalDataEl.textContent = `${s.samples.total} segments \u00b7 ` +
+          `${s.samples.steps} steps \u00b7 ${s.samples.distanceM.toFixed(0)} m`;
+      }
+
+      setCalStateIcon(certified || manualCalApplied);
+      menuBtn.title = certified || manualCalApplied
+        ? 'Step length calibrated (within \u00b16% at 90% confidence)'
+        : 'Step length calibration - walk with GPS on';
+
+      if (s.calibrated && s.baseM != null
+          && (autoCalBaseApplied == null || Math.abs(s.baseM - autoCalBaseApplied) > 0.002)) {
+        stepModel.base = s.baseM;
+        autoCalBaseApplied = s.baseM;
+        storedAutoCal = {
+          baseM: s.baseM, ci90RelPct: s.ci90RelPct,
+          confidencePct: s.confidencePct, t: Date.now(),
+        };
+        try {
+          localStorage.setItem('pdr-step-base', String(s.baseM));
+          localStorage.setItem('pdr-step-auto', JSON.stringify(storedAutoCal));
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    function toggleSidebar() {
+      sidebar.classList.toggle('visible');
+    }
+
+    // Registration math (metresPerDegree, dxfCoordsToLonLat, DXF_SCALE,
+    // makeToLL) lives in geo.mjs - shared with smoke.mjs and import.html.
+
+    // Colours per route tier (vertical connectors, outdoor legs, and the 2D
+    // connector dots keep these; indoor/skybridge route geometry uses the
+    // floor ramp below).
+    const TIER_COLORS = {
+      indoor: '#e74c3c',
+      outdoor: '#2980b9',
+      elevator: '#8e44ad',
+      stairs: '#e67e22',
+      skybridge: '#16a085',
+    };
+
+    // Route colour encodes the floor: red at level 1 -> green at the top
+    // level, interpolated by hue (red -> orange -> yellow -> green), so the
+    // change between floors is unmistakable. Levels are absolute, so a 4th
+    // floor reads green in every building.
+    function maxFloorLevel() {
+      let m = 1;
+      for (const b of buildings) for (const f of b.floors) m = Math.max(m, floorLevelOf(f.floorId));
+      return m;
+    }
+    function floorLevelColor(level) {
+      const max = maxFloorLevel();
+      const t = max > 1 ? (level - 1) / (max - 1) : 0;
+      return `hsl(${Math.round(120 * t)}, 72%, 50%)`;
+    }
+    function floorColorFor(floorId) {
+      return floorLevelColor(floorLevelOf(floorId));
+    }
+    /**
+     * Route geometry colour. Indoor + skybridge use their floor's ramp
+     * colour; outdoor legs run at ground level, so they take level 1's colour
+     * (the same as a normal line on that level). Vertical connectors keep
+     * their tier colours so the stair/elevator cue survives.
+     */
+    function routeColorFor(seg) {
+      if (seg.tier === 'indoor' || seg.tier === 'skybridge') return floorColorFor(seg.floor);
+      if (seg.tier === 'outdoor') return floorLevelColor(1);
+      return TIER_COLORS[seg.tier] ?? TIER_COLORS.indoor;
+    }
+
+    // --- 3D rendering -------------------------------------------------------
+    // The campus is always drawn in 3D with fill-extrusion. Floors stack at
+    // FLOOR_HEIGHT_M per level; walls + floor plates form the structure (built
+    // once) and the route is a raised ribbon rebuilt per route. This build has
+    // no line-z-offset, so extrusions are the only way to lift geometry.
+    const FLOOR_HEIGHT_M = 5.5;   // metres between floor levels
+    const WALL_TOP_M = 5.3;       // wall height above a floor's base
+    const WALL_WIDTH_M = 0.25;    // extruded wall thickness
+    const ROUTE_WIDTH_M = 0.35;   // route ribbon width
+    const STRUCTURE_OPACITY = 0.22;   // x-ray fill-extrusion opacity, all levels
+    const TOP_OUTLINE_M = 0.2;        // base band height on the top level (kept subtle)
+    const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
+    const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
+
+    /** Closed lon/lat ring of a thin rectangle around segment a->b. */
+    function segmentQuad(a, b, widthM) {
+      const m = metresPerDegree((a[1] + b[1]) / 2);
+      const ax = a[0] * m.lon, ay = a[1] * m.lat;
+      const bx = b[0] * m.lon, by = b[1] * m.lat;
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) return null;
+      const nx = (-dy / len) * (widthM / 2), ny = (dx / len) * (widthM / 2);
+      const ll = (x, y) => [x / m.lon, y / m.lat];
+      return [ll(ax + nx, ay + ny), ll(bx + nx, by + ny),
+              ll(bx - nx, by - ny), ll(ax - nx, ay - ny), ll(ax + nx, ay + ny)];
+    }
+
+    /** Closed lon/lat square of side `sizeM` around a point. */
+    function squareRing(ll, sizeM) {
+      const m = metresPerDegree(ll[1]);
+      const hx = (sizeM / 2) / m.lon, hy = (sizeM / 2) / m.lat;
+      return [[ll[0] - hx, ll[1] - hy], [ll[0] + hx, ll[1] - hy],
+              [ll[0] + hx, ll[1] + hy], [ll[0] - hx, ll[1] + hy], [ll[0] - hx, ll[1] - hy]];
+    }
+
+    /** Closed lon/lat circle ring of radius `radiusM` around a point. */
+    function discRing(ll, radiusM, steps = 12) {
+      const m = metresPerDegree(ll[1]);
+      const ring = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * 2 * Math.PI;
+        ring.push([ll[0] + Math.cos(t) * radiusM / m.lon,
+                   ll[1] + Math.sin(t) * radiusM / m.lat]);
+      }
+      return ring;
+    }
+
+    /** Distance in metres between two lon/lat points. */
+    function lonLatDistM(a, b) {
+      const m = metresPerDegree((a[1] + b[1]) / 2);
+      return Math.hypot((b[0] - a[0]) * m.lon, (b[1] - a[1]) * m.lat);
+    }
+
+    /**
+     * Convex hull of lon/lat points (monotone chain), closed. Used for the
+     * floor plate: a wall-bbox slab is axis-aligned and overhangs badly on a
+     * rotated building (AS117 is ~19 deg), while the hull hugs the outline.
+     */
+    function convexHull(points) {
+      if (points.length < 3) return null;
+      const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lower = [];
+      for (const p of pts) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+        lower.push(p);
+      }
+      const upper = [];
+      for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+        upper.push(p);
+      }
+      const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+      if (hull.length < 3) return null;
+      hull.push(hull[0]);
+      return hull;
+    }
+
+    // Floors are drawn as ONE translucent extrusion layer per level, added in
+    // ascending order AFTER the (opaque) route. Transparent fill-extrusions
+    // still write depth in this build, so a single combined structure layer
+    // would depth-reject everything behind it and read as solid; splitting by
+    // level lets each upper floor blend over the lower ones (true x-ray).
+    let structureLevels = [];
+    // Walls darker than the floor plate. The top displayed level (the
+    // selected one) gets slightly darker walls instead of the old blue
+    // highlight - it is the top of the stack, not a starring role. Floor
+    // plates share one colour across levels.
+    const structureColorFor = (level) => {
+      const top = level === floorLevelOf(currentFloorId());
+      const wall = top ? '#1f2328' : '#2b3036';
+      return ['case', ['==', ['get', 'kind'], 'floor'], '#6b7683', wall];
+    };
+
+    /** Build the static structure: extruded walls + floor plates, once. */
+    function buildStructure3D() {
+      if (map.getSource('campus-3d')) return;
+      const features = [];
+      const levels = new Set();
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          const base = floorBase(f.floorId);
+          const level = floorLevelOf(f.floorId);
+          levels.add(level);
+          const segs = f.obstacleLines ?? [];
+          const pts = [];
+          for (const [a, c] of segs) {
+            const ring = segmentQuad(a, c, WALL_WIDTH_M);
+            if (ring) features.push({
+              type: 'Feature',
+              properties: { floor: f.floorId, level, kind: 'wall', base, top: base + WALL_TOP_M },
+              geometry: { type: 'Polygon', coordinates: [ring] },
+            });
+            pts.push(a, c);
+          }
+          // Floor plate: convex hull of the walls, not their axis-aligned bbox.
+          const hull = convexHull(pts);
+          if (hull) features.push({
+            type: 'Feature',
+            properties: { floor: f.floorId, level, kind: 'floor', base: base - 0.15, top: base },
+            geometry: { type: 'Polygon', coordinates: [hull] },
+          });
+        }
+      }
+      structureLevels = [...levels].sort((a, c) => a - c);
+      map.addSource('campus-3d', { type: 'geojson', data: { type: 'FeatureCollection', features } });
+      // The top level's walls are split into two stacked extrusions: this
+      // near-black band from `base` to `base + TOP_OUTLINE_M`, and the
+      // translucent wall ABOVE it - applyStructureStyle raises the selected
+      // level's `fill-extrusion-base` to base + TOP_OUTLINE_M so the two
+      // volumes do not overlap. This build cannot lift a 2D line, so an
+      // extrusion is the outline.
+      //
+      // ORDER IS LOAD-BEARING. This build's fill-extrusion painter draws EVERY
+      // extrusion in the translucent pass, in style order, with depth writes
+      // (`LEQUAL, ReadWrite`) regardless of opacity. Added after the walls, the
+      // band renders last and is depth-rejected behind any nearer wall; added
+      // FIRST, the walls blend over it exactly like they blend over the route,
+      // so the band stays visible through them. Keep this layer before the
+      // campus-3d-level-* layers.
+      map.addLayer({
+        id: 'campus-3d-top-outline',
+        type: 'fill-extrusion',
+        source: 'campus-3d',
+        filter: ['all', ['==', ['get', 'level'], floorLevelOf(currentFloorId())],
+                 ['==', ['get', 'kind'], 'wall']],
+        paint: {
+          // Softened: near-black (not pure) and slightly transparent, so the
+          // base band reads as a hint of the plan rather than a hard ink line.
+          'fill-extrusion-color': '#16181c',
+          'fill-extrusion-base': ['get', 'base'],
+          'fill-extrusion-height': ['+', ['get', 'base'], TOP_OUTLINE_M],
+          'fill-extrusion-opacity': 0.7,
+        },
+      });
+      for (const level of structureLevels) {
+        map.addLayer({
+          id: `campus-3d-level-${level}`,
+          type: 'fill-extrusion',
+          source: 'campus-3d',
+          filter: ['==', ['get', 'level'], level],
+          paint: {
+            'fill-extrusion-color': structureColorFor(level),
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': STRUCTURE_OPACITY,
+            'fill-extrusion-vertical-gradient': true,
+          },
+        });
+      }
+      applyStructureStyle();
+    }
+
+    /**
+     * Style the structure for the current floor and mode. In "Find Path" mode
+     * the selected floor's walls are drawn SOLID BLACK (opaque) with the floor
+     * plates hidden, so the room layout reads clearly while picking taps;
+     * afterwards everything returns to the translucent x-ray stack.
+     */
+    function applyStructureStyle() {
+      const n = floorLevelOf(currentFloorId());
+      for (const level of structureLevels) {
+        const id = `campus-3d-level-${level}`;
+        if (!map.getLayer(id)) continue;
+        map.setLayoutProperty(id, 'visibility', (is3D && level <= n) ? 'visible' : 'none');
+        const sel = level === n;
+        if (findPathMode) {
+          // Walls only (plates hidden), selected level solid black, full
+          // height (the outline band is hidden in this mode).
+          map.setFilter(id, ['all', ['==', ['get', 'level'], level], ['==', ['get', 'kind'], 'wall']]);
+          map.setPaintProperty(id, 'fill-extrusion-base', ['get', 'base']);
+          map.setPaintProperty(id, 'fill-extrusion-color', sel ? '#000000' : '#2b3036');
+          map.setPaintProperty(id, 'fill-extrusion-opacity', sel ? 1 : STRUCTURE_OPACITY);
+        } else {
+          map.setFilter(id, ['==', ['get', 'level'], level]);
+          // The top level's translucent walls start ABOVE the opaque outline
+          // band (two stacked extrusions, no overlap).
+          map.setPaintProperty(id, 'fill-extrusion-base',
+            sel ? ['+', ['get', 'base'], TOP_OUTLINE_M] : ['get', 'base']);
+          map.setPaintProperty(id, 'fill-extrusion-color', structureColorFor(level));
+          map.setPaintProperty(id, 'fill-extrusion-opacity', STRUCTURE_OPACITY);
+        }
+      }
+      if (map.getLayer('campus-3d-top-outline')) {
+        // The black base band follows the selected level; hidden while picking
+        // a route (that mode draws the walls solid black already).
+        map.setFilter('campus-3d-top-outline', ['all',
+          ['==', ['get', 'level'], n], ['==', ['get', 'kind'], 'wall']]);
+        map.setLayoutProperty('campus-3d-top-outline', 'visibility',
+          (is3D && !findPathMode) ? 'visible' : 'none');
+      }
+      if (map.getLayer('campus-3d-route')) {
+        map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    // The last computed route.
+    let lastRoute = null;
+
+    /** Does this route segment lie on the given floor? (2D line filtering.) */
+    function segmentOnFloor(s, floorId) {
+      if (s.tier === 'indoor') return s.floor === floorId;
+      // An explicit skybridge may join different floors (a grade change); it
+      // belongs to both of its ends.
+      if (s.tier === 'skybridge') {
+        return s.floor === floorId || s.fromFloor === floorId || s.toFloor === floorId;
+      }
+      if (s.tier === 'outdoor') return buildings.some((b) => b.groundFloor === floorId);
+      return false;
+    }
+
+    /** (Re)draw the route: 3D raised ribbons + a filtered 2D line. */
+    function renderRoute() {
+      // --- 3D: raised ribbons + vertical risers (whole route) ---
+      const features = [];
+      for (const s of lastRoute?.segments ?? []) {
+        const color = routeColorFor(s);
+        if (s.polyline) {
+          // A cross-floor skybridge is drawn at the higher of its two ends so
+          // it does not cut through the lower floor's stack.
+          const base = (s.tier === 'outdoor' ? 0
+            : s.tier === 'skybridge'
+              ? Math.max(floorBase(s.fromFloor ?? s.floor), floorBase(s.toFloor ?? s.floor))
+              : floorBase(s.floor)) + 0.1;
+          for (let i = 1; i < s.polyline.length; i++) {
+            const ring = segmentQuad(s.polyline[i - 1], s.polyline[i], ROUTE_WIDTH_M);
+            if (ring) features.push({
+              type: 'Feature', properties: { color, base, top: base + 0.5 },
+              geometry: { type: 'Polygon', coordinates: [ring] },
+            });
+          }
+        } else if ((s.tier === 'elevator' || s.tier === 'stairs') && s.ll) {
+          const b0 = floorBase(s.fromFloor), b1 = floorBase(s.toFloor);
+          // Connector-coloured riser between the landings.
+          features.push({
+            type: 'Feature',
+            properties: { color, base: Math.min(b0, b1), top: Math.max(b0, b1) },
+            geometry: { type: 'Polygon', coordinates: [squareRing(s.ll, 0.6)] },
+          });
+        }
+      }
+      // Destination pin: a raised block at the destination floor's base (0
+      // outdoors) so the marker sits on the correct floor, not the basemap.
+      if (destinationMarker) {
+        const {lng, lat} = destinationMarker.getLngLat();
+        const base = (destinationFloor ? floorBase(destinationFloor) : 0) + 0.1;
+        features.push({
+          type: 'Feature', properties: { color: '#3FB1CE', base, top: base + 1.6 },
+          geometry: { type: 'Polygon', coordinates: [squareRing([lng, lat], 0.5)] },
+        });
+      }
+      const data = { type: 'FeatureCollection', features };
+      if (!map.getSource('campus-3d-route')) {
+        map.addSource('campus-3d-route', { type: 'geojson', data });
+        map.addLayer({
+          id: 'campus-3d-route',
+          type: 'fill-extrusion',
+          source: 'campus-3d-route',
+          paint: {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 1,
+          },
+        });
+      } else {
+        map.getSource('campus-3d-route').setData(data);
+      }
+
+      // Connector dots: one per vertical leg of the CURRENT route, so stairs/
+      // elevators appear only where the path uses them. Empty without a route.
+      if (map.getSource('portals')) {
+        const portalFeatures = (lastRoute?.segments ?? [])
+          .filter((s) => (s.tier === 'elevator' || s.tier === 'stairs') && s.ll)
+          .map((s) => ({
+            type: 'Feature',
+            properties: { kind: s.tier, building: s.building ?? '',
+                          fromFloor: s.fromFloor, toFloor: s.toFloor },
+            geometry: { type: 'Point', coordinates: s.ll },
+          }));
+        map.getSource('portals').setData({ type: 'FeatureCollection', features: portalFeatures });
+      }
+
+      // --- 2D: flat line. The selected floor's part is solid; segments on
+      // other floors stay visible but faded, so a route that changes floors
+      // clearly continues instead of ending at a stairwell.
+      const sel = currentFloorId();
+      const onSelectedFloor = (s) => segmentOnFloor(s, sel);
+      const routeLineData = (onFloor) => ({
+        type: 'FeatureCollection',
+        features: (lastRoute?.segments ?? [])
+          .filter((s) => s.polyline && onSelectedFloor(s) === onFloor)
+          .map((s) => ({
+            type: 'Feature', properties: { tier: s.tier, color: routeColorFor(s) },
+            geometry: { type: 'LineString', coordinates: s.polyline },
+          })),
+      });
+      const lineData = routeLineData(true);
+      const ghostData = routeLineData(false);
+      if (!map.getSource('navigation-route')) {
+        map.addSource('navigation-route', { type: 'geojson', data: lineData });
+        map.addLayer({
+          id: 'navigation-route',
+          type: 'line',
+          source: 'navigation-route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 4,
+          },
+        });
+      } else {
+        map.getSource('navigation-route').setData(lineData);
+      }
+      if (!map.getSource('navigation-route-ghost')) {
+        map.addSource('navigation-route-ghost', { type: 'geojson', data: ghostData });
+        map.addLayer({
+          id: 'navigation-route-ghost',
+          type: 'line',
+          source: 'navigation-route-ghost',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 3,
+            'line-opacity': 0.25,
+          },
+        });
+      } else {
+        map.getSource('navigation-route-ghost').setData(ghostData);
+      }
+      if (map.getLayer('navigation-route')) {
+        map.setLayoutProperty('navigation-route', 'visibility', is3D ? 'none' : 'visible');
+      }
+      if (map.getLayer('navigation-route-ghost')) {
+        map.setLayoutProperty('navigation-route-ghost', 'visibility', is3D ? 'none' : 'visible');
+      }
+      if (map.getLayer('campus-3d-route')) {
+        map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
+      }
+      // The DOM marker only shows in 2D, and only while the floor it belongs
+      // to is the one displayed (outdoor destinations show on a ground floor).
+      if (destinationMarker) {
+        const onView = destinationFloor === null
+          ? buildings.some((b) => b.groundFloor === sel)
+          : destinationFloor === sel;
+        destinationMarker.getElement().style.display = (is3D || !onView) ? 'none' : '';
+      }
+    }
+
+    /** Human label for a building id (short code + full name when known). */
+    function buildingLabel(id) {
+      const b = buildings.find((x) => x.id === id);
+      if (!b) return id;
+      const code = b.sourceId || b.id;
+      return b.sourceName ? `${code} — ${b.sourceName}` : code;
+    }
+
+    /** Middle vertex of a route polyline, or null. */
+    function polyMid(poly) {
+      if (!poly || !poly.length) return null;
+      return poly[Math.floor(poly.length / 2)];
+    }
+
+    /**
+     * Turn the router's segments into a leg-by-leg preview for the card.
+     * Consecutive same-building/floor indoor runs merge, so it reads
+     * "Inside Engineering & Computation Building" instead of a row of codes.
+     * Each step carries a representative `ll` and `floorId` so it can be
+     * tapped to fly the map to where it happens.
+     */
+    function routePreviewSteps(route) {
+      const steps = [];
+      let cur = null;
+      const flush = () => { if (cur) steps.push(cur); cur = null; };
+      for (const s of route.segments ?? []) {
+        if (s.tier === 'indoor') {
+          if (cur && cur.kind === 'indoor' && cur.building === s.building && cur.floor === s.floor) {
+            cur.meters += s.meters || 0;
+          } else {
+            flush();
+            cur = { kind: 'indoor', building: s.building, floor: s.floor, meters: s.meters || 0,
+                    ll: polyMid(s.polyline), floorId: s.floor ?? null };
+          }
+        } else if (s.tier === 'outdoor') {
+          if (cur && cur.kind === 'outdoor') cur.meters += s.meters || 0;
+          else { flush(); cur = { kind: 'outdoor', meters: s.meters || 0,
+                                  ll: polyMid(s.polyline), floorId: null }; }
+        } else {
+          flush();
+          steps.push({ kind: s.tier, from: s.fromFloor, to: s.toFloor, building: s.building,
+                       ll: s.ll ?? polyMid(s.polyline),
+                       floorId: s.to ?? s.from ?? null });
+        }
+      }
+      flush();
+      return steps;
+    }
+
+    /** One preview row (dot + label + detail), tappable to fly there. */
+    function routeStepEl(step) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'route-step';
+      const dot = document.createElement('span');
+      dot.className = 'step-dot' + (step.kind === 'outdoor' ? ' muted' : '');
+      const body = document.createElement('div');
+      const text = document.createElement('div');
+      text.className = 'step-text';
+      const sub = document.createElement('div');
+      sub.className = 'step-sub';
+      let label = step.kind, detail = '';
+      if (step.kind === 'indoor') {
+        label = `Inside ${buildingLabel(step.building)}`;
+        detail = `Floor ${step.floor} · ${Math.round(step.meters)} m`;
+      } else if (step.kind === 'outdoor') {
+        label = 'Walk outside';
+        detail = `${Math.round(step.meters)} m`;
+      } else if (step.kind === 'elevator') {
+        label = 'Take the elevator'; detail = `Floor ${step.from} → ${step.to}`;
+      } else if (step.kind === 'stairs') {
+        label = 'Take the stairs'; detail = `Floor ${step.from} → ${step.to}`;
+      } else if (step.kind === 'skybridge') {
+        label = 'Cross the skybridge';
+        detail = step.building ? `to ${buildingLabel(step.building)}` : '';
+      }
+      text.textContent = label;
+      sub.textContent = detail;
+      body.appendChild(text);
+      body.appendChild(sub);
+      el.appendChild(dot);
+      el.appendChild(body);
+      if (step.ll) {
+        el.classList.add('tappable');
+        el.title = 'Show this step on the map';
+        el.addEventListener('click', () => flyToStep(step));
+      }
+      return el;
+    }
+
+    /** Fly the map to a route step's location, switching to its floor. */
+    function flyToStep(step) {
+      if (!step.ll) return;
+      if (step.floorId) {
+        const lvl = floorLevels.indexOf(step.floorId) + 1;
+        if (lvl > 0) setFloor(lvl);
+      }
+      map.flyTo({ center: step.ll, zoom: Math.max(map.getZoom(), 19), duration: 650 });
+      // Collapse the card on phones so the location is actually visible.
+      const card = document.getElementById('route-card');
+      const toggle = document.getElementById('route-toggle');
+      if (card && window.matchMedia('(max-width: 899px)').matches) {
+        card.classList.remove('expanded');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    function showRoute(route) {
+      lastRoute = route;
+      lastReroute = null;   // a freshly set route re-anchors the live re-route
+      const routeCard = document.getElementById('route-card');
+      const routeTitle = document.getElementById('route-title');
+      const routeMeta = document.getElementById('route-meta');
+      const routeSteps = document.getElementById('route-steps');
+      if (!route) {
+        if (routeCard) routeCard.hidden = true;
+        statusText.textContent = 'No route found';
+        renderRoute();
+        return;
+      }
+      renderRoute();
+      const mins = Math.floor(route.totalSeconds / 60);
+      const secs = Math.round(route.totalSeconds % 60);
+      const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      statusText.textContent = `Route is ${Math.round(route.totalMeters)} m · ${time}`;
+      if (routeCard) {
+        const query = searchInput.value.trim();
+        if (routeTitle) routeTitle.textContent = query ? `To ${query}` : route.summary;
+        if (routeMeta) routeMeta.textContent =
+          `${Math.round(route.totalMeters)} m · ${time} walk`;
+        if (routeSteps) routeSteps.replaceChildren(...routePreviewSteps(route).map(routeStepEl));
+        routeCard.hidden = false;
+      }
+    }
+
+    // --- building / room search --------------------------------------------
+    // A query carries the UAA building code from the floor JSON's `ID` field
+    // (BMH) or the app's registration id (AS103), plus a room number. Rooms
+    // are the roomLabels built in loadFloor - the exact same array the
+    // displayed room-numbers layer uses.
+    /**
+     * The room's DOORWAY: the nearest door (DOORS-layer midpoint) that a
+     * straight walk from the label reaches without crossing a wall. A segment
+     * label->door that stays walkable means they share one open space, so the
+     * door belongs to this room (not an adjacent one across a wall). Falls back
+     * to the label when the floor has no such door.
+     */
+    function doorwayFor(floor, labelLL) {
+      if (!floor || !floor.navGraph || !floor.doorPoints?.length) return labelLL;
+      const g = floor.navGraph;
+      const from = g.isWalkable(labelLL) ? labelLL : (g.nearestWalkable?.(labelLL) ?? labelLL);
+      const mpd = metresPerDegree(from[1]);
+      let best = null, bestD = Infinity;
+      for (const d of floor.doorPoints) {
+        const dd = g.isWalkable(d) ? d : (g.nearestWalkable?.(d) ?? d);
+        const dist = Math.hypot((dd[0] - from[0]) * mpd.lon, (dd[1] - from[1]) * mpd.lat);
+        if (dist >= bestD || dist > 15) continue;
+        const steps = Math.max(1, Math.ceil(dist / 0.2));
+        let clear = true;
+        for (let s = 1; s <= steps; s++) {
+          const t = s / steps;
+          if (!g.isWalkable([from[0] + (dd[0] - from[0]) * t, from[1] + (dd[1] - from[1]) * t])) { clear = false; break; }
+        }
+        if (clear) { best = dd; bestD = dist; }
+      }
+      return best ?? labelLL;
+    }
+
+    function findRoom(building, roomText) {
+      const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
+      const want = norm(roomText);
+      if (!want) return null;
+      // Room numbering usually starts with the floor (114A is on 1), so an
+      // exact hit on that floor beats an exact hit elsewhere.
+      const wantLevel = parseInt(want[0], 10);
+      const hitFor = (f, coord) => ({
+        ll: doorwayFor(f, coord), labelLL: coord, floorId: f.floorId,
+      });
+      let exact = null, prefixed = null;
+      for (const f of building.floors) {
+        for (const label of f.roomLabels ?? []) {
+          const text = norm(label.properties.text);
+          if (text === want) {
+            const hit = hitFor(f, label.geometry.coordinates);
+            if (!isNaN(wantLevel) && floorLevelOf(f.floorId) === wantLevel) return hit;
+            exact ??= hit;
+          } else if (!prefixed && text.startsWith(want)) {
+            prefixed = hitFor(f, label.geometry.coordinates);
+          }
+        }
+      }
+      return exact ?? prefixed;
+    }
+
+    function runSearch() {
+      const q = searchInput.value.trim();
+      if (!campusRouter) { statusText.textContent = 'Buildings still loading'; return; }
+      if (!q) { statusText.textContent = 'Type a building and room, e.g. BMH 114A'; return; }
+      // The longest known building code at the start of the query wins, so
+      // "BMH 114A", "BMH114A" and "AS103114" all split correctly. Codes are
+      // the UAA `ID` (BMH) or the registration id (AS103).
+      const ql = q.toLowerCase();
+      const candidates = [];
+      for (const b of buildings) {
+        if (b.sourceId) candidates.push({b, key: b.sourceId.toLowerCase()});
+        candidates.push({b, key: b.id.toLowerCase()});
+      }
+      candidates.sort((a, c) => c.key.length - a.key.length);
+      const hit = candidates.find((c) => ql.startsWith(c.key));
+      if (!hit) {
+        const codes = buildings.map((b) => b.sourceId ?? b.id).join(', ');
+        statusText.textContent = `Unknown building in "${q}" - try ${codes}`;
+        return;
+      }
+      const building = hit.b;
+      const roomText = q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim();
+      const room = roomText ? findRoom(building, roomText) : null;
+      if (!room) {
+        statusText.textContent = roomText
+          ? `No room "${roomText}" in ${building.sourceId ?? building.id}`
+          : 'Include a room number, e.g. BMH 114A';
+        return;
+      }
+      // Start from the live estimate ("My Location") when there is one, else
+      // from wherever the map is centred.
+      const startLL = currentEstimate
+        ? [currentEstimate.lon, currentEstimate.lat]
+        : [map.getCenter().lng, map.getCenter().lat];
+      const startFloor = (currentEstimate && locator) ? locator.floor.floorId : currentFloorId();
+      const route = campusRouter.route(startLL, room.ll,
+        {startFloor, endFloor: room.floorId});
+      // The room becomes the destination: marker + 3D pin on its floor.
+      destinationFloor = room.floorId;
+      if (destinationMarker) destinationMarker.setLngLat(room.ll);
+      else destinationMarker = new maplibregl.Marker().setLngLat(room.ll).addTo(map);
+      // A search supersedes any path tap-picking.
+      isDefiningPath = false;
+      findPathMode = false;
+      const level = floorLevels.indexOf(room.floorId) + 1;
+      if (level > 0) setFloor(level);
+      showRoute(route);
+      map.flyTo({center: room.ll, zoom: Math.max(map.getZoom(), 18.5), duration: 700});
+      searchInput.blur();
+    }
+
+    // Map click handler
+    map.on('click', (e) => {
+      const coords = e.lngLat;
+      const coordArray = [coords.lng, coords.lat];
+
+      if (placingAnchor) {
+        placingAnchor = false;
+        anchorBtn.classList.remove('active');
+        anchorAt(coordArray);
+        return;
+      }
+
+      if (calibration.placing) {
+        setCalPoint(calibration.placing, coordArray);
+        return;
+      }
+
+      if (isDefiningPath && campusRouter) {
+        if (firstPathPoint === null) {
+          firstPathPoint = coordArray;
+          // Freeze the floor for the start here: the user may switch floors
+          // before tapping the destination (e.g. start on 01, end on 02).
+          firstPathFloor = floorOfView();
+          statusText.textContent = 'Tap the destination point';
+        } else {
+          statusText.textContent = 'Calculating route...';
+          // Each tap is read on the floor that was displayed when it was made,
+          // so a single route can start and end on different floors.
+          const endFloor = floorOfView();
+          const route = campusRouter.route(firstPathPoint, coordArray,
+            {startFloor: firstPathFloor, endFloor});
+          // Mark the destination on the floor it actually lands on (null when
+          // outdoors), before rendering so the 3D pin is placed correctly.
+          const destHit = campusRouter.buildingAt(coordArray, endFloor);
+          destinationFloor = destHit ? destHit.floor.floorId : null;
+          if (destinationMarker) destinationMarker.setLngLat(coords);
+          else destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
+          showRoute(route);
+          firstPathPoint = null;
+          firstPathFloor = null;
+          isDefiningPath = false;
+          findPathMode = false;      // route computed: black plan + numbers go away
+          applyFloorFilter(currentFloorId());
+        }
+      }
+      // A plain tap does nothing - it used to silently move a destination
+      // marker, which was confusing.
+    });
+
+    // Live location
+    let livePosMarker = null;
+    let headingIndicator = null;
+    let lastAccuracyMeters = 0;
+    let geoWatchId = null;
+    let lastCalFixStamp = null;   // de-dupe cached fixes for the auto-calibrator
+    let didAutoCenter = false;   // fly to the first fix after "My Location"
+    // Live 3D avatar + Follow state (see the sections below): the latest
+    // estimate, and the most recent heading in degrees clockwise from north.
+    let followCenter = null;      // latest estimate [lon, lat]
+    let lastHeadingDeg = null;    // compass heading / GPS course, degrees
+    let followRaf = null;         // requestAnimationFrame handle
+    let followFraming = false;    // the one-shot enable ease owns the camera
+
+    // PDR + GPS locator (motion.mjs -> locate.mjs -> arbiter.mjs). GPS and
+    // dead reckoning run at the same time; the arbiter picks whichever is
+    // more accurate, so the app transitions in and out of buildings on its own.
+    const stepModel = new StepLengthModel();
+    // Continuous GPS step-length auto-calibration (autocal.mjs): every good-GPS
+    // walking stretch feeds the estimator; `stepModel.base` is only touched
+    // once the estimate is within +-6% at 90% confidence - never before.
+    const gpsCal = new GpsStepCalibrator({
+      cadenceRef: stepModel.cadenceRef,
+      cadenceGain: stepModel.gain,
+    });
+    let manualCalApplied = false;     // a known-distance calibration was applied
+    let autoCalBaseApplied = null;    // last base the auto-calibrator wrote
+    let storedAutoCal = null;         // last certified auto-calibration (persisted)
+    // Manual compass trim (degrees, -45..45) the user drags to correct the
+    // heading; composed with the walk-calibration bias (heading bias = base +
+    // trim) so the slider never has to know about the relative-frame offset.
+    let headingTrimDeg = 0;
+    let baseHeadingBias = 0;
+    // Hallway compass-drift correction: while the walker goes straight down a
+    // clearly elongated (>9:1) corridor, nudge the heading bias toward the
+    // corridor axis; stop on an intentional turn. The correction is
+    // SESSION-ONLY - it deliberately does NOT touch localStorage, so a reload
+    // returns to the walk-calibrated bias.
+    const headingDriftCal = new HeadingDriftCalibrator();
+    const CORRIDOR_OPTS = { aspectRatio: 9, maxM: 15 };
+    // Restore a previously calibrated step length and heading calibration.
+    let savedHeadingBias = null;
+    let savedHeadingMode = 'absolute';
+    try {
+      const savedBase = parseFloat(localStorage.getItem('pdr-step-base'));
+      if (savedBase > 0) stepModel.base = savedBase;
+      const savedBias = parseFloat(localStorage.getItem('pdr-heading-bias'));
+      if (Number.isFinite(savedBias)) savedHeadingBias = savedBias;
+      const savedMode = localStorage.getItem('pdr-heading-mode');
+      if (savedMode === 'relative') savedHeadingMode = 'relative';
+      const savedTrim = parseFloat(localStorage.getItem('pdr-heading-trim'));
+      if (Number.isFinite(savedTrim)) headingTrimDeg = Math.max(-45, Math.min(45, savedTrim));
+      storedAutoCal = JSON.parse(localStorage.getItem('pdr-step-auto') || 'null');
+      if (!(storedAutoCal && storedAutoCal.confidencePct >= 90)) storedAutoCal = null;
+      manualCalApplied = localStorage.getItem('pdr-step-manual') === '1'
+        || (savedBase > 0 && !storedAutoCal);
+    } catch (e) { /* ignore */ }
+    // Paint the button dot + panel from the stored calibration (if any).
+    updateAutocalUI();
+    // Paint the restored compass trim (the bias itself is applied in
+    // startMotion, once the sensor tracker exists).
+    headingTrimEl.value = String(headingTrimDeg);
+    syncHeadingTrim();
+    let motion = null;
+    let locator = null;    // { building, floor, filter, arbiter }
+    let currentEstimate = null;
+
+    function floorCentroid(floor) {
+      let x = 0, y = 0, n = 0;
+      for (const seg of floor.obstacleLines) for (const [lon, lat] of seg) { x += lon; y += lat; n++; }
+      return n ? [x / n, y / n] : null;
+    }
+
+    function nearestFloor([lon, lat]) {
+      let best = null, bestD = Infinity;
+      const mpd = metresPerDegree(lat);
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          const c = floorCentroid(f);
+          if (!c) continue;
+          const d = Math.hypot((c[0] - lon) * mpd.lon, (c[1] - lat) * mpd.lat);
+          if (d < bestD) { bestD = d; best = { building: b, floor: f }; }
+        }
+      }
+      return best;
+    }
+
+    // Bind the locator to a building/floor. The DISPLAYED floor wins when it
+    // is known ("I'm Here" passes `floorOfView()`): stacked floors share a
+    // footprint, so the centroid-nearest pick cannot tell "03" from "01" and
+    // an upper-floor anchor used to bind to the ground floor. Falls back to
+    // the centroid pick for GPS fixes / boot, which carry no floor. Re-built
+    // only when the floor changes, so the particle cloud is preserved.
+    function ensureLocator([lon, lat], floorHint) {
+      let pick = null;
+      if (floorHint && campusRouter) {
+        const hit = campusRouter.buildingAt([lon, lat], floorHint);
+        if (hit) pick = { building: hit.building, floor: hit.floor };
+      }
+      if (!pick) pick = nearestFloor([lon, lat]);
+      if (!pick) return;
+      if (locator && locator.floor === pick.floor) return;
+      // A floor's raster (navGraph) ends at its own wall bbox. A connected
+      // complex is split across several plans (AS117 and AS119 are one
+      // building with separate navgraphs), so a body crossing from one into
+      // its neighbour hits that bbox as an INVISIBLE wall: the cloud piles up
+      // in a line along it instead of following. PDR is therefore bound to the
+      // UNION of every plan at this floor level - walls still block, a gap
+      // between separate buildings still blocks (nothing walkable in between),
+      // but an opening shared by two plans is continuous.
+      const level = pick.floor.floorId;
+      const sameLevel = buildings
+        .map((b) => ({ b, f: b.floors.find((x) => x.floorId === level) }))
+        .filter((x) => x.f);
+      const levelGraphs = sameLevel.map((x) => x.f.navGraph);
+      const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
+      // Each raster stops at its own wall bbox (padded by one clearance);
+      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall,
+      // it is just the end of the plan, so the PDR filter must not treat it as
+      // one - otherwise the cloud piles up in a line along the bbox and the
+      // walker "can't get past it" (atria/open corridor ends and the gaps
+      // between separate plans). Inside a plan the walls still block; just past
+      // a plan's edge the space is unmapped and free, but only for a BOUNDED
+      // margin - beyond it the space counts as blocked so the estimate cannot
+      // dead-reckon away into the void.
+      const PDR_OFFPLAN_MARGIN_M = 3;
+      // One pass over the plans: as soon as any plan contains the point and
+      // says it is body-clear, the point is walkable; otherwise it is walkable
+      // only if it sits within the bounded off-plan margin of some plan.
+      const pdrWalkable = (ll) => {
+        let near = false;
+        for (const gr of levelGraphs) {
+          if (gr.inBounds(ll)) {
+            if (gr.isWalkable(ll)) return true;
+          } else if (!near && gr.inBounds(ll, PDR_OFFPLAN_MARGIN_M)) {
+            near = true;
+          }
+        }
+        return near;
+      };
+      // Proximity buckets so the plan the point is actually near is searched
+      // first (a plan the point is far outside must NOT be handed the full
+      // 500-cell radius - it spirals every ring for ~0.2 s).
+      const GRAPH_MARGINS_M = [0, 10, 30, 100, 300];
+      const boundsRank = (gr, ll) => {
+        for (let i = 0; i < GRAPH_MARGINS_M.length; i++) {
+          if (gr.inBounds(ll, GRAPH_MARGINS_M[i])) return i;
+        }
+        return GRAPH_MARGINS_M.length;
+      };
+      /**
+       * Nearest walkable point across the same-level plans. Short-circuits when
+       * the point is already walkable (then it IS the nearest), searches the
+       * nearest plan first, and caps each later search by the best distance
+       * found so far - so off-plan plans do a few rings, not the full radius.
+       * (The naive union spiralled every plan at radius 500: ~430 ms per
+       * "I'm Here" / floor change.)
+       */
+      const nearestWalkable = (ll, maxRadius) => {
+        if (pdrWalkable(ll)) return ll;
+        const cap0 = maxRadius ?? 60;
+        const ordered = levelGraphs
+          .map((gr) => ({ gr, rank: boundsRank(gr, ll) }))
+          .sort((a, b) => a.rank - b.rank);
+        let best = null, bestD = Infinity, cap = cap0;
+        for (const { gr } of ordered) {
+          const p = gr.nearestWalkable?.(ll, cap);
+          if (!p) continue;
+          const d = lonLatDistM(ll, p);
+          if (d < bestD) {
+            bestD = d; best = p;
+            cap = Math.min(cap0, Math.max(1, Math.ceil(d / 0.1)));
+          }
+        }
+        return best;
+      };
+      // Outdoors, PDR free-roams but must stay off every building that has a
+      // plan at this level (the bound one included) - so the cloud cannot cut
+      // through a building, while a gap between buildings, or a bridge passing
+      // over a building with no floor here, stays usable.
+      const isOutsideBuildings = (ll) => !isWalkable(ll);
+      const filter = new ParticleFilter({ isWalkable: pdrWalkable, nearestWalkable });
+      locator = {
+        building: pick.building, floor: pick.floor, filter, isWalkable,
+        arbiter: new PositionArbiter({
+          filter,
+          isWalkable,
+          nearestWalkable,
+          isOutsideBuildings,
+        }),
+      };
+      // Seed the cloud so PDR is live immediately. The particle filter does
+      // nothing until seeded, and indoors GPS is usually too poor to re-seed
+      // it - without this, steps are counted but never move the marker.
+      const centroid = floorCentroid(pick.floor);
+      const seed = nearestWalkable([lon, lat], 500)
+        || (centroid && nearestWalkable(centroid))
+        || [lon, lat];
+      filter.seed(seed, { spreadM: 4 });
+      headingDriftCal.reset();
+      setCorridorBadge(false);
+    }
+
+    // --- live re-routing ----------------------------------------------------
+    // While a route is on screen, each position update re-routes from the
+    // CURRENT estimate to the same destination, so the drawn line always
+    // leads forward instead of pointing back where you came from. Runs for
+    // both GPS and PDR updates (PDR used to leave the line stale indoors) and
+    // passes the locator's bound floor as the start-floor hint. Throttled:
+    // one route costs ~70 ms, so recompute only after REROUTE_MIN_M metres or
+    // REROUTE_MIN_S seconds. Skipped while "Find Path" taps are being picked.
+    const REROUTE_MIN_M = 3;
+    const REROUTE_MIN_S = 5;
+    let lastReroute = null;   // {ll, t}
+    let reroutePending = false;
+
+    /**
+     * With a route on screen, re-plan from the current estimate. Throttled, and
+     * the ~70 ms Dijkstra is DEFERRED off the animation frame (requestIdleCallback,
+     * setTimeout fallback) so it never janks the camera/particle rendering.
+     */
+    function rerouteFromEstimate() {
+      if (!campusRouter || !destinationMarker || !lastRoute) return;
+      if (!currentEstimate || isDefiningPath) return;
+      const ll = [currentEstimate.lon, currentEstimate.lat];
+      const now = performance.now();
+      if (lastReroute) {
+        const mpd = metresPerDegree(ll[1]);
+        const moved = Math.hypot((ll[0] - lastReroute.ll[0]) * mpd.lon,
+                                 (ll[1] - lastReroute.ll[1]) * mpd.lat);
+        if (moved < REROUTE_MIN_M && now - lastReroute.t < REROUTE_MIN_S * 1000) return;
+      }
+      lastReroute = { ll, t: now };
+      if (reroutePending) return;
+      reroutePending = true;
+      const run = () => {
+        reroutePending = false;
+        if (!campusRouter || !destinationMarker || !lastRoute
+            || !currentEstimate || isDefiningPath) return;
+        const from = [currentEstimate.lon, currentEstimate.lat];
+        const dest = destinationMarker.getLngLat();
+        const startFloor = locator?.floor?.floorId ?? currentFloorId();
+        const route = campusRouter.route(from, [dest.lng, dest.lat],
+          { startFloor, endFloor: destinationFloor });
+        if (route) {
+          lastRoute = route;
+          renderRoute();
+        }
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 500 });
+      } else {
+        window.setTimeout(run, 0);
+      }
+    }
+
+    // --- particle cloud overlay (the live position indicator) ---------------
+    // Draws the PDR particle filter's cloud - where the pedestrian *could* be -
+    // as dots sized/darkened by particle weight. This is the production
+    // position indicator (it replaced the old accuracy circle). Created lazily
+    // (the style may still be loading when the first estimate arrives) and
+    // refreshed on every estimate; the WHOLE cloud is drawn, only the update
+    // rate is throttled so it never keeps up with the sensors.
+    let lastParticlePaint = -Infinity;
+    let lastParticleVersion = -1;
+    const PARTICLE_PAINT_MS = 100;
+    function ensureParticleLayer() {
+      if (map.getLayer && map.getLayer('pdr-particles')) return;
+      try {
+        if (!map.getSource('pdr-particles')) {
+          map.addSource('pdr-particles', {
+            type: 'geojson', data: { type: 'FeatureCollection', features: [] },
+          });
+        }
+        map.addLayer({
+          id: 'pdr-particles',
+          type: 'circle',
+          source: 'pdr-particles',
+          paint: {
+            // Weighted particles are larger and more opaque; the cloud sharpens
+            // as the floor plan squeezes it into a corridor.
+            'circle-radius': ['interpolate', ['linear'], ['get', 'w'], 0, 1.5, 0.02, 3.5],
+            'circle-color': '#e0533d',
+            'circle-opacity': ['interpolate', ['linear'], ['get', 'w'], 0, 0.12, 0.02, 0.7],
+          },
+        });
+        // Flat dots read wrong under a pitched 3D view (they sit at ground
+        // level, not the selected floor); show them in 2D only.
+        map.setLayoutProperty('pdr-particles', 'visibility', is3D ? 'none' : 'visible');
+      } catch { /* style not ready; the next estimate retries */ }
+    }
+
+    function updateParticles() {
+      // The layer is hidden in 3D (flat dots read wrong under a pitch), so
+      // don't build or upload the cloud at all while it is not visible.
+      if (is3D) return;
+      const filter = locator?.filter;
+      // A GPS-only estimate (or a repeated render) does not move the PDR
+      // cloud; skip the O(count) rebuild + map upload unless it changed.
+      if (filter && filter.version === lastParticleVersion) return;
+      const now = performance.now();
+      if (now - lastParticlePaint < PARTICLE_PAINT_MS) return;
+      lastParticlePaint = now;
+      ensureParticleLayer();
+      const src = map.getSource('pdr-particles');
+      if (!src) return;
+      const pts = filter?.points?.() ?? [];
+      lastParticleVersion = filter ? filter.version : -1;
+      // Draw EVERY particle (no sub-sampling) - the whole cloud is the point.
+      const features = new Array(pts.length);
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        features[i] = {
+          type: 'Feature', properties: { w: p.w },
+          geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        };
+      }
+      src.setData({ type: 'FeatureCollection', features });
+    }
+
+    function renderEstimate(est) {
+      if (!est) return;
+      currentEstimate = est;
+      const ll = [est.lon, est.lat];
+      followCenter = ll;
+      if (followActive() && !followFraming) startFollowLoop();
+      if (livePosMarker) livePosMarker.setLngLat(ll);
+      lastAccuracyMeters = est.accuracyM;
+      updateParticles();
+      updateHeadingLine();   // keep the 4 m heading line attached to the marker
+      // 3D: the same estimate as a blocky avatar extrusion on the selected
+      // floor (DOM markers cannot be lifted). 2D keeps the DOM pin and the
+      // flat heading/particle layers. Only build the 3D geometry when in 3D -
+      // it rebuilds polygons + a turf.circle every step.
+      if (is3D) {
+        ensureLive3D();
+        if (map.getSource('campus-3d-live')) {
+          map.getSource('campus-3d-live').setData(live3DData(est));
+        }
+      }
+      if (livePosMarker) {
+        const disp = is3D ? 'none' : '';
+        const el = livePosMarker.getElement();
+        if (el.style.display !== disp) el.style.display = disp;
+      }
+      const statusTxt = est.source === 'gps'
+        ? `GPS ±${est.accuracyM.toFixed(0)} m`
+        : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
+      if (statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
+      rerouteFromEstimate();
+    }
+
+    // Compass display / heading indicator, driven by the SMOOTHED heading from
+    // motion.mjs (time-based low-pass), not the raw sensor event - the raw
+    // magnetometer flickers. The map stays north-up: only the line turns. The
+    // line is a FIXED length so it reads the same regardless of GPS accuracy.
+    const HEADING_LINE_M = 4;
+    // The heading line is redrawn on every orientation event (10-60 Hz); that
+    // is far more often than the map needs, so throttle the source update.
+    let lastHeadingPaint = -Infinity;
+    const HEADING_PAINT_MS = 60;
+    /** Redraw the fixed-length heading line from the live marker (throttled). */
+    function updateHeadingLine(force = false) {
+      if (!livePosMarker || !map.getSource('location-heading') || lastHeadingDeg == null) return;
+      const now = performance.now();
+      if (!force && now - lastHeadingPaint < HEADING_PAINT_MS) return;
+      lastHeadingPaint = now;
+      const p = livePosMarker.getLngLat();
+      const mpd = metresPerDegree(p.lat);
+      const br = lastHeadingDeg * Math.PI / 180;
+      const lat = p.lat + (Math.cos(br) * HEADING_LINE_M) / mpd.lat;
+      const lon = p.lng + (Math.sin(br) * HEADING_LINE_M) / mpd.lon;
+      map.getSource('location-heading').setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: [[p.lng, p.lat], [lon, lat]] } }],
+      });
+    }
+    function updateHeadingDisplay(headingRad) {
+      const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
+      lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
+      const txt = `${Math.round(deg)}°`;
+      if (compassDisplay.textContent !== txt) compassDisplay.textContent = txt;
+      updateHeadingLine();
+    }
+
+    // --- "My Location" in 3D: a blocky avatar --------------------------------
+    // DOM markers live in 2D screen space and cannot be lifted (no z), so in
+    // 3D the live marker becomes a little figure built from extrusions - body
+    // column, lighter head and a facing wedge along the heading - plus a
+    // translucent accuracy disc lying on the same floor. Real position sources
+    // (GPS/PDR) carry no height, so the avatar always stands on the
+    // **selected floor**: the floor picker is authoritative, exactly as in 2D.
+    const AVATAR_BODY_M = 0.62;        // torso width
+    const AVATAR_HEAD_M = 0.42;        // head width
+    const AVATAR_COLOR = '#4a90e2';
+    const AVATAR_HEAD_COLOR = '#dce9f8';
+    const AVATAR_POINTER_COLOR = '#2f6fb5';
+    const AVATAR_DISC_MIN_ACC_M = 1.5; // exact fixes still get no disc
+    const AVATAR_DISC_MAX_M = 40;      // clamp huge outdoor GPS accuracy
+
+    function live3DData(est) {
+      const ll = [est.lon, est.lat];
+      const base = floorBase(currentFloorId()) + 0.05;
+      const parts = [
+        { kind: 'body', color: AVATAR_COLOR,
+          ring: discRing(ll, AVATAR_BODY_M / 2, 10), low: 0.55, high: 1.45 },
+        { kind: 'head', color: AVATAR_HEAD_COLOR,
+          ring: discRing(ll, AVATAR_HEAD_M / 2, 10), low: 1.45, high: 1.85 },
+      ];
+      // Facing wedge at shoulder height - rotated to the smoothed heading
+      // (compass, or the GPS course while moving). Skipped until one exists.
+      if (lastHeadingDeg != null) {
+        const m = metresPerDegree(ll[1]);
+        const th = lastHeadingDeg * Math.PI / 180;
+        const perp = th + Math.PI / 2;
+        const bx = Math.sin(perp) * 0.2 / m.lon, by = Math.cos(perp) * 0.2 / m.lat;
+        parts.push({
+          kind: 'pointer', color: AVATAR_POINTER_COLOR,
+          ring: [[ll[0] - bx, ll[1] - by], [ll[0] + bx, ll[1] + by],
+                 [ll[0] + Math.sin(th) * 0.6 / m.lon, ll[1] + Math.cos(th) * 0.6 / m.lat],
+                 [ll[0] - bx, ll[1] - by]],
+          low: 1.1, high: 1.4,
+        });
+      }
+      if (est.accuracyM >= AVATAR_DISC_MIN_ACC_M) {
+        const disc = turf.circle(ll, Math.min(est.accuracyM, AVATAR_DISC_MAX_M),
+          { steps: 48, units: 'meters' });
+        parts.push({
+          kind: 'accuracy', color: AVATAR_COLOR,
+          ring: disc.geometry.coordinates[0], low: 0.02, high: 0.12,
+        });
+      }
+      return {
+        type: 'FeatureCollection',
+        features: parts.map((p) => ({
+          type: 'Feature',
+          properties: { kind: p.kind, color: p.color, base: base + p.low, top: base + p.high },
+          geometry: { type: 'Polygon', coordinates: [p.ring] },
+        })),
+      };
+    }
+
+    /** Create the 3D avatar layers once, after the style is ready. */
+    function ensureLive3D() {
+      if (map.getSource('campus-3d-live')) return;
+      // No isStyleLoaded() guard: this custom MapLibre build's style.loaded()
+      // flag stays false while tiles are active, so it would never create the
+      // layers; a throw (style still loading) is retried by the next estimate.
+      try {
+        map.addSource('campus-3d-live', {
+          type: 'geojson', data: { type: 'FeatureCollection', features: [] },
+        });
+        map.addLayer({
+          id: 'campus-3d-live',
+          type: 'fill-extrusion',
+          source: 'campus-3d-live',
+          filter: ['!=', ['get', 'kind'], 'accuracy'],
+          paint: {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 1,
+          },
+        });
+        map.addLayer({
+          id: 'campus-3d-live-accuracy',
+          type: 'fill-extrusion',
+          source: 'campus-3d-live',
+          filter: ['==', ['get', 'kind'], 'accuracy'],
+          paint: {
+            'fill-extrusion-color': AVATAR_COLOR,
+            'fill-extrusion-base': ['get', 'base'],
+            'fill-extrusion-height': ['get', 'top'],
+            'fill-extrusion-opacity': 0.22,
+          },
+        });
+      } catch { return; }   // style not ready; next estimate retries
+      // Insert BEFORE the structure (which is added after the route) so the
+      // translucent walls blend over the avatar instead of depth-rejecting it.
+      const anchor = map.getLayer('campus-3d-route') ? 'campus-3d-route'
+        : map.getLayer('campus-3d-top-outline') ? 'campus-3d-top-outline'
+          : structureLevels.length ? `campus-3d-level-${structureLevels[0]}` : null;
+      for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {
+        if (anchor) map.moveLayer(id, anchor);
+        map.setLayoutProperty(id, 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    /** 2D: DOM pin + flat circles. 3D: the floor-pinned avatar extrusions. */
+    function applyLiveMode() {
+      if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
+      for (const id of ['location-heading-outline', 'pdr-particles']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'none' : 'visible');
+      }
+      for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'visible' : 'none');
+      }
+    }
+
+    /** Re-place the avatar after a floor change (no new estimate needed). */
+    function refreshLive3D() {
+      if (currentEstimate && map.getSource('campus-3d-live')) {
+        map.getSource('campus-3d-live').setData(live3DData(currentEstimate));
+      }
+    }
+
+    // Step/heading input to the arbiter. Sensor permission is requested here
+    // (a user gesture started the flow).
+    function startMotion() {
+      if (motion) { motion.start(); return; }
+      motion = createMotion({
+        onStep: ({ t, cadenceHz }) => {
+          // Calibration counts steps regardless of location.
+          if (calibration.active) {
+            calibration.steps++;
+            calStepsEl.textContent = String(calibration.steps);
+          }
+          // The step channel of the GPS auto-calibration: raw step events from
+          // the motion sensor (the only possible source of step rate). The
+          // calibrator's spatial and speed evidence comes solely from raw GPS
+          // fixes in successPosition; the PDR/arbiter estimate is never fed
+          // into it, so PDR can never calibrate itself.
+          gpsCal.addStep({ t });
+          updateAutocalUIThrottled(t);
+          if (!locator || !motion.heading.hasHeading) return;
+          const heading = motion.heading.heading;
+          locator.arbiter.setHeading(heading);
+          locator.arbiter.step({
+            stepLengthM: stepModel.lengthFor(cadenceHz),
+            headingRad: heading,
+          });
+          const est = locator.arbiter.estimate(t);
+          applyCorridorHeading(est, heading);
+          renderEstimate(est);
+        },
+        onHeading: ({ heading }) => {
+          // During the calibration walk, accumulate the heading so we can
+          // measure the offset against the line's true bearing.
+          if (calibration.active) {
+            calibration.headingSin += Math.sin(heading);
+            calibration.headingCos += Math.cos(heading);
+            calibration.headingSamples++;
+          }
+          if (locator) locator.arbiter.setHeading(heading);
+          updateHeadingDisplay(heading);
+        },
+        onStatus: ({ type }) => {
+          if (type === 'permission-denied') statusText.textContent = 'Motion sensor access denied';
+        },
+      });
+      // Restore the heading calibration (relative frame + offset) and the
+      // manual compass trim, composed as one bias (base + trim).
+      if (savedHeadingMode === 'relative') {
+        motion.setHeadingMode('relative');
+        if (savedHeadingBias != null) baseHeadingBias = savedHeadingBias;
+      }
+      applyHeadingTrim();
+      motion.start();
+    }
+
+    function successPosition(position) {
+      const { latitude, longitude, accuracy } = position.coords;
+      const posLonLat = [longitude, latitude];
+
+      if (!didAutoCenter) {
+        didAutoCenter = true;
+        map.flyTo({ center: [longitude, latitude], zoom: 18, duration: 1200 });
+      }
+
+      if (livePosMarker) {
+        livePosMarker.setLngLat([longitude, latitude]);
+      }
+      lastAccuracyMeters = accuracy;
+
+      // No compass (desktop, denied motion permission): use the GPS course of
+      // travel while moving and hold the last bearing when stopped. A real
+      // compass heading wins - it also updates through updateHeadingDisplay.
+      if (motion?.heading?.hasHeading !== true
+          && Number.isFinite(position.coords.heading)) {
+        lastHeadingDeg = position.coords.heading;
+      }
+
+      // (The old accuracy circle was replaced by the particle cloud, which
+      // renderEstimate refreshes from the filter.)
+
+      // Feed GPS to the arbiter too; if PDR is currently more accurate the
+      // marker will be re-rendered from the filter instead.
+      const t = performance.now();
+      ensureLocator(posLonLat);
+      if (locator) {
+        locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
+        renderEstimate(locator.arbiter.estimate(t));
+      }
+      // ...and to the step-length auto-calibrator: RAW GPS ONLY. Its inputs
+      // are this geolocation fix (position/accuracy/speed/course) and the raw
+      // step events above - never the arbiter/PDR estimate or its position.
+      // maximumAge can hand back a cached fix, so the fix is stamped with its
+      // measurement time (performance clock, like the step events) and a
+      // repeated cached fix is not counted twice.
+      const stamp = Number.isFinite(position.timestamp) ? position.timestamp : null;
+      if (stamp === null || stamp !== lastCalFixStamp) {
+        lastCalFixStamp = stamp;
+        const ageMs = stamp === null ? 0
+          : Math.max(0, Math.min(Date.now() - stamp, 10000));
+        gpsCal.addFix({
+          t: t - ageMs, lon: longitude, lat: latitude, accuracyM: accuracy,
+          speedMps: position.coords.speed,
+          courseDeg: position.coords.heading,
+        });
+      }
+      updateAutocalUI();
+      // (Live re-routing happens inside renderEstimate for every source.)
+    }
+
+    function errorPosition() {
+      statusText.textContent = 'Location access denied';
+    }
+
+    /**
+     * Marker + accuracy/heading layers + PDR, WITHOUT geolocation: the shared
+     * setup for "My Location" (which then starts GPS) and for "I'm Here"
+     * (which corrects GPS, so it must never start it).
+     */
+    function ensureLiveSetup() {
+      if (livePosMarker) {
+        livePosMarker.remove();
+      }
+      livePosMarker = new maplibregl.Marker().setLngLat([0, 0]).addTo(map);
+
+      // The old accuracy circle is gone - the particle cloud (pdr-particles)
+      // is the position indicator now (created in ensureParticleLayer).
+      if (map.getSource('location-radius')) {
+        map.removeLayer('location-radius-outline');
+        map.removeLayer('location-radius');
+        map.removeSource('location-radius');
+      }
+
+      if (map.getSource('location-heading')) {
+        map.removeLayer('location-heading-outline');
+        map.removeSource('location-heading');
+      }
+
+      headingIndicator = turf.lineString([
+        [0, 0],
+        [0, 1],
+      ]);
+      map.addSource('location-heading', {
+        type: 'geojson',
+        data: headingIndicator,
+      });
+      map.addLayer({
+        id: 'location-heading-outline',
+        type: 'line',
+        source: 'location-heading',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#2f6fb5',
+          'line-width': 4,
+        },
+      });
+
+      // Start dead reckoning alongside GPS; the arbiter chooses between them.
+      // motion.mjs owns the orientation listener (absolute-only, smoothed) and
+      // requests iOS permission in its start().
+      ensureLocator([map.getCenter().lng, map.getCenter().lat]);
+      startMotion();
+      applyLiveMode();   // the marker may have been re-created in this mode
+    }
+
+    /**
+     * STOP geolocation (marker, PDR and manual anchors keep running). Used by
+     * "I'm Here": the user reaches for it when GPS is wrong, so a live (but
+     * wrong) fix must not stay a candidate - `clearGps` forgets it, or the
+     * arbiter holds it through a source switch and the marker snaps back
+     * seconds after the anchor.
+     */
+    function stopGps() {
+      if (geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId);
+        geoWatchId = null;
+      }
+      locationBtn.classList.remove('active');
+      if (locator) locator.arbiter.clearGps();
+      if (!gpsCal.stats().calibrated) {
+        autocalStatusEl.textContent = 'GPS off - auto-calibration pauses';
+      }
+    }
+
+    function startLiveLocate() {
+      locationBtn.classList.add('active');
+      statusText.textContent = 'Locating...';
+      didAutoCenter = false;   // fly to the next fix again
+
+      ensureLiveSetup();
+
+      if (geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId);
+      }
+      geoWatchId = navigator.geolocation.watchPosition(successPosition, errorPosition, {
+        maximumAge: 5000,
+        enableHighAccuracy: true,
+      });
+    }
+
+    // --- Follow mode ---------------------------------------------------------
+    // Camera follow: keep the walker on screen and drive the camera
+    // orientation from the current mode - **3D** angles the view (pitch 50)
+    // and turns the map to the heading (offset ahead along it, so the walker
+    // sits in the lower third facing "forward"); **2D** is a plain north-up
+    // top-down plan, exactly like regular 2D, panned to keep the walker on
+    // screen. An rAF loop with exponential smoothing is used instead of
+    // repeated easeTo calls: fixes arrive continuously and restarting an
+    // animation on every one stutters - and the loop's own jumpTo would cancel
+    // such eases anyway, so the loop must carry pitch/bearing itself. Zoom is
+    // not part of the loop, so pinch-zoom stays live.
+    const FOLLOW_LOOK_AHEAD_M = 22;   // metres ahead of the walker (3D only)
+    const FOLLOW_PITCH_3D = 50;       // 3D follow angle; 2D is always top-down
+    const FOLLOW_CENTER_RATE = 6;     // exponential smoothing rates, per second
+    const FOLLOW_BEARING_RATE = 5;
+    const FOLLOW_PITCH_RATE = 5;
+    const FOLLOW_ZOOM = 19;           // zoom-in on activation (never zoom out)
+    const FOLLOW_FRAME_MS = 700;      // one-shot enable ease duration
+
+    function followCameraCenter(ll) {
+      // Look-ahead is a 3D concept (the camera faces the heading); 2D centres
+      // the walker exactly. No heading yet -> exact centre either way. Plain
+      // trig (not turf) - this runs every animation frame.
+      if (!is3D || lastHeadingDeg == null) return ll;
+      const mpd = metresPerDegree(ll[1]);
+      const br = lastHeadingDeg * Math.PI / 180;
+      return [ll[0] + (Math.sin(br) * FOLLOW_LOOK_AHEAD_M) / mpd.lon,
+              ll[1] + (Math.cos(br) * FOLLOW_LOOK_AHEAD_M) / mpd.lat];
+    }
+
+    function startFollowLoop() {
+      if (followRaf !== null) return;
+      let prev = performance.now();
+      const step = (now) => {
+        followRaf = null;
+        if (!followActive() || !followCenter) return;
+        const dt = Math.min(0.25, Math.max(0.001, (now - prev) / 1000));
+        prev = now;
+        const target = followCameraCenter(followCenter);
+        const cur = map.getCenter();
+        const a = 1 - Math.exp(-FOLLOW_CENTER_RATE * dt);
+        const nextLng = cur.lng + (target[0] - cur.lng) * a;
+        const nextLat = cur.lat + (target[1] - cur.lat) * a;
+        // Mode owns orientation: 3D turns to the heading and angles at 50
+        // deg; 2D is north-up and top-down. The loop drives both because an
+        // applyViewMode easeTo cannot survive the loop's jumpTo.
+        const bearingTarget = is3D ? (lastHeadingDeg ?? map.getBearing()) : 0;
+        const curB = map.getBearing();
+        // Shortest path across the +/-180 seam, or the map spins the long way.
+        const delta = ((bearingTarget - curB + 540) % 360) - 180;
+        const nextBearing = curB + delta * (1 - Math.exp(-FOLLOW_BEARING_RATE * dt));
+        const pitchTarget = is3D ? FOLLOW_PITCH_3D : 0;
+        const curP = map.getPitch();
+        const nextPitch = curP + (pitchTarget - curP) * (1 - Math.exp(-FOLLOW_PITCH_RATE * dt));
+        // Only touch the camera when it has actually moved - a stationary
+        // walker would otherwise re-jump identical transforms every frame.
+        const moved = Math.abs(nextLng - cur.lng) > 1e-7 || Math.abs(nextLat - cur.lat) > 1e-7
+          || Math.abs(nextBearing - curB) > 0.05 || Math.abs(nextPitch - curP) > 0.05;
+        if (moved) {
+          map.jumpTo({ center: [nextLng, nextLat], bearing: nextBearing, pitch: nextPitch });
+        }
+        followRaf = requestAnimationFrame(step);
+      };
+      followRaf = requestAnimationFrame(step);
+    }
+
+    function stopFollowLoop() {
+      if (followRaf !== null) cancelAnimationFrame(followRaf);
+      followRaf = null;
+    }
+
+    /** 'off' | 'active' | 'paused' - the button wears the state. */
+    function setFollowButton(state) {
+      followBtn.classList.toggle('active', state === 'active');
+      followBtn.classList.toggle('paused', state === 'paused');
+      followBtn.textContent = state === 'paused' ? 'Resume' : 'Follow';
+      followBtn.title = state === 'active' ? 'Following - tap to stop'
+        : state === 'paused' ? 'Resume following'
+          : 'Follow me (camera faces my heading)';
+    }
+
+    function enableFollow() {
+      followMode = true;
+      followPaused = false;
+      setFollowButton('active');
+      // Follow needs a live position: start My Location if nothing feeds one
+      // yet (this tap is the user gesture the sensors need).
+      if (geoWatchId === null && !livePosMarker) startLiveLocate();
+      didAutoCenter = true;   // no competing flyTo on the first fix
+      applyRotationMode();
+      const ll = currentEstimate
+        ? [currentEstimate.lon, currentEstimate.lat]
+        : [map.getCenter().lng, map.getCenter().lat];
+      // One-shot framing: ease to the walker and ZOOM IN (at least z18, never
+      // out). The loop must not run yet - its jumpTo cancels this ease, which
+      // is why the zoom-in never used to happen - so it waits for the ease.
+      followFraming = true;
+      map.easeTo({
+        center: followCameraCenter(ll),
+        bearing: is3D ? (lastHeadingDeg ?? map.getBearing()) : 0,
+        pitch: is3D ? FOLLOW_PITCH_3D : 0,
+        zoom: Math.max(map.getZoom(), FOLLOW_ZOOM),
+        duration: FOLLOW_FRAME_MS,
+      });
+      window.setTimeout(() => {
+        followFraming = false;
+        if (followActive()) startFollowLoop();
+      }, FOLLOW_FRAME_MS + 50);
+    }
+
+    function resumeFollow() {
+      followPaused = false;
+      setFollowButton('active');
+      applyRotationMode();
+      startFollowLoop();
+    }
+
+    function disableFollow() {
+      followMode = false;
+      followPaused = false;
+      setFollowButton('off');
+      stopFollowLoop();
+      applyRotationMode();
+    }
+
+    followBtn.addEventListener('click', () => {
+      if (!followMode) enableFollow();
+      else if (followPaused) resumeFollow();
+      else disableFollow();
+    });
+
+    // A manual drag on the map pauses Follow (nav-app pattern): the button
+    // turns into "Resume". Detected from DOM pointer events on the map canvas
+    // itself, NOT MapLibre's dragstart/rotatestart/pitchstart: this custom
+    // build fires rotate/pitch events for PROGRAMMATIC camera changes too
+    // (jumpTo/easeTo that alter bearing/pitch), so listening to them paused
+    // Follow the moment our own loop or ease moved the map - the button stuck
+    // on "Resume" on mobile. One-finger drags (and mouse drags) pause; wheel
+    // and two-finger pinch stay live - rotation is disabled while following,
+    // so two fingers can only zoom.
+    const FOLLOW_GESTURE_PX = 8;
+    {
+      const el = map.getCanvasContainer();
+      let down = null;   // { x, y } of the first contact, null when pinch/up
+      const at = (e) => (e.touches ? e.touches[0] : e);
+      const onDown = (e) => {
+        down = null;
+        if (!followActive()) return;
+        if (e.touches && e.touches.length !== 1) return;   // pinch/rotate
+        const p = at(e);
+        if (p) down = { x: p.clientX, y: p.clientY };
+      };
+      const onMove = (e) => {
+        if (!down || !followActive()) return;
+        if (e.touches && e.touches.length !== 1) { down = null; return; }
+        const p = at(e);
+        if (!p || Math.hypot(p.clientX - down.x, p.clientY - down.y) < FOLLOW_GESTURE_PX) return;
+        down = null;
+        followPaused = true;
+        setFollowButton('paused');
+        applyRotationMode();
+        stopFollowLoop();
+      };
+      const onUp = () => { down = null; };
+      el.addEventListener('touchstart', onDown, { passive: true });
+      el.addEventListener('touchmove', onMove, { passive: true });
+      el.addEventListener('touchend', onUp, { passive: true });
+      el.addEventListener('touchcancel', onUp, { passive: true });
+      el.addEventListener('mousedown', onDown);
+      el.addEventListener('mousemove', onMove);
+      el.addEventListener('mouseup', onUp);
+      el.addEventListener('mouseleave', onUp);
+    }
+
+    // One entry per building; floors listed underneath (all buildings are
+    // single-floor today - more floors can be added without other changes).
+    // Protomaps (OpenStreetMap) archive the basemap style points at; osm.mjs
+    // reads its `roads` layer for walkway geometry around the buildings.
+    const OSM_ARCHIVE_URL = 'https://navigator.cheeseverse.net/scak.pmtiles';
+    // Extra metres of road network fetched past the outermost building portal.
+    const OSM_BBOX_PAD_M = 200;
+
+    // Building registrations live in buildings-config.json (repo root),
+    // produced by import.html. Edit registrations there, not here.
+    const buildingsConfig = await (await fetch('/buildings-config.json')).json();
+
+    // Kick off all boot downloads NOW (before the MapLibre style finishes
+    // loading) so network time overlaps map setup:
+    //  - every floor JSON in parallel (HTTP/2 multiplexing; ~1 MB gzipped),
+    //  - the OSM path network, whose bbox comes from the config's cached
+    //    portals (no navGraph needed).
+    // style.load below consumes these promises.
+    const floorPrefetch = new Map();
+    for (const config of buildingsConfig) {
+      for (const floor of config.floors) {
+        // Resolves to {data} or {error} so a failure never surfaces as an
+        // unhandled rejection while the promise waits for its await.
+        floorPrefetch.set(floor, fetch(floor.url)
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status} for ${floor.url}`);
+            return res.json();
+          })
+          .then((data) => ({ data }), (error) => ({ error })));
+      }
+    }
+    const bootOsmPromise = loadCampusOsm(outdoorBBoxFromConfig());
+
+    // Geo registration for one building+floor: a floor may carry its own
+    // origin/offset (AS106 does), otherwise the building-level ones apply —
+    // makeToLL lives in geo.mjs, shared with smoke.mjs and import.html.
+
+    // Lon/lat bbox covering every building portal, padded for room to walk.
+    // Computed from the CONFIG (cached portals + manual doors) exactly like
+    // gen-osm.mjs, so the OSM fetch can start before any floor JSON is parsed
+    // or navGraph built - it no longer waits for the floor load loop.
+    function outdoorBBoxFromConfig(padM = OSM_BBOX_PAD_M) {
+      let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      const bump = ([lon, lat]) => {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      };
+      for (const b of buildingsConfig) {
+        for (const f of b.floors) {
+          const toLL = makeToLL(b, f);
+          const p = f.portals ? portalsFromCache(f.portals, toLL)
+                              : {elevators: [], stairs: [], exits: []};
+          const exits = f.exits?.length
+            ? f.exits.map((e) => toLL(e.dxf[0], e.dxf[1]))
+            : p.exits.map((e) => e.ll);
+          for (const q of [...p.elevators.map((e) => e.ll), ...p.stairs.map((e) => e.ll), ...exits]) {
+            bump(q);
+          }
+        }
+      }
+      if (!isFinite(minLon)) return null;
+      const mPerDeg = metresPerDegree((minLat + maxLat) / 2);
+      return {
+        minLon: minLon - padM / mPerDeg.lon,
+        maxLon: maxLon + padM / mPerDeg.lon,
+        minLat: minLat - padM / mPerDeg.lat,
+        maxLat: maxLat + padM / mPerDeg.lat,
+      };
+    }
+
+    // The precomputed OSM paths (gen-osm.mjs), used only when its bbox still
+    // covers the campus; otherwise the caller decodes pmtiles live.
+    async function loadCachedOsm(bbox) {
+      if (!bbox) return null;
+      try {
+        const res = await fetch('/osm-paths.json');
+        if (!res.ok) return null;
+        const cache = await res.json();
+        const c = cache.bbox;
+        const covers = c &&
+          bbox.minLon >= c.minLon && bbox.maxLon <= c.maxLon &&
+          bbox.minLat >= c.minLat && bbox.maxLat <= c.maxLat;
+        if (!covers) {
+          console.warn('osm-paths.json does not cover the campus; decoding pmtiles live');
+          return null;
+        }
+        console.log(`OSM paths: ${cache.shapes.length} ways from osm-paths.json`);
+        return cache.shapes;
+      } catch { return null; }
+    }
+
+    /**
+     * The campus walk network: the precomputed cache when it covers the
+     * bbox, else a live PMTiles decode; straight-line outdoor legs are used
+     * when both fail. Called as a promise at boot so it runs alongside the
+     * floor fetches/navGraph builds.
+     */
+    async function loadCampusOsm(bbox) {
+      let shapes = await loadCachedOsm(bbox);
+      if (!shapes) {
+        try {
+          const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox });
+          shapes = osm.shapes;
+          console.log(`OSM paths: ${osm.stats.ways} ways over ` +
+            `${osm.stats.tiles} tiles (${osm.stats.duplicateWays} duplicates dropped)`);
+        } catch (e) {
+          console.warn('OSM road layer unavailable, using straight-line outdoor legs:', e);
+        }
+      }
+      return shapes;
+    }
+
+    // --- off-main-thread navGraph builds ------------------------------------
+    // `buildGraphState` is ~0.1-1.2 s per floor on desktop (3-4x on mobile),
+    // and the old boot ran it synchronously for all ~18 floors, freezing the UI
+    // in ~1 s chunks for ~7 s (desktop). A single worker moves that work off the
+    // main thread; the thread only runs the cheap `graphFromState`. Any worker
+    // failure (unsupported, not deployed, crash, or hang) falls back to a
+    // synchronous `buildGraph`, so boot never depends on the worker.
+    const navWorker = (() => {
+      try { return new Worker('/navgraph-worker.mjs', { type: 'module' }); }
+      catch { return null; }
+    })();
+    let navSeq = 0;
+    const navPending = new Map();   // id -> {resolve, reject}
+    const NAV_WORKER_TIMEOUT_MS = 20000;
+    if (navWorker) {
+      navWorker.onmessage = (e) => {
+        const { id, state, error } = e.data;
+        const job = navPending.get(id);
+        if (!job) return;
+        navPending.delete(id);
+        if (error) job.reject(new Error(error));
+        else job.resolve(state);
+      };
+      navWorker.onerror = () => {
+        for (const job of navPending.values()) job.reject(new Error('navgraph worker error'));
+        navPending.clear();
+      };
+    }
+    /** Build one floor's navGraph, off-thread when possible. */
+    function buildGraphAsync(walls) {
+      if (!navWorker) return Promise.resolve(buildGraph(walls));
+      const id = ++navSeq;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (navPending.delete(id)) reject(new Error('navgraph worker timeout'));
+        }, NAV_WORKER_TIMEOUT_MS);
+        navPending.set(id, {
+          resolve: (state) => { clearTimeout(timer); resolve(state); },
+          reject: (err) => { clearTimeout(timer); reject(err); },
+        });
+        try { navWorker.postMessage({ id, walls }); }
+        catch (err) { navPending.delete(id); clearTimeout(timer); reject(err); }
+      }).then((state) => graphFromState(state), () => buildGraph(walls));
+    }
+
+    async function loadFloor(buildingConfig, floor, preloadedData) {
+      // The boot prefetches every floor JSON in parallel and passes it in;
+      // the fallback keeps the function usable standalone.
+      const data = preloadedData ?? await (await fetch(floor.url)).json();
+      const toLL = makeToLL(buildingConfig, floor);
+      const base = `${buildingConfig.id}-${floor.floorId}`.toLowerCase();
+      const wallLayerId = floor.wallLayerId ?? `${base}-walls`;
+      const roomLayerId = floor.roomLayerId ?? `${base}-roomnumbers`;
+
+      // Case-insensitive: most buildings write "Windows", AS106 writes
+      // "WINDOWS".
+      const walls = data.shapes.filter((i) => {
+        const l = i.layer.toLowerCase();
+        return l === 'walls' || l === 'windows';
+      });
+      // True vertices from shapeSegments, not the bbox diagonal: a rotated
+      // wall run drawn as its bbox shows up as a diagonal slash across the
+      // corner, and the navgraph/obstacle sets inherit the same corruption.
+      const lines = walls.flatMap((wall) =>
+        shapeSegments(wall).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
+      const wallFeatureCollection = turf.lineStrings(lines);
+
+      // Room-number labels: ONE array feeds both the displayed symbol layer
+      // (created when the floor is first shown) and the search index, so the
+      // two can never disagree. Search resolves "BMH 114A" against this data.
+      const roomLabels = (data.text_lines ?? []).map((roomno) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: toLL(roomno.x, roomno.y),
+        },
+        properties: { text: String(roomno.text ?? '').trim() },
+      })).filter((f) => f.properties.text);
+
+      // Interior door leaves (the DOORS layer): each entity is a short leaf
+      // line; its midpoint is the doorway. A room search targets the room's
+      // DOOR, not its number label, so the route stops at the opening.
+      const doorPoints = data.shapes
+        .filter((s) => s.layer.toLowerCase() === 'doors')
+        .map((s) => {
+          const leaf = (s.items ?? []).find((it) => it.op === 'line' && it.points?.length >= 2);
+          if (leaf) {
+            const a = leaf.points[0], b = leaf.points[leaf.points.length - 1];
+            return toLL((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+          }
+          if (s.bbox) return toLL((s.bbox[0] + s.bbox[2]) / 2, (s.bbox[1] + s.bbox[3]) / 2);
+          return null;
+        })
+        .filter(Boolean);
+
+      const navGraph = await buildGraphAsync(wallFeatureCollection);
+      // Portals (elevators/stairs) and doors are expensive to extract (doorway
+      // clustering + flood fill). buildings-config.json caches them as DXF
+      // points, so prefer that; fall back to extracting when absent.
+      const portals = floor.portals
+        ? portalsFromCache(floor.portals, toLL)
+        : extractPortals(data.shapes, toLL);
+      // Exterior doors are placed by hand in the import tool (floor.exits);
+      // fall back to the algorithm's exits when a floor has none registered.
+      const doorList = floor.exits?.length ? floor.exits : portals.exits;
+      const exits = doorList.map((e, i) => ({
+        id: e.id ?? `exits-${i}`,
+        ll: toLL(e.dxf[0], e.dxf[1]),
+        dxf: e.dxf,
+      }));
+      // Skybridges are explicit manual portals (floor.skybridges). Only these
+      // link a floor to another building, so rooftop exits stay isolated.
+      // `to` is the import tool's explicit destination building.
+      const skybridges = (floor.skybridges ?? []).map((e, i) => ({
+        id: e.id ?? `bridge-${i}`,
+        ll: toLL(e.dxf[0], e.dxf[1]),
+        dxf: e.dxf,
+        to: e.to ?? null,
+      }));
+      return {
+        floorId: floor.floorId,
+        // Map-layer inputs. The plan's map layers are created the first time
+        // the floor is displayed (ensureFloorLayers), so loading stays eager
+        // but unselected floors are never added to the map, let alone shown.
+        wallLayerId,
+        roomLayerId,
+        wallSourceId: `${base}-walls`,
+        roomSourceId: `${base}-roomnumbers`,
+        showRoomLabels: !!floor.showRoomLabels,
+        wallFC: wallFeatureCollection,
+        labelFC: { type: 'FeatureCollection', features: roomLabels },
+        navGraph,
+        // lon/lat wall segments: the router keeps outdoor path edges out of
+        // the building footprint with these.
+        obstacleLines: lines,
+        elevators: portals.elevators,
+        stairs: portals.stairs,
+        exits,
+        skybridges,
+        // Room-number points, shared with the displayed room-numbers layer
+        // (see above) - the destination for a "BMH 114A" search.
+        roomLabels,
+        // Doorway midpoints (DOORS layer): a room search routes to the nearest
+        // door connected to the label, not to the label itself.
+        doorPoints,
+        // Extractor metadata: UAA short code (BMH) + full building name.
+        sourceId: data.ID ?? null,
+        sourceName: data.building_name ?? null,
+      };
+    }
+
+    // Stair (orange) and elevator (purple) markers, one shared source/layer.
+    // The source stays EMPTY at boot: an unrelated stairwell dot is noise.
+    // renderRoute fills it with one dot per vertical leg of the current route,
+    // so markers appear only for the connectors the path actually uses (in 2D,
+    // on either floor the leg joins).
+    function createPortalLayer() {
+      map.addSource('portals', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'portals',
+        type: 'circle',
+        source: 'portals',
+        paint: {
+          'circle-radius': 5,
+          'circle-color': [
+            'match', ['get', 'kind'],
+            'elevator', TIER_COLORS.elevator,
+            'stairs', TIER_COLORS.stairs,
+            '#333333',
+          ],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.5,
+        },
+      });
+      map.on('click', 'portals', (e) => {
+        const f = e.features[0];
+        if (!f) return;
+        new maplibregl.Popup()
+          .setLngLat(f.geometry.coordinates)
+          .setHTML(`<strong>${f.properties.kind}</strong> · ` +
+            `${f.properties.building} ${f.properties.fromFloor}→${f.properties.toFloor}`)
+          .addTo(map);
+      });
+      map.on('mouseenter', 'portals', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'portals', () => { map.getCanvas().style.cursor = ''; });
+    }
+
+    // Global floor display: a single level across every building, stepped
+    // with the +/- buttons. Wall/room-label layers are toggled per floor and
+    // the route's connector dots are filtered by their end floors.
+    let floorLevels = [];   // distinct floorIds, lowest first
+    let floorLevel = 1;     // 1-based index into floorLevels
+
+    const currentFloorId = () => floorLevels[floorLevel - 1] ?? buildingGroundFloor();
+
+    function buildingGroundFloor() {
+      return buildings[0]?.groundFloor;
+    }
+
+    function populateFloorPicker(buildingList) {
+      const levels = new Set();
+      for (const b of buildingList) for (const f of b.floors) levels.add(f.floorId);
+      floorLevels = [...levels].sort((a, c) =>
+        String(a).localeCompare(String(c), undefined, { numeric: true }));
+      setFloor(1);
+    }
+
+    /** Move the display to a floor level (clamped), re-filtering and redrawing. */
+    function setFloor(level) {
+      floorLevel = Math.max(1, Math.min(floorLevels.length, level));
+      floorLabel.textContent = `Floor ${floorLevel}`;
+      floorDown.disabled = floorLevel <= 1;
+      floorUp.disabled = floorLevel >= floorLevels.length;
+      applyFloorFilter(currentFloorId());
+      renderRoute();
+    }
+
+    /**
+     * Create a floor's plan layers the FIRST time that floor is displayed.
+     * loadFloor no longer adds sources/layers for every floor at boot, so an
+     * unselected floor is never on the map (no all-floors flash during load,
+     * no map work for plans nobody has looked at). Layer creation only - the
+     * floor JSON, navGraph and portals are all loaded eagerly. Inserted below
+     * 'portals' so dots and the route stay on top.
+     */
+    function ensureFloorLayers(f) {
+      if (f._layersAdded) return;
+      const before = map.getLayer('portals') ? 'portals'
+        : map.getLayer('navigation-route') ? 'navigation-route' : undefined;
+      if (!map.getSource(f.wallSourceId)) {
+        map.addSource(f.wallSourceId, { type: 'geojson', data: f.wallFC });
+        map.addLayer({
+          id: f.wallLayerId,
+          type: 'line',
+          source: f.wallSourceId,
+          paint: {
+            'line-color': '#333333',
+            'line-width': 2,
+          },
+        }, before);
+      }
+      if (f.showRoomLabels && f.labelFC.features.length) {
+        map.addSource(f.roomSourceId, { type: 'geojson', data: f.labelFC });
+        map.addLayer({
+          id: f.roomLayerId,
+          type: 'symbol',
+          source: f.roomSourceId,
+          layout: {
+            'text-field': ['get', 'text'],
+            'text-size': 12,
+            // The basemap glyph server only serves the Noto Sans family;
+            // Open Sans/Arial 404 and the labels render blank.
+            'text-font': ['Noto Sans Medium'],
+          },
+          paint: {
+            'text-color': '#2c3e50',
+            'text-halo-color': '#ffffff',
+            'text-halo-width': 1.2,
+          },
+        }, before);
+      }
+      f._layersAdded = true;
+    }
+
+    function applyFloorFilter(floorId) {
+      if (!floorId) return;
+      // 2D: show the selected floor's flat walls + labels + connector dots
+      // (the original plan view). 3D: those are hidden; the extruded structure
+      // carries the geometry, and room labels appear only while picking a
+      // route (they cannot be elevated in this build). Only the selected
+      // floor's layers are ever visible.
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          const selected = f.floorId === floorId;
+          // Only add the plan when it will actually be drawn (2D, or 3D while
+          // picking a route for its labels).
+          if (selected && (!is3D || findPathMode)) ensureFloorLayers(f);
+          if (!f._layersAdded) continue;
+          const wallsVisible = !is3D && selected;
+          map.setLayoutProperty(f.wallLayerId, 'visibility', wallsVisible ? 'visible' : 'none');
+          if (map.getLayer(f.roomLayerId)) {
+            const labelsVisible = is3D ? (findPathMode && selected) : selected;
+            map.setLayoutProperty(f.roomLayerId, 'visibility', labelsVisible ? 'visible' : 'none');
+            const hot = is3D && findPathMode;
+            map.setPaintProperty(f.roomLayerId, 'text-color', hot ? '#ffe14a' : '#2c3e50');
+            map.setPaintProperty(f.roomLayerId, 'text-halo-color', hot ? '#000000' : '#ffffff');
+          }
+        }
+      }
+      if (map.getLayer('portals')) {
+        map.setLayoutProperty('portals', 'visibility', is3D ? 'none' : 'visible');
+        // Points carry the vertical leg's end floors; show the dot on either.
+        if (!is3D) map.setFilter('portals', ['any',
+          ['==', ['get', 'fromFloor'], floorId],
+          ['==', ['get', 'toFloor'], floorId]]);
+      }
+      applyStructureStyle();
+      refreshLive3D();   // the 3D avatar follows the selected floor
+    }
+
+    // Map load
+    map.on('style.load', async () => {
+      statusText.textContent = 'Loading buildings...';
+      buildings = [];
+      try {
+        // Floor JSONs and OSM shapes were already kicked off at module load
+        // (see floorPrefetch / bootOsmPromise) - overlapping map setup. The
+        // CPU work below runs sequentially, yielding between floors so the
+        // status line can paint.
+        const prefetched = floorPrefetch;
+        const totalFloors = buildingsConfig.reduce((n, c) => n + c.floors.length, 0);
+        const osmPromise = bootOsmPromise;
+
+        let built = 0;
+        for (const config of buildingsConfig) {
+          try {
+            const building = { id: config.id, groundFloor: config.groundFloor, floors: [],
+                               sourceId: null, sourceName: null };
+            for (const floor of config.floors) {
+              const result = await prefetched.get(floor);
+              if (result.error) {
+                console.warn(`Failed to load ${config.id} ${floor.floorId}:`, result.error);
+                continue;
+              }
+              const data = result.data;
+              statusText.textContent =
+                `Building graph ${config.id} ${floor.floorId} (${++built}/${totalFloors})...`;
+              // Let the browser paint the status before the CPU-bound build.
+              await new Promise((r) => setTimeout(r));
+              const loaded = await loadFloor(config, floor, data);
+              building.sourceId ??= loaded.sourceId;
+              building.sourceName ??= loaded.sourceName;
+              building.floors.push(loaded);
+            }
+            buildings.push(building);
+          } catch (e) {
+            console.warn(`Failed to load ${config.id}:`, e);
+          }
+        }
+
+        if (buildings.length === 0) {
+          statusText.textContent = 'No walls loaded';
+          return;
+        }
+
+        statusText.textContent = 'Building campus router...';
+        await new Promise((r) => setTimeout(r));
+
+        // 3. OSM shapes (started in parallel above; likely already resolved).
+        const osmShapes = await osmPromise;
+
+        campusRouter = buildCampusRouter(buildings, osmShapes);
+        window.campusRouter = campusRouter;   // handy for console debugging
+        createPortalLayer();
+        populateFloorPicker(buildings);
+        buildStructure3D();                  // extruded walls + floor plates
+        // Bind the locator to the floor nearest the view now that graphs exist.
+        ensureLocator([map.getCenter().lng, map.getCenter().lat]);
+
+        const totalNodes = buildings.reduce(
+          (a, b) => a + b.floors.reduce((x, f) => x + f.navGraph.stats.nodes, 0),
+          0
+        );
+        const s = campusRouter.stats;
+        graphStats.textContent =
+          `${s.buildings} buildings, ${totalNodes} nodes, ${s.exits} exits, ` +
+          `${s.outdoor.nodes} path nodes, ${s.buildMs}ms`;
+        statusText.textContent = 'Ready';
+      } catch (err) {
+        console.error('Failed to build navigation graph:', err);
+        statusText.textContent = 'Graph build failed';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1042,4 +1042,16 @@ is not registered in `buildings-config.json`, so it is not searchable.
   immediately in 3D (the layer is hidden there) and skips the O(count) rebuild +
   map upload unless `filter.version` changed (bumped in `seed`/`predict`), so a
   GPS-only estimate or a repeated render no longer re-uploads the cloud.
+- **`app.html` — the modern "Navigator" frontend.** A single-page, mobile-first
+  reskin of the demo: same inline-CSS/HTML + `<script type="module">` style and
+  the SAME modules/logic as index.html, with a redesigned presentation layer
+  (glass surfaces, CSS custom properties, light/dark via `prefers-color-scheme`,
+  safe-area insets, top bar with search + floor stepper + status chip, right-edge
+  icon FABs, bottom-left action pills, a draggable bottom sheet for calibration,
+  a branded splash, and subtle haptics). The route result is a top-anchored
+  **expandable route-preview card** (`showRoute` builds leg-by-leg rows via
+  `routePreviewSteps`/`routeStepEl`, using human building names from
+  `sourceName`) instead of the cryptic bottom pill; the calibration panel is the
+  bottom sheet. The "Find Path" dev button was removed. It reuses every element
+  id index.html's script expects (verified by an id cross-check).
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.
