@@ -492,8 +492,45 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   picks the smaller uncertainty with hysteresis. Critical: indoor GPS accuracy
   is often optimistically small *and wrong*, so fixes landing in a wall (when
   near a known building) are discarded. GPS acts as a free anchor when good.
+  **PDR walkability spans the whole floor level, and off-plan is not a wall.**
+  A navgraph raster ends at its own wall bbox (padded by one clearance);
+  `isWalkable` is false everywhere beyond it. That edge is **not a wall - it is
+  just the end of the plan** - so treating it as one made the cloud pile up in a
+  line along the bbox and the walker "can't get past it" (open corridor ends,
+  atria, and the gaps between separate plans). Two changes in `ensureLocator`:
+  - **Union of every plan at this floor level.** A connected complex is split
+    across several plans (AS117 and AS119 are one building with separate
+    navgraphs), so crossing into the neighbour hit that bbox as an invisible
+    wall. `isWalkable`/`nearestWalkable` are the union over `sameLevel`; walls
+    still block, a gap between separate buildings still blocks (nothing walkable
+    in between), but a shared opening is continuous. The **arbiter** and
+    `isOutsideBuildings` use this strict union (`insideBuilding` = any same-level
+    walkable raster), and it feeds `corridorAxis` so drift is corrected in
+    whichever plan the estimate is in. **`nearestWalkable` MUST short-circuit:**
+    a naive union hands every plan the full radius, and a plan the point is far
+    outside spirals every ring (~0.2 s each) - "I'm Here"/floor change took
+    ~0.8 s. It returns `ll` immediately when the point is already walkable,
+    searches the nearest plan first (`boundsRank` buckets by `inBounds` margin),
+    and caps each later plan's search by the best distance found so far.
+    Measured 777 ms -> 22 ms per `ensureLocator`, same nearest points.
+  - **The filter gets a lenient `pdrWalkable`:** `navgraph.inBounds(ll)` tells
+    "outside the raster" apart from "blocked by a wall", and `pdrWalkable(ll)`
+    is `inBounds ? isWalkable : inBounds(ll, PDR_OFFPLAN_MARGIN_M)`. Inside a
+    plan (or any same-level neighbour's plan) the walls still block; **just past
+    a plan's edge the unmapped space is free for a bounded margin** (3 m) so the
+    cloud follows the walker through a data-edge opening instead of piling on
+    the invisible bbox line - but beyond the margin it is blocked so the estimate
+    cannot dead-reckon away into the void. (`nearestWalkable` stays strict, so
+    recovery still snaps to real walkable space.)
+  - **A manual floor change re-binds the live locator**
+    (`rebindLocatorToView`, wired to the +/- picker). The displayed floor is
+    authoritative, exactly as for "I'm Here": stacked floors share a footprint,
+    so the boot/GPS centroid pick can bind the wrong one, and stepping the
+    picker used to move the plan under a stale cloud that kept dead-reckoning on
+    its first floor (the "similar problems after changing floors" report).
+    Rebinds only when the picked floor has a plan under the estimate.
   **Entering a building hands over to PDR immediately**: an indoor fix (one that
-  lands on the bound floor's walkable raster - `insideBuilding`) or any
+  lands on any same-level walkable raster - `insideBuilding`) or any
   implausible fix forces `source = 'pdr'` with no hysteresis delay, and such
   fixes are **never used to re-seed the particle cloud** (a metres-wrong indoor
   "good" fix would drag every particle with it - the poisoning that motivated
@@ -917,7 +954,12 @@ registration id (`AS103`) also works, and the longest known code prefix wins so
 (built from the DXF `text_lines`, see `loadFloor`), so search and labels can
 never disagree. Matching is case/space-insensitive, exact first then prefix;
 an exact hit on the floor whose level equals the room's first digit wins
-(`114A` -> floor `01`). `runSearch` routes from the live GPS/PDR estimate when
+(`114A` -> floor `01`). The destination is the room's **DOORWAY, not its
+number label**: `loadFloor` also extracts the `DOORS`-layer leaf midpoints
+(`doorPoints`), and `doorwayFor` picks the nearest door whose straight segment
+from the label stays walkable (no wall between -> same open space, so it is the
+room's door, not an adjacent room's). Falls back to the label when no such door
+exists. `runSearch` routes from the live GPS/PDR estimate when
 "My Location" is running, else the map centre, makes the hit the destination
 marker/pin, jumps the floor picker to its floor and flies there. AS112 (WWA)
 is not registered in `buildings-config.json`, so it is not searchable.

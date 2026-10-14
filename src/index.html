@@ -667,8 +667,8 @@
       if (is3D) { ensureLive3D(); refreshLive3D(); }
       renderRoute();
     }
-    floorDown.addEventListener('click', () => setFloor(floorLevel - 1));
-    floorUp.addEventListener('click', () => setFloor(floorLevel + 1));
+    floorDown.addEventListener('click', () => { setFloor(floorLevel - 1); rebindLocatorToView(); });
+    floorUp.addEventListener('click', () => { setFloor(floorLevel + 1); rebindLocatorToView(); });
 
     // The floor a tap is read on: whatever the picker currently shows.
     const floorOfView = () => currentFloorId();
@@ -700,6 +700,27 @@
       setCorridorBadge(false);
       renderEstimate(locator.arbiter.estimate(performance.now()));
       statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
+    }
+
+    /**
+     * A manual floor change (the +/- picker) is also a statement of which floor
+     * the walker is on, so re-bind the live locator to it - exactly like
+     * "I'm Here" treats the displayed floor as authoritative. Without this the
+     * cloud kept dead-reckoning on the floor it was FIRST bound to: stacked
+     * floors share a footprint, so the boot/GPS centroid pick can be the wrong
+     * one, and changing the picker only moved the plan under a stale cloud (the
+     * "similar problems after changing floors" report). Only rebinds to a floor
+     * that actually has a plan under the estimate, and re-seeds there.
+     */
+    function rebindLocatorToView() {
+      if (!locator || !campusRouter) return;
+      const ll = currentEstimate ? [currentEstimate.lon, currentEstimate.lat]
+                                 : [map.getCenter().lng, map.getCenter().lat];
+      const floorId = currentFloorId();
+      const hit = campusRouter.buildingAt(ll, floorId);
+      if (!hit || hit.floor === locator.floor) return;
+      ensureLocator(ll, floorId);
+      renderEstimate(locator.arbiter.estimate(performance.now()));
     }
 
     // --- step-length calibration -------------------------------------------
@@ -856,7 +877,7 @@
         return;
       }
       const axis = headingDriftCal.wantsAxis
-        ? corridorAxis(locator.floor.navGraph.isWalkable, [est.lon, est.lat], CORRIDOR_OPTS)
+        ? corridorAxis(locator.isWalkable, [est.lon, est.lat], CORRIDOR_OPTS)
         : null;
       const r = headingDriftCal.update(headingRad, axis);
       if (r.correctionRad) {
@@ -1074,6 +1095,12 @@
                    ll[1] + Math.sin(t) * radiusM / m.lat]);
       }
       return ring;
+    }
+
+    /** Distance in metres between two lon/lat points. */
+    function lonLatDistM(a, b) {
+      const m = metresPerDegree((a[1] + b[1]) / 2);
+      return Math.hypot((b[0] - a[0]) * m.lon, (b[1] - a[1]) * m.lat);
     }
 
     /**
@@ -1413,6 +1440,34 @@
     // (BMH) or the app's registration id (AS103), plus a room number. Rooms
     // are the roomLabels built in loadFloor - the exact same array the
     // displayed room-numbers layer uses.
+    /**
+     * The room's DOORWAY: the nearest door (DOORS-layer midpoint) that a
+     * straight walk from the label reaches without crossing a wall. A segment
+     * label->door that stays walkable means they share one open space, so the
+     * door belongs to this room (not an adjacent one across a wall). Falls back
+     * to the label when the floor has no such door.
+     */
+    function doorwayFor(floor, labelLL) {
+      if (!floor || !floor.navGraph || !floor.doorPoints?.length) return labelLL;
+      const g = floor.navGraph;
+      const from = g.isWalkable(labelLL) ? labelLL : (g.nearestWalkable?.(labelLL) ?? labelLL);
+      const mpd = metresPerDegree(from[1]);
+      let best = null, bestD = Infinity;
+      for (const d of floor.doorPoints) {
+        const dd = g.isWalkable(d) ? d : (g.nearestWalkable?.(d) ?? d);
+        const dist = Math.hypot((dd[0] - from[0]) * mpd.lon, (dd[1] - from[1]) * mpd.lat);
+        if (dist >= bestD || dist > 15) continue;
+        const steps = Math.max(1, Math.ceil(dist / 0.2));
+        let clear = true;
+        for (let s = 1; s <= steps; s++) {
+          const t = s / steps;
+          if (!g.isWalkable([from[0] + (dd[0] - from[0]) * t, from[1] + (dd[1] - from[1]) * t])) { clear = false; break; }
+        }
+        if (clear) { best = dd; bestD = dist; }
+      }
+      return best ?? labelLL;
+    }
+
     function findRoom(building, roomText) {
       const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
       const want = norm(roomText);
@@ -1420,16 +1475,19 @@
       // Room numbering usually starts with the floor (114A is on 1), so an
       // exact hit on that floor beats an exact hit elsewhere.
       const wantLevel = parseInt(want[0], 10);
+      const hitFor = (f, coord) => ({
+        ll: doorwayFor(f, coord), labelLL: coord, floorId: f.floorId,
+      });
       let exact = null, prefixed = null;
       for (const f of building.floors) {
         for (const label of f.roomLabels ?? []) {
           const text = norm(label.properties.text);
           if (text === want) {
-            const hit = {ll: label.geometry.coordinates, floorId: f.floorId};
+            const hit = hitFor(f, label.geometry.coordinates);
             if (!isNaN(wantLevel) && floorLevelOf(f.floorId) === wantLevel) return hit;
             exact ??= hit;
           } else if (!prefixed && text.startsWith(want)) {
-            prefixed = {ll: label.geometry.coordinates, floorId: f.floorId};
+            prefixed = hitFor(f, label.geometry.coordinates);
           }
         }
       }
@@ -1640,27 +1698,92 @@
       if (!pick) pick = nearestFloor([lon, lat]);
       if (!pick) return;
       if (locator && locator.floor === pick.floor) return;
-      const g = pick.floor.navGraph;
-      const filter = new ParticleFilter({
-        isWalkable: g.isWalkable,
-        nearestWalkable: g.nearestWalkable,
-      });
-      // Outdoors, PDR free-roams but must stay off every building that has a
-      // plan at this level (the bound one included) - so the cloud cannot cut
-      // through a building, while a gap between buildings, or a bridge passing
-      // over a building with no floor here, stays usable.
+      // A floor's raster (navGraph) ends at its own wall bbox. A connected
+      // complex is split across several plans (AS117 and AS119 are one
+      // building with separate navgraphs), so a body crossing from one into
+      // its neighbour hits that bbox as an INVISIBLE wall: the cloud piles up
+      // in a line along it instead of following. PDR is therefore bound to the
+      // UNION of every plan at this floor level - walls still block, a gap
+      // between separate buildings still blocks (nothing walkable in between),
+      // but an opening shared by two plans is continuous.
       const level = pick.floor.floorId;
       const sameLevel = buildings
         .map((b) => ({ b, f: b.floors.find((x) => x.floorId === level) }))
         .filter((x) => x.f);
-      const isOutsideBuildings = (ll) =>
-        !sameLevel.some((x) => x.f.navGraph.isWalkable(ll));
+      const levelGraphs = sameLevel.map((x) => x.f.navGraph);
+      const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
+      // Each raster stops at its own wall bbox (padded by one clearance);
+      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall,
+      // it is just the end of the plan, so the PDR filter must not treat it as
+      // one - otherwise the cloud piles up in a line along the bbox and the
+      // walker "can't get past it" (atria/open corridor ends and the gaps
+      // between separate plans). Inside a plan the walls still block; just past
+      // a plan's edge the space is unmapped and free, but only for a BOUNDED
+      // margin - beyond it the space counts as blocked so the estimate cannot
+      // dead-reckon away into the void.
+      const PDR_OFFPLAN_MARGIN_M = 3;
+      // One pass over the plans: as soon as any plan contains the point and
+      // says it is body-clear, the point is walkable; otherwise it is walkable
+      // only if it sits within the bounded off-plan margin of some plan.
+      const pdrWalkable = (ll) => {
+        let near = false;
+        for (const gr of levelGraphs) {
+          if (gr.inBounds(ll)) {
+            if (gr.isWalkable(ll)) return true;
+          } else if (!near && gr.inBounds(ll, PDR_OFFPLAN_MARGIN_M)) {
+            near = true;
+          }
+        }
+        return near;
+      };
+      // Proximity buckets so the plan the point is actually near is searched
+      // first (a plan the point is far outside must NOT be handed the full
+      // 500-cell radius - it spirals every ring for ~0.2 s).
+      const GRAPH_MARGINS_M = [0, 10, 30, 100, 300];
+      const boundsRank = (gr, ll) => {
+        for (let i = 0; i < GRAPH_MARGINS_M.length; i++) {
+          if (gr.inBounds(ll, GRAPH_MARGINS_M[i])) return i;
+        }
+        return GRAPH_MARGINS_M.length;
+      };
+      /**
+       * Nearest walkable point across the same-level plans. Short-circuits when
+       * the point is already walkable (then it IS the nearest), searches the
+       * nearest plan first, and caps each later search by the best distance
+       * found so far - so off-plan plans do a few rings, not the full radius.
+       * (The naive union spiralled every plan at radius 500: ~430 ms per
+       * "I'm Here" / floor change.)
+       */
+      const nearestWalkable = (ll, maxRadius) => {
+        if (pdrWalkable(ll)) return ll;
+        const cap0 = maxRadius ?? 60;
+        const ordered = levelGraphs
+          .map((gr) => ({ gr, rank: boundsRank(gr, ll) }))
+          .sort((a, b) => a.rank - b.rank);
+        let best = null, bestD = Infinity, cap = cap0;
+        for (const { gr } of ordered) {
+          const p = gr.nearestWalkable?.(ll, cap);
+          if (!p) continue;
+          const d = lonLatDistM(ll, p);
+          if (d < bestD) {
+            bestD = d; best = p;
+            cap = Math.min(cap0, Math.max(1, Math.ceil(d / 0.1)));
+          }
+        }
+        return best;
+      };
+      // Outdoors, PDR free-roams but must stay off every building that has a
+      // plan at this level (the bound one included) - so the cloud cannot cut
+      // through a building, while a gap between buildings, or a bridge passing
+      // over a building with no floor here, stays usable.
+      const isOutsideBuildings = (ll) => !isWalkable(ll);
+      const filter = new ParticleFilter({ isWalkable: pdrWalkable, nearestWalkable });
       locator = {
-        building: pick.building, floor: pick.floor, filter,
+        building: pick.building, floor: pick.floor, filter, isWalkable,
         arbiter: new PositionArbiter({
           filter,
-          isWalkable: g.isWalkable,
-          nearestWalkable: g.nearestWalkable,
+          isWalkable,
+          nearestWalkable,
           isOutsideBuildings,
         }),
       };
@@ -1668,8 +1791,8 @@
       // nothing until seeded, and indoors GPS is usually too poor to re-seed
       // it - without this, steps are counted but never move the marker.
       const centroid = floorCentroid(pick.floor);
-      const seed = g.nearestWalkable([lon, lat], 500)
-        || (centroid && g.nearestWalkable(centroid))
+      const seed = nearestWalkable([lon, lat], 500)
+        || (centroid && nearestWalkable(centroid))
         || [lon, lat];
       filter.seed(seed, { spreadM: 4 });
       headingDriftCal.reset();
@@ -2494,6 +2617,22 @@
         properties: { text: String(roomno.text ?? '').trim() },
       })).filter((f) => f.properties.text);
 
+      // Interior door leaves (the DOORS layer): each entity is a short leaf
+      // line; its midpoint is the doorway. A room search targets the room's
+      // DOOR, not its number label, so the route stops at the opening.
+      const doorPoints = data.shapes
+        .filter((s) => s.layer.toLowerCase() === 'doors')
+        .map((s) => {
+          const leaf = (s.items ?? []).find((it) => it.op === 'line' && it.points?.length >= 2);
+          if (leaf) {
+            const a = leaf.points[0], b = leaf.points[leaf.points.length - 1];
+            return toLL((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+          }
+          if (s.bbox) return toLL((s.bbox[0] + s.bbox[2]) / 2, (s.bbox[1] + s.bbox[3]) / 2);
+          return null;
+        })
+        .filter(Boolean);
+
       const navGraph = buildGraph(wallFeatureCollection);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
       // clustering + flood fill). buildings-config.json caches them as DXF
@@ -2541,6 +2680,9 @@
         // Room-number points, shared with the displayed room-numbers layer
         // (see above) - the destination for a "BMH 114A" search.
         roomLabels,
+        // Doorway midpoints (DOORS layer): a room search routes to the nearest
+        // door connected to the label, not to the label itself.
+        doorPoints,
         // Extractor metadata: UAA short code (BMH) + full building name.
         sourceId: data.ID ?? null,
         sourceName: data.building_name ?? null,

@@ -476,6 +476,23 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
   }
 
   /**
+   * Is this (lon,lat) inside the raster, optionally within `marginM` metres of
+   * it? The raster is bounded by the wall bbox (padded by one clearance), and
+   * `isWalkable` reports false for everything outside it. That outside is NOT a
+   * wall - it is simply unmapped - so the PDR particle filter uses this to tell
+   * "blocked by a wall" apart from "past the edge of the plan". A margin lets
+   * the cloud spill a bounded distance past the edge (no pile-up on the
+   * invisible bbox line) without dead-reckoning away into the void.
+   */
+  function inBounds(ll, marginM = 0) {
+    const [x, y] = toM(ll);
+    const c = Math.floor((x - OX) / CELL);
+    const r = Math.floor((y - OY) / CELL);
+    const m = marginM > 0 ? Math.ceil(marginM / CELL) : 0;
+    return c >= -m && c < W + m && r >= -m && r < H + m;
+  }
+
+  /**
    * Nearest body-clear (lon,lat) to `ll`, found by an outward spiral search in
    * whole cells (the centre of the first free cell wins). Returns null if
    * nothing free is found within `maxRadius` cells.
@@ -499,7 +516,7 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
     return null;
   }
 
-  return {findPath, nodes, stats, isWalkable, nearestWalkable,
+  return {findPath, nodes, stats, isWalkable, nearestWalkable, inBounds,
           attach, dijkstraFromAttach, distToAttach, pathToAttach};
 }
 
