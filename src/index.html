@@ -510,7 +510,7 @@
 
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
-    import { buildGraph } from './navgraph.mjs';
+    import { buildGraph, graphFromState } from './navgraph.mjs';
     import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments } from './campus.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
@@ -1860,6 +1860,7 @@
     // refreshed on every estimate; the WHOLE cloud is drawn, only the update
     // rate is throttled so it never keeps up with the sensors.
     let lastParticlePaint = -Infinity;
+    let lastParticleVersion = -1;
     const PARTICLE_PAINT_MS = 100;
     function ensureParticleLayer() {
       if (map.getLayer && map.getLayer('pdr-particles')) return;
@@ -1888,13 +1889,21 @@
     }
 
     function updateParticles() {
+      // The layer is hidden in 3D (flat dots read wrong under a pitch), so
+      // don't build or upload the cloud at all while it is not visible.
+      if (is3D) return;
+      const filter = locator?.filter;
+      // A GPS-only estimate (or a repeated render) does not move the PDR
+      // cloud; skip the O(count) rebuild + map upload unless it changed.
+      if (filter && filter.version === lastParticleVersion) return;
       const now = performance.now();
       if (now - lastParticlePaint < PARTICLE_PAINT_MS) return;
       lastParticlePaint = now;
       ensureParticleLayer();
       const src = map.getSource('pdr-particles');
       if (!src) return;
-      const pts = locator?.filter?.points?.() ?? [];
+      const pts = filter?.points?.() ?? [];
+      lastParticleVersion = filter ? filter.version : -1;
       // Draw EVERY particle (no sub-sampling) - the whole cloud is the point.
       const features = new Array(pts.length);
       for (let i = 0; i < pts.length; i++) {
@@ -2583,6 +2592,51 @@
       return shapes;
     }
 
+    // --- off-main-thread navGraph builds ------------------------------------
+    // `buildGraphState` is ~0.1-1.2 s per floor on desktop (3-4x on mobile),
+    // and the old boot ran it synchronously for all ~18 floors, freezing the UI
+    // in ~1 s chunks for ~7 s (desktop). A single worker moves that work off the
+    // main thread; the thread only runs the cheap `graphFromState`. Any worker
+    // failure (unsupported, not deployed, crash, or hang) falls back to a
+    // synchronous `buildGraph`, so boot never depends on the worker.
+    const navWorker = (() => {
+      try { return new Worker('/navgraph-worker.mjs', { type: 'module' }); }
+      catch { return null; }
+    })();
+    let navSeq = 0;
+    const navPending = new Map();   // id -> {resolve, reject}
+    const NAV_WORKER_TIMEOUT_MS = 20000;
+    if (navWorker) {
+      navWorker.onmessage = (e) => {
+        const { id, state, error } = e.data;
+        const job = navPending.get(id);
+        if (!job) return;
+        navPending.delete(id);
+        if (error) job.reject(new Error(error));
+        else job.resolve(state);
+      };
+      navWorker.onerror = () => {
+        for (const job of navPending.values()) job.reject(new Error('navgraph worker error'));
+        navPending.clear();
+      };
+    }
+    /** Build one floor's navGraph, off-thread when possible. */
+    function buildGraphAsync(walls) {
+      if (!navWorker) return Promise.resolve(buildGraph(walls));
+      const id = ++navSeq;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (navPending.delete(id)) reject(new Error('navgraph worker timeout'));
+        }, NAV_WORKER_TIMEOUT_MS);
+        navPending.set(id, {
+          resolve: (state) => { clearTimeout(timer); resolve(state); },
+          reject: (err) => { clearTimeout(timer); reject(err); },
+        });
+        try { navWorker.postMessage({ id, walls }); }
+        catch (err) { navPending.delete(id); clearTimeout(timer); reject(err); }
+      }).then((state) => graphFromState(state), () => buildGraph(walls));
+    }
+
     async function loadFloor(buildingConfig, floor, preloadedData) {
       // The boot prefetches every floor JSON in parallel and passes it in;
       // the fallback keeps the function usable standalone.
@@ -2633,7 +2687,7 @@
         })
         .filter(Boolean);
 
-      const navGraph = buildGraph(wallFeatureCollection);
+      const navGraph = await buildGraphAsync(wallFeatureCollection);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
       // clustering + flood fill). buildings-config.json caches them as DXF
       // points, so prefer that; fall back to extracting when absent.

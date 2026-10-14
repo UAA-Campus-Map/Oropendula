@@ -310,6 +310,10 @@ export class ParticleFilter {
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
+    // Bumped whenever the cloud actually changes (seed / step). The renderer
+    // uses it to skip rebuilding the particle overlay for GPS-only estimates
+    // that leave the PDR cloud untouched.
+    this.version = 0;
   }
 
   /**
@@ -349,6 +353,7 @@ export class ParticleFilter {
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
+    this.version++;
   }
 
   /** Advance every particle one step along its heading. */
@@ -383,6 +388,7 @@ export class ParticleFilter {
     }
     this._update(headingRad);
     this._trackStall();
+    this.version++;
   }
 
   /**

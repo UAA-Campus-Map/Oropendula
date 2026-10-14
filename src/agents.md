@@ -1023,4 +1023,23 @@ is not registered in `buildings-config.json`, so it is not searchable.
   Dijkstra off the frame (`requestIdleCallback`, throttled 3 m / 5 s); the
   follow loop uses plain trig instead of `turf.destination`; compass/status DOM
   text is only written when it changes.
+- **navGraph builds run in a Worker** (`navgraph-worker.mjs`, one module worker
+  created at module load). `buildGraphState` is ~0.1-1.2 s per floor on desktop
+  (3-4x mobile) and boot used to run it synchronously for all ~18 floors
+  (**~6.7 s** desktop / ~20 s+ mobile of frozen main thread in ~1 s chunks).
+  `loadFloor` now `await`s `buildGraphAsync(wallFeatureCollection)`: the worker
+  returns the serializable state (the `blocked` raster is **transferred**, not
+  copied) and the main thread only runs the cheap `graphFromState`. The state
+  round-trips through structured clone with identical results (verified:
+  `isWalkable`, `stats.nodes`, `findPath` all match `buildGraph`). **Any worker
+  failure falls back to a synchronous `buildGraph`** (`onerror`, `postMessage`
+  throw, or a 20 s timeout), so boot never depends on the worker. Only
+  `index.html`, `locate.mjs` (+ this file) and the worker are uploaded; the
+  worker imports the same `./navgraph.mjs`. Total boot time is unchanged
+  (one worker, floors are still built one at a time) - the gain is a responsive
+  main thread; a worker POOL + concurrent prefetch would also cut total time.
+- **Particle overlay skips work when it cannot show.** `updateParticles` returns
+  immediately in 3D (the layer is hidden there) and skips the O(count) rebuild +
+  map upload unless `filter.version` changed (bumped in `seed`/`predict`), so a
+  GPS-only estimate or a repeated render no longer re-uploads the cloud.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.
