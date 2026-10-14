@@ -457,7 +457,7 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   using only the plain event — engaged by the calibration walk, which measures
   the frame's offset from true north. (2) The magnetometer jitters several
   degrees per sample, so `HeadingTracker` low-passes it with a **time-based**
-  blend (`1-exp(-dt/tau)`, tau 0.5 s, frame-rate independent) and the gyro only
+  blend (`1-exp(-dt/tau)`, tau 0.3 s, frame-rate independent) and the gyro only
   bridges when the compass is stale (`gyroBridgeAfterMs`). (3) The Heading panel
   has a **compass-trim slider (±45°)** for the "compass points a bit off"
   case: the trim is composed with the calibration bias
@@ -839,7 +839,7 @@ lift geometry (the MapLibre "display buildings in 3D" / "extrude polygons for
   pin in 2D and a blocky **avatar** in 3D (`campus-3d-live` source: body
   column + lighter head + a facing wedge along the smoothed heading, plus a
   translucent accuracy disc; `applyLiveMode` toggles them with the DOM pin and
-  the flat `location-radius`/`location-heading` layers). The avatar's base is
+  the flat `location-heading`/`pdr-particles` layers). The avatar's base is
   always `floorBase(currentFloorId())`: real position sources (GPS/PDR) carry
   no height, so the **floor picker is authoritative** exactly as in 2D.
   `applyFloorFilter` calls `refreshLive3D()` so it follows floor changes
@@ -940,11 +940,17 @@ is not registered in `buildings-config.json`, so it is not searchable.
   (between buttons, and beside the shorter ones under the wide search row) used
   to swallow taps and pinch/rotate gestures, so map gestures did not work in
   those areas. Any new overlay must follow the same pattern.
-- The PDR **particle cloud is drawn on the map** (`pdr-particles` circle layer,
-  fed by `ParticleFilter.points()`): one dot per particle, larger/darker with
-  weight, so map-matching is visible as the cloud squeezing into corridors.
-  **Gated on `?dev=1`** (the same flag as "Find Path"), created lazily in
+- The PDR **particle cloud is the production position indicator**
+  (`pdr-particles` circle layer, fed by `ParticleFilter.points()`): one dot per
+  particle, larger/darker with weight, so map-matching is visible as the cloud
+  squeezing into corridors. It **replaced the old accuracy circle**
+  (`location-radius` fill/outline, now removed). Created lazily in
   `ensureParticleLayer()` (retried while the style loads) and refreshed from
   `renderEstimate`, for both GPS and PDR sources. 2D only - flat dots sit at
-  ground level and read wrong under a pitched 3D view.
+  ground level and read wrong under a pitched 3D view (the 3D avatar remains).
+- The **heading indicator** is a `location-heading` line drawn from the live
+  marker along the smoothed heading, at a **fixed `HEADING_LINE_M = 4 m`**
+  length (so it reads the same at any GPS accuracy). `updateHeadingLine()` is
+  called both on heading updates and from `renderEstimate`, so the line stays
+  attached to the marker as it moves.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.

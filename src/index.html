@@ -1539,7 +1539,6 @@
 
     // Live location
     let livePosMarker = null;
-    let accuracyIndicator = null;
     let headingIndicator = null;
     let lastAccuracyMeters = 0;
     let geoWatchId = null;
@@ -1710,13 +1709,14 @@
       }
     }
 
-    // --- particle cloud overlay (debug telemetry) ---------------------------
+    // --- particle cloud overlay (the live position indicator) ---------------
     // Draws the PDR particle filter's cloud - where the pedestrian *could* be -
-    // as dots sized/darkened by particle weight. Created lazily (the style may
-    // still be loading when the first estimate arrives) and refreshed on every
-    // estimate, for both GPS and dead-reckoning sources (PDR runs either way).
+    // as dots sized/darkened by particle weight. This is the production
+    // position indicator (it replaced the old accuracy circle). Created lazily
+    // (the style may still be loading when the first estimate arrives) and
+    // refreshed on every estimate, for both GPS and dead-reckoning sources.
     function ensureParticleLayer() {
-      if (!devMode || (map.getLayer && map.getLayer('pdr-particles'))) return;
+      if (map.getLayer && map.getLayer('pdr-particles')) return;
       try {
         if (!map.getSource('pdr-particles')) {
           map.addSource('pdr-particles', {
@@ -1768,11 +1768,8 @@
       if (followActive() && !followFraming) startFollowLoop();
       if (livePosMarker) livePosMarker.setLngLat(ll);
       lastAccuracyMeters = est.accuracyM;
-      if (map.getSource('location-radius')) {
-        map.getSource('location-radius').setData(
-          turf.circle(ll, Math.max(1, est.accuracyM), { steps: 64, units: 'meters' }));
-      }
       updateParticles();
+      updateHeadingLine();   // keep the 4 m heading line attached to the marker
       // 3D: the same estimate as a blocky avatar extrusion on the selected
       // floor (DOM markers cannot be lifted). 2D keeps the DOM pin and the
       // flat accuracy/heading layers.
@@ -1787,20 +1784,24 @@
       rerouteFromEstimate();
     }
 
-    // Compass display / heading arrow, driven by the SMOOTHED heading from
+    // Compass display / heading indicator, driven by the SMOOTHED heading from
     // motion.mjs (time-based low-pass), not the raw sensor event - the raw
-    // magnetometer flickers. The map stays north-up: only the arrow turns.
+    // magnetometer flickers. The map stays north-up: only the line turns. The
+    // line is a FIXED length so it reads the same regardless of GPS accuracy.
+    const HEADING_LINE_M = 4;
+    /** Redraw the fixed-length heading line from the live marker. */
+    function updateHeadingLine() {
+      if (!livePosMarker || !map.getSource('location-heading') || lastHeadingDeg == null) return;
+      const p = livePosMarker.getLngLat();
+      const tip = turf.destination([p.lng, p.lat], HEADING_LINE_M, lastHeadingDeg, { units: 'meters' });
+      map.getSource('location-heading').setData(
+        turf.lineString([[p.lng, p.lat], tip.geometry.coordinates]));
+    }
     function updateHeadingDisplay(headingRad) {
       const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
       lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
       compassDisplay.textContent = `${Math.round(deg)}°`;
-      if (livePosMarker && map.getSource('location-heading')) {
-        const markerPos = livePosMarker.getLngLat();
-        const outsidePoint = turf.destination(
-          [markerPos.lng, markerPos.lat], Math.max(1, lastAccuracyMeters), deg, { units: 'meters' });
-        map.getSource('location-heading').setData(
-          turf.lineString([[markerPos.lng, markerPos.lat], outsidePoint.geometry.coordinates]));
-      }
+      updateHeadingLine();
     }
 
     // --- "My Location" in 3D: a blocky avatar --------------------------------
@@ -1909,7 +1910,7 @@
     /** 2D: DOM pin + flat circles. 3D: the floor-pinned avatar extrusions. */
     function applyLiveMode() {
       if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
-      for (const id of ['location-radius', 'location-radius-outline', 'location-heading-outline', 'pdr-particles']) {
+      for (const id of ['location-heading-outline', 'pdr-particles']) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', is3D ? 'none' : 'visible');
       }
       for (const id of ['campus-3d-live', 'campus-3d-live-accuracy']) {
@@ -2000,13 +2001,8 @@
         lastHeadingDeg = position.coords.heading;
       }
 
-      const accuracyCircle = turf.circle([longitude, latitude], accuracy, {
-        steps: 64,
-        units: 'meters',
-      });
-      if (map.getSource('location-radius')) {
-        map.getSource('location-radius').setData(accuracyCircle);
-      }
+      // (The old accuracy circle was replaced by the particle cloud, which
+      // renderEstimate refreshes from the filter.)
 
       // Feed GPS to the arbiter too; if PDR is currently more accurate the
       // marker will be re-rendered from the filter instead.
@@ -2052,35 +2048,13 @@
       }
       livePosMarker = new maplibregl.Marker().setLngLat([0, 0]).addTo(map);
 
+      // The old accuracy circle is gone - the particle cloud (pdr-particles)
+      // is the position indicator now (created in ensureParticleLayer).
       if (map.getSource('location-radius')) {
         map.removeLayer('location-radius-outline');
         map.removeLayer('location-radius');
         map.removeSource('location-radius');
       }
-
-      accuracyIndicator = turf.circle([0, 0], 1, { steps: 64, units: 'meters' });
-      map.addSource('location-radius', {
-        type: 'geojson',
-        data: accuracyIndicator,
-      });
-      map.addLayer({
-        id: 'location-radius',
-        type: 'fill',
-        source: 'location-radius',
-        paint: {
-          'fill-color': '#4a90e2',
-          'fill-opacity': 0.3,
-        },
-      });
-      map.addLayer({
-        id: 'location-radius-outline',
-        type: 'line',
-        source: 'location-radius',
-        paint: {
-          'line-color': '#4a90e2',
-          'line-width': 2,
-        },
-      });
 
       if (map.getSource('location-heading')) {
         map.removeLayer('location-heading-outline');
@@ -2104,8 +2078,8 @@
           'line-cap': 'round',
         },
         paint: {
-          'line-color': '#4a90e2',
-          'line-width': 3,
+          'line-color': '#2f6fb5',
+          'line-width': 4,
         },
       });
 

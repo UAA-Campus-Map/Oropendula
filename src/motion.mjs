@@ -243,7 +243,7 @@ export class StepDetector {
  * rotation about device +z, so the default is -1.
  */
 export class HeadingTracker {
-  constructor({ bias = 0, tau = 0.5, gyroSign = -1, gyroBridgeAfterMs = 250 } = {}) {
+  constructor({ bias = 0, tau = 0.3, gyroSign = -1, gyroBridgeAfterMs = 250 } = {}) {
     this.bias = bias;
     this.tau = tau;                       // smoothing time constant, seconds
     this.gyroSign = gyroSign;
