@@ -430,6 +430,7 @@ export function createMotion(opts = {}) {
   const heading = new HeadingTracker(headingOptions);
   const support = sensorSupport(win);
   let running = false;
+  let starting = null;   // in-flight start() promise (guards duplicate requests)
   let lastStepT = null;
 
   // Which frame the heading comes from. 'absolute' trusts the magnetometer
@@ -482,17 +483,38 @@ export function createMotion(opts = {}) {
 
   async function start() {
     if (running) return;
+    if (starting) return starting;   // a second call joins the in-flight request
+    starting = doStart();
+    try { await starting; } finally { starting = null; }
+  }
+
+  async function doStart() {
     if (support.needsPermission) {
-      try {
-        if (typeof win.DeviceMotionEvent?.requestPermission === 'function') {
-          await win.DeviceMotionEvent.requestPermission();
+      // ONE request is enough: iOS shows a single "Motion & Orientation
+      // Access" prompt, and granting it enables both `devicemotion` and
+      // `deviceorientation`. Asking twice is what breaks things - awaiting the
+      // first spends the user activation so the second call rejects (old bug),
+      // and firing both in the same tick lets the second cancel the first, so
+      // only one API ends up granted (steps never arrive). Request the one that
+      // carries the accelerometer.
+      const requestPermission =
+        (typeof win.DeviceMotionEvent?.requestPermission === 'function')
+          ? win.DeviceMotionEvent.requestPermission.bind(win.DeviceMotionEvent)
+          : (typeof win.DeviceOrientationEvent?.requestPermission === 'function')
+            ? win.DeviceOrientationEvent.requestPermission.bind(win.DeviceOrientationEvent)
+            : null;
+      if (requestPermission) {
+        let state;
+        try {
+          state = await requestPermission();
+        } catch (error) {
+          onStatus?.({ type: 'permission-denied', error });
+          return;
         }
-        if (typeof win.DeviceOrientationEvent?.requestPermission === 'function') {
-          await win.DeviceOrientationEvent.requestPermission();
+        if (state === 'denied') {
+          onStatus?.({ type: 'permission-denied' });
+          return;
         }
-      } catch (error) {
-        onStatus?.({ type: 'permission-denied', error });
-        return;
       }
     }
     win.addEventListener?.('devicemotion', handleMotion, true);

@@ -1893,6 +1893,90 @@ function runSteps(det, samples) {
     fn({ type: 'deviceorientation', alpha: 90, timeStamp: 10 }));
   check('relative mode uses the plain event', relLast != null && relLast.absolute === false,
     relLast ? `${(relLast.heading * 180 / Math.PI).toFixed(1)} deg` : 'none');
+
+  // iOS permission: ONE request is made (the shared prompt enables both APIs).
+  // The old code awaited DeviceMotion then called DeviceOrientation, whose
+  // request rejects once the user activation is spent - the catch bailed
+  // without registering listeners ("granted but the walking model does
+  // nothing"). Firing both in one tick lets the second cancel the first.
+  {
+    const permListeners = {};
+    let motionRequests = 0, orientRequests = 0;
+    let resolveMotion;
+    let motionStarted = false;
+    const permWin = {
+      addEventListener: (t, fn) => { (permListeners[t] ||= []).push(fn); },
+      removeEventListener: () => {},
+      performance: { now: () => 0 },
+      DeviceMotionEvent: {
+        requestPermission: () => {
+          motionRequests++;
+          return new Promise((res) => { resolveMotion = () => res('granted'); });
+        },
+      },
+      DeviceOrientationEvent: {
+        requestPermission: () => { orientRequests++; return Promise.reject(new Error('NotAllowedError')); },
+      },
+    };
+    const pm = createMotion({ win: permWin, onStatus: (s) => { if (s.type === 'started') motionStarted = true; } });
+    const startingP = pm.start();
+    check('only the accelerometer permission is requested', motionRequests === 1 && orientRequests === 0,
+      `motion=${motionRequests} orient=${orientRequests}`);
+    resolveMotion();
+    await startingP;
+    check('sensors start after the grant', motionStarted);
+    check('both listeners register', (permListeners.devicemotion || []).length === 1 &&
+      (permListeners.deviceorientation || []).length === 1);
+  }
+
+  // Falls back to the orientation permission when no motion API exists.
+  {
+    let orientRequests = 0, started = false;
+    const fallbackWin = {
+      addEventListener: () => {}, removeEventListener: () => {},
+      performance: { now: () => 0 },
+      DeviceOrientationEvent: { requestPermission: () => { orientRequests++; return Promise.resolve('granted'); } },
+    };
+    const fm = createMotion({ win: fallbackWin, onStatus: (s) => { if (s.type === 'started') started = true; } });
+    await fm.start();
+    check('orientation permission used when motion API is absent', orientRequests === 1 && started);
+  }
+
+  // A second start() while one is in flight must not re-request permission.
+  {
+    const joinListeners = {};
+    let requests = 0;
+    let resolvePerm;
+    const joinWin = {
+      addEventListener: (t, fn) => { (joinListeners[t] ||= []).push(fn); },
+      removeEventListener: () => {},
+      performance: { now: () => 0 },
+      DeviceMotionEvent: { requestPermission: () => { requests++; return new Promise((res) => { resolvePerm = () => res('granted'); }); } },
+    };
+    const jm = createMotion({ win: joinWin });
+    const a = jm.start();
+    const b = jm.start();
+    check('a concurrent start() joins the in-flight request', requests === 1, `${requests} requests`);
+    resolvePerm();
+    await Promise.all([a, b]);
+    check('joined start() leaves the motion running once', jm.running);
+  }
+
+  // Explicit denial reports permission-denied and registers no listeners.
+  {
+    const deniedListeners = {};
+    const deniedWin = {
+      addEventListener: (t, fn) => { (deniedListeners[t] ||= []).push(fn); },
+      removeEventListener: () => {},
+      performance: { now: () => 0 },
+      DeviceMotionEvent: { requestPermission: () => Promise.resolve('denied') },
+    };
+    let denied = false;
+    const dm = createMotion({ win: deniedWin, onStatus: (s) => { if (s.type === 'permission-denied') denied = true; } });
+    await dm.start();
+    check('denied permission reports and registers no listeners',
+      denied && !deniedListeners.devicemotion, denied ? 'denied' : 'no status');
+  }
 }
 
 // ---------------------------------------------------------------------------
