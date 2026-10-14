@@ -1964,7 +1964,12 @@
       const seed = nearestWalkable([lon, lat], 500)
         || (centroid && nearestWalkable(centroid))
         || [lon, lat];
-      filter.seed(seed, { spreadM: 4 });
+      // Modest re-bind radius (a floor change / boot is a heuristic, not a
+      // correction), plus a short grace and a trusted-radius floor so the first
+      // step cannot crush the fresh cloud to a point.
+      const REBIND_SEED_SPREAD_M = 2.5;
+      filter.seed(seed, { spreadM: REBIND_SEED_SPREAD_M });
+      locator.arbiter.setAccuracyFloor(REBIND_SEED_SPREAD_M * 2);
       headingDriftCal.reset();
       setCorridorBadge(false);
     }

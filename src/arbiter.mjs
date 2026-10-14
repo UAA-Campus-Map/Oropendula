@@ -63,6 +63,11 @@ export class PositionArbiter {
     });
     this._seededOutdoors = false;
     this.gpsFix = null;
+    // A heuristic re-seed (floor change / anchor) is NOT a correction: the
+    // trusted radius must start at least at the seed's own spread, or the first
+    // step's accuracy cap would crush the fresh cloud to a point. The floor
+    // becomes irrelevant once walked distance dominates the drift term.
+    this.accuracyFloorM = 0;
     this.heldGps = null;         // last good fix, held through a source switch
     this.metresSinceCorrection = 0;
     this.source = null;          // committed source
@@ -148,6 +153,9 @@ export class PositionArbiter {
   anchor([lon, lat], { spreadM = 2.5 } = {}) {
     this.filter.seed([lon, lat], { spreadM, heading: this.heading, headingSpreadDeg: 30 });
     this.metresSinceCorrection = 0;
+    // Keep the trusted radius at the seed's spread so the anchor is not crushed
+    // on the first step (then it grows with walked distance).
+    this.setAccuracyFloor(spreadM * 2);
     this.lastAnchor = [lon, lat];
     this.heldGps = null;
     this.source = 'pdr';       // the estimate now comes straight from the seeded filter
@@ -174,7 +182,18 @@ export class PositionArbiter {
 
   /** PDR position uncertainty in metres at the current walked distance. */
   pdrAccuracy() {
-    return this.pdrBaseAccM + this.pdrDriftPerM * this.metresSinceCorrection;
+    return Math.max(this.accuracyFloorM,
+      this.pdrBaseAccM + this.pdrDriftPerM * this.metresSinceCorrection);
+  }
+
+  /**
+   * Set the trusted-radius floor after a re-seed. Call with ~2x the seed
+   * spread so the freshly seeded cloud (roughly gaussian, so a hard radius at
+   * 1x spread would discard most of it) is not crushed on the first step.
+   */
+  setAccuracyFloor(m) {
+    if (m > this.accuracyFloorM) this.accuracyFloorM = m;
+    return this;
   }
 
   /** The live GPS candidate, or null if stale/implausible. */
