@@ -48,14 +48,14 @@ export class PositionArbiter {
    *        free-roaming PDR (and re-seeds the cloud) with a fix this good
    * @param {number}   [opts.hysteresisS=3]       seconds before a switch commits
    * @param {number}   [opts.pdrBaseAccM=2.5]     PDR accuracy at zero distance
-   * @param {number}   [opts.pdrDriftPerM=0.08]   added PDR error per metre walked
+   * @param {number}   [opts.pdrDriftPerM=0.20]   added PDR error per metre walked
    * @param {number}   [opts.buildingZoneM=15]    within this of a wall = "at a building"
    */
   constructor({ filter, isWalkable, nearestWalkable, isOutsideBuildings = null,
     gpsStalenessS = 6, gpsMaxAccuracyM = 60,
     gpsSeedAccuracyM = 20, gpsOverrideAccuracyM = 3,
     gpsHoldS = 10, hysteresisS = 3,
-    pdrBaseAccM = 2.5, pdrDriftPerM = 0.08, buildingZoneM = 15 } = {}) {
+    pdrBaseAccM = 2.5, pdrDriftPerM = 0.20, buildingZoneM = 15 } = {}) {
     Object.assign(this, {
       filter, isWalkable, nearestWalkable, isOutsideBuildings,
       gpsStalenessS, gpsMaxAccuracyM, gpsSeedAccuracyM, gpsOverrideAccuracyM, gpsHoldS,

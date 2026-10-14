@@ -1,6 +1,15 @@
 /**
  * Smoke test for the tiered campus router, run against the real building
- * JSONs in this directory.  Usage:  node smoke.mjs
+ * JSONs in this directory.
+ *
+ *   node smoke.mjs                        # everything (the gate)
+ *   node smoke.mjs motion pdr arbiter autocal   # a fast subset (no floor load)
+ *   node smoke.mjs router                 # one category
+ *   node smoke.mjs --list                 # categories
+ *
+ * Categories only gate which sections RUN; selected groups still share the
+ * one-time building load, which is skipped entirely when no selected category
+ * needs the real floors.
  */
 import { readFileSync } from 'fs';
 import { Worker } from 'node:worker_threads';
@@ -47,6 +56,56 @@ function check(name, cond, detail = '') {
   if (!cond) failures++;
   console.log(`  [${ok}] ${name}${detail ? ' - ' + detail : ''}`);
 }
+
+/** Pretty-print a route (used by the router and multi-floor groups). */
+function showRoute(name, r) {
+  if (!r) { console.log(`  ${name}: null`); return; }
+  console.log(`  ${name}: ${r.summary} | ${Math.round(r.totalMeters)}m, ${Math.round(r.totalSeconds)}s`);
+  for (const s of r.segments) {
+    const geom = s.polyline ? `${s.polyline.length} pts` : 'vertical';
+    console.log(`    - ${s.tier.padEnd(8)} ${s.building ?? ''} ${s.floor ?? (s.fromFloor ? s.fromFloor + '->' + s.toFloor : '')} ${geom} ${Math.round(s.meters)}m ${Math.round(s.seconds)}s`);
+  }
+}
+
+// --- test categories --------------------------------------------------------
+// Run a subset to avoid the full ~40 s suite while iterating:
+//   node smoke.mjs motion autocal pdr      (fast, no building load)
+//   node smoke.mjs router                  (building-loading groups)
+//   node smoke.mjs                         (everything, the gate)
+const ALL_CATEGORIES = [
+  'align',       // floor auto-align (synthetic)
+  'walkability', // navgraph isWalkable/nearestWalkable over real floors
+  'pdr',         // particle filter (synthetic maps)
+  'arbiter',     // GPS/PDR arbiter (synthetic map)
+  'portals',     // portal sanity + portal cache (real floors)
+  'router',      // building router + exit reachability + tests 1-8
+  'osm',         // osm-paths cache + live OSM network
+  'multifloor',  // multi-floor routing, skybridges, connector anchors
+  'motion',      // StepDetector / HeadingTracker / StepLengthModel
+  'autocal',     // GPS step-length auto-calibration
+];
+const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+if (process.argv.includes('--list') || process.argv.includes('-h') || process.argv.includes('--help')) {
+  console.log('Usage: node smoke.mjs [category ...]   (no args = run everything)\n');
+  console.log('Categories:');
+  for (const c of ALL_CATEGORIES) console.log(`  ${c}`);
+  console.log('\nExamples:');
+  console.log('  node smoke.mjs motion pdr arbiter autocal   # fast, no building load');
+  console.log('  node smoke.mjs router                        # building-loading groups');
+  process.exit(0);
+}
+const _unknown = _args.filter((a) => !ALL_CATEGORIES.includes(a));
+if (_unknown.length) {
+  console.error(`Unknown category: ${_unknown.join(', ')}`);
+  console.error(`Categories: ${ALL_CATEGORIES.join(', ')}`);
+  process.exit(2);
+}
+const ACTIVE = _args.length ? new Set(_args) : new Set(ALL_CATEGORIES);
+const want = (c) => ACTIVE.has(c);
+// Which groups need the (slow) real-floor load: wall raster + portals.
+const NEEDS_FLOORS = ['walkability', 'portals', 'router', 'osm', 'multifloor'];
+const needsFloors = NEEDS_FLOORS.some(want);
+if (_args.length) console.log(`Running categories: ${[...ACTIVE].join(', ')}\n`);
 
 // SMOKE_TIMING=1 prefixes every line with elapsed seconds - run it when
 // hunting for the slow section. Off by default so the gate's output stays
@@ -130,16 +189,21 @@ async function buildFloorBasis() {
   return basis;
 }
 
-console.log('Loading buildings...');
 const t0 = performance.now();
 // ONE JSON parse + wall pass + buildGraph + fresh portal extraction per floor,
 // shared by every test group below (built in parallel workers). The suite used
 // to redo this per group - the multi-floor block rebuilt every navGraph a
 // second time for its cached-router comparison.
-const floorBasis = await buildFloorBasis();
+// SKIPPED entirely when no selected category needs the real floors (so
+// `node smoke.mjs motion pdr arbiter autocal` runs in a couple of seconds).
+let floorBasis = [];
+if (needsFloors) {
+  console.log('Loading buildings...');
+  floorBasis = await buildFloorBasis();
+}
 
 // The older tests deliberately work on a ground-floor-only campus.
-const buildings = CONFIG.map((cfg, i) => {
+const buildings = !needsFloors ? [] : CONFIG.map((cfg, i) => {
   const { navGraph, lines, freshPortals } = floorBasis[i][0];
   console.log(`  ${cfg.id}: ${navGraph.stats.nodes} nodes, ${navGraph.stats.edges} edges, ` +
     `portals: ${freshPortals.elevators.length} elevators, ${freshPortals.stairs.length} stairs, ${freshPortals.exits.length} exits`);
@@ -158,7 +222,7 @@ const buildings = CONFIG.map((cfg, i) => {
     }],
   };
 });
-console.log(`Loaded in ${Math.round(performance.now() - t0)}ms\n`);
+if (needsFloors) console.log(`Loaded in ${Math.round(performance.now() - t0)}ms\n`);
 
 // The shipped OSM path cache. index.html loads this (or decodes pmtiles live)
 // and the production router walks the network; the full-campus router below
@@ -202,8 +266,8 @@ catch { /* optional; the OSM cache tests below report it */ }
 // Floor auto-align (align.mjs) - synthetic rigid recovery for the import
 // tool's "align to ground".
 // ---------------------------------------------------------------------------
+if (want('align')) {
 console.log('\nFloor auto-align:');
-{
   const corners = [[0, 0], [100, 0], [100, 60], [0, 60]];
   const hull = convexHull(corners.concat([[50, 30], [10, 10]]));
   check('convexHull drops interior points', hull.length === 4, `${hull.length} pts`);
@@ -257,8 +321,8 @@ console.log('\nFloor auto-align:');
 
 // The PDR particle filter relies on these O(1) accessors staying consistent
 // with the router's clearance raster.
+if (want('walkability')) {
 console.log('\nWalkability accessor:');
-{
   let falseOnWall = 0, freeRecovered = 0, tested = 0, maxRecoverM = 0;
   for (const b of buildings) {
     const g = b.floors[0].navGraph;
@@ -285,8 +349,8 @@ console.log('\nWalkability accessor:');
 // ---------------------------------------------------------------------------
 // PDR particle filter (locate.mjs) - synthetic maps, no sensors required.
 // ---------------------------------------------------------------------------
+if (want('pdr')) {
 console.log('\nPDR particle filter:');
-{
   const lon0 = -149.83, lat0 = 61.18;
   const mpd = metresPerDegree(lat0);
   const toLL = (e, n) => [lon0 + e / mpd.lon, lat0 + n / mpd.lat];
@@ -557,8 +621,8 @@ console.log('\nPDR particle filter:');
 // ---------------------------------------------------------------------------
 // GPS/PDR arbiter (arbiter.mjs) - synthetic map, no GPS or sensors required.
 // ---------------------------------------------------------------------------
+if (want('arbiter')) {
 console.log('\nGPS/PDR arbiter:');
-{
   const lon0 = -149.83, lat0 = 61.18;
   const mpd = metresPerDegree(lat0);
   const toLL = (e, n) => [lon0 + e / mpd.lon, lat0 + n / mpd.lat];
@@ -741,6 +805,7 @@ function insideWalls(px, py, segs) {
   return crossings % 2 === 1;
 }
 
+if (want('portals')) {
 console.log('Portal sanity:');
 check('every building has exits', buildings.every(b => b.floors[0].exits.length > 0));
 check('AS103 has elevators', buildings.find(b => b.id === 'AS103').floors[0].elevators.length > 0);
@@ -807,8 +872,9 @@ check('every building has stairs', buildings.every(b => b.floors[0].stairs.lengt
 // exactly - the app trusts it instead of re-running the doorway clustering and
 // flood fill. DXF coords are cached, so the check applies the floor's own
 // registration to both sides.
+}
+if (want('portals')) {
 console.log('\nPortal cache:');
-{
   let floors = 0, missing = 0, mismatches = [];
   for (let i = 0; i < CONFIG.length; i++) {
     const cfg = CONFIG[i];
@@ -839,6 +905,7 @@ console.log('\nPortal cache:');
     mismatches.length ? mismatches.join(', ') : `${floors} floors checked`);
 }
 
+if (want('router')) {
 console.log('\nBuilding router...');
 const router = buildCampusRouter(buildings);
 console.log('  stats:', router.stats, '\n');
@@ -856,15 +923,6 @@ console.log('');
 const as103 = buildings.find(b => b.id === 'AS103');
 const as102 = buildings.find(b => b.id === 'AS102');
 const as101 = buildings.find(b => b.id === 'AS101');
-
-function showRoute(name, r) {
-  if (!r) { console.log(`  ${name}: null`); return; }
-  console.log(`  ${name}: ${r.summary} | ${Math.round(r.totalMeters)}m, ${Math.round(r.totalSeconds)}s`);
-  for (const s of r.segments) {
-    const geom = s.polyline ? `${s.polyline.length} pts` : 'vertical';
-    console.log(`    - ${s.tier.padEnd(8)} ${s.building ?? ''} ${s.floor ?? (s.fromFloor ? s.fromFloor + '->' + s.toFloor : '')} ${geom} ${Math.round(s.meters)}m ${Math.round(s.seconds)}s`);
-  }
-}
 
 console.log('Test 1: same building, same floor (AS103 exit -> AS103 exit)');
 const a = as103.floors[0].exits[0].ll, b = as103.floors[0].exits[3].ll;
@@ -1171,8 +1229,9 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
 // OSM paths cache (gen-osm.mjs) - the app loads this instead of decoding the
 // pmtiles archive when it covers the campus.
 // ---------------------------------------------------------------------------
+}
+if (want('osm')) {
 console.log('\nOSM paths cache:');
-{
   const cache = osmCache;
   check('osm-paths.json exists', !!cache);
   if (cache) {
@@ -1213,8 +1272,8 @@ console.log('\nOSM paths cache:');
 // ---------------------------------------------------------------------------
 // Multi-floor routing (real second floors) and auto-detected skybridges.
 // ---------------------------------------------------------------------------
+if (want('multifloor')) {
 console.log('\nMulti-floor routing (all real floors):');
-{
   // A second full campus, this time with every registered floor (the `buildings`
   // above deliberately keep only the ground floor for the older tests). All
   // per-floor work comes from the shared `floorBasis`; this block only wraps
@@ -1363,8 +1422,8 @@ console.log('\nMulti-floor routing (all real floors):');
   }
 }
 
+if (want('multifloor')) {
 console.log('\nAuto-detected skybridge (synthetic):');
-{
   // Two small square buildings ~3m apart at level 02, each with an exit on the
   // facing wall. Those two same-level exits within SKYBRIDGE_MAX_M must be
   // detected as a bridge and used instead of descending to the ground.
@@ -1408,8 +1467,8 @@ console.log('\nAuto-detected skybridge (synthetic):');
     rS && rS.segments.find(s => s.tier === 'skybridge')?.floor === '02');
 }
 
+if (want('multifloor')) {
 console.log('\nExplicit skybridge destination (synthetic):');
-{
   // X and Z are 40 m apart (auto-matchable), Y is 170 m away (over the cap).
   // Without a destination X auto-pairs with Z; marking X's bridge `to: 'Y'`
   // (the ECB case) must link X-Y instead and never auto-pair X with Z.
@@ -1476,8 +1535,8 @@ console.log('\nExplicit skybridge destination (synthetic):');
     !rXF.segments.some(s => s.tier === 'outdoor'));
 }
 
+if (want('multifloor')) {
 console.log('\nConnector anchors without a ground-floor stop (synthetic):');
-{
   // A stairwell that exists on floors 02 and 03 but not 01: the first stop
   // anchors the connector and the other floor links to it. Before the anchor
   // fix, the second floor's lookup of the missing ground-floor stop passed
@@ -1517,6 +1576,7 @@ console.log('\nConnector anchors without a ground-floor stop (synthetic):');
 // ---------------------------------------------------------------------------
 // PDR signal processing (motion.mjs) - synthetic gait, no sensors required.
 // ---------------------------------------------------------------------------
+if (want('motion')) {
 console.log('\nMotion / PDR signal processing:');
 
 // One Gaussian vertical-acceleration bump per step (a realistic "one peak per
@@ -1838,6 +1898,8 @@ function runSteps(det, samples) {
 // ---------------------------------------------------------------------------
 // GPS step length auto-calibration (autocal.mjs) - synthetic GPS walks.
 // ---------------------------------------------------------------------------
+}
+if (want('autocal')) {
 console.log('\nGPS step length auto-calibration (autocal.mjs):');
 
 // Seeded uniforms/Gaussians so a certification test that passes once keeps
@@ -2173,4 +2235,5 @@ function feedCalWalk(cal, opts = {}) {
   check('a fix alone is collecting, not calibrating', fresh.stats().status === 'collecting');
 }
 
+}
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : failures + ' FAILURES'}`);process.exit(failures === 0 ? 0 : 1);

@@ -668,7 +668,13 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 
 `node smoke.mjs` — the only gate; run it after any change to campus.mjs,
 geo.mjs, osm.mjs, align.mjs, buildings-config.json or a building registration.
-It covers:
+**It takes category arguments so you don't run the whole ~23 s suite every
+time** (`node smoke.mjs --list` shows them): `align, walkability, pdr, arbiter,
+portals, router, osm, multifloor, motion, autocal`. No args = everything. The
+fast groups that need no real floors (`motion pdr arbiter autocal`) skip the
+~4-20 s building load entirely and run in <1 s:
+`node smoke.mjs motion pdr arbiter autocal`. The building-loading groups share
+one load. It covers:
 portal sanity, exits outside the footprint / near real doors, exit reachability
 for every building, six end-to-end routes (same floor, cross-building, outdoor
 click, vertical, cross-floor, cross-campus), a hermetic synthetic outdoor grid
@@ -967,10 +973,10 @@ is not registered in `buildings-config.json`, so it is not searchable.
   **O(count) per step at ~1 us/particle** (`predict` ~0.92, `estimate` ~0.08;
   mobile ~3-4x slower). `count` default is **1000** (safe ~3-4 ms/step on a
   phone; up to ~4k affordable on mobile, ~16k desktop within a 16 ms frame),
-  and raising it costs only filter CPU, NOT render cost. The **render loop is
+  and raising it costs filter CPU too (the whole cloud is now drawn, so
+  `setData` is O(count), throttled to 10 Hz). The **render loop is
   O(1) per frame** (follow rAF: constant camera math, skips `jumpTo` when
-  converged) and the particle layer's `setData` is **O(min(count, 500))** and
-  throttled, so it is decoupled from `count`. Other fixes: throttle map
+  converged). Other fixes: throttle map
   `setData` (particles 100 ms, heading-line 60 ms); defer the ~70 ms re-route
   Dijkstra off the frame (`requestIdleCallback`, throttled 3 m / 5 s); the
   follow loop uses plain trig instead of `turf.destination`; compass/status DOM
