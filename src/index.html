@@ -664,6 +664,7 @@
       applyRotationMode();
       applyFloorFilter(currentFloorId());
       applyLiveMode();
+      if (is3D) { ensureLive3D(); refreshLive3D(); }
       renderRoute();
     }
     floorDown.addEventListener('click', () => setFloor(floorLevel - 1));
@@ -1686,7 +1687,13 @@
     const REROUTE_MIN_M = 3;
     const REROUTE_MIN_S = 5;
     let lastReroute = null;   // {ll, t}
+    let reroutePending = false;
 
+    /**
+     * With a route on screen, re-plan from the current estimate. Throttled, and
+     * the ~70 ms Dijkstra is DEFERRED off the animation frame (requestIdleCallback,
+     * setTimeout fallback) so it never janks the camera/particle rendering.
+     */
     function rerouteFromEstimate() {
       if (!campusRouter || !destinationMarker || !lastRoute) return;
       if (!currentEstimate || isDefiningPath) return;
@@ -1698,14 +1705,27 @@
                                  (ll[1] - lastReroute.ll[1]) * mpd.lat);
         if (moved < REROUTE_MIN_M && now - lastReroute.t < REROUTE_MIN_S * 1000) return;
       }
-      const dest = destinationMarker.getLngLat();
-      const startFloor = locator?.floor?.floorId ?? currentFloorId();
-      const route = campusRouter.route(ll, [dest.lng, dest.lat],
-        {startFloor, endFloor: destinationFloor});
-      lastReroute = {ll, t: now};
-      if (route) {
-        lastRoute = route;
-        renderRoute();
+      lastReroute = { ll, t: now };
+      if (reroutePending) return;
+      reroutePending = true;
+      const run = () => {
+        reroutePending = false;
+        if (!campusRouter || !destinationMarker || !lastRoute
+            || !currentEstimate || isDefiningPath) return;
+        const from = [currentEstimate.lon, currentEstimate.lat];
+        const dest = destinationMarker.getLngLat();
+        const startFloor = locator?.floor?.floorId ?? currentFloorId();
+        const route = campusRouter.route(from, [dest.lng, dest.lat],
+          { startFloor, endFloor: destinationFloor });
+        if (route) {
+          lastRoute = route;
+          renderRoute();
+        }
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 500 });
+      } else {
+        window.setTimeout(run, 0);
       }
     }
 
@@ -1714,7 +1734,10 @@
     // as dots sized/darkened by particle weight. This is the production
     // position indicator (it replaced the old accuracy circle). Created lazily
     // (the style may still be loading when the first estimate arrives) and
-    // refreshed on every estimate, for both GPS and dead-reckoning sources.
+    // refreshed on every estimate; the WHOLE cloud is drawn, only the update
+    // rate is throttled so it never keeps up with the sensors.
+    let lastParticlePaint = -Infinity;
+    const PARTICLE_PAINT_MS = 100;
     function ensureParticleLayer() {
       if (map.getLayer && map.getLayer('pdr-particles')) return;
       try {
@@ -1741,23 +1764,24 @@
       } catch { /* style not ready; the next estimate retries */ }
     }
 
-    function particleData() {
-      const pts = locator?.filter?.points?.() ?? [];
-      return {
-        type: 'FeatureCollection',
-        features: pts.map((p) => ({
-          type: 'Feature',
-          properties: { w: p.w },
-          geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-        })),
-      };
-    }
-
     function updateParticles() {
+      const now = performance.now();
+      if (now - lastParticlePaint < PARTICLE_PAINT_MS) return;
+      lastParticlePaint = now;
       ensureParticleLayer();
-      if (map.getSource('pdr-particles')) {
-        map.getSource('pdr-particles').setData(particleData());
+      const src = map.getSource('pdr-particles');
+      if (!src) return;
+      const pts = locator?.filter?.points?.() ?? [];
+      // Draw EVERY particle (no sub-sampling) - the whole cloud is the point.
+      const features = new Array(pts.length);
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        features[i] = {
+          type: 'Feature', properties: { w: p.w },
+          geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        };
       }
+      src.setData({ type: 'FeatureCollection', features });
     }
 
     function renderEstimate(est) {
@@ -1772,15 +1796,23 @@
       updateHeadingLine();   // keep the 4 m heading line attached to the marker
       // 3D: the same estimate as a blocky avatar extrusion on the selected
       // floor (DOM markers cannot be lifted). 2D keeps the DOM pin and the
-      // flat accuracy/heading layers.
-      ensureLive3D();
-      if (map.getSource('campus-3d-live')) {
-        map.getSource('campus-3d-live').setData(live3DData(est));
+      // flat heading/particle layers. Only build the 3D geometry when in 3D -
+      // it rebuilds polygons + a turf.circle every step.
+      if (is3D) {
+        ensureLive3D();
+        if (map.getSource('campus-3d-live')) {
+          map.getSource('campus-3d-live').setData(live3DData(est));
+        }
       }
-      if (livePosMarker) livePosMarker.getElement().style.display = is3D ? 'none' : '';
-      statusText.textContent = est.source === 'gps'
+      if (livePosMarker) {
+        const disp = is3D ? 'none' : '';
+        const el = livePosMarker.getElement();
+        if (el.style.display !== disp) el.style.display = disp;
+      }
+      const statusTxt = est.source === 'gps'
         ? `GPS ±${est.accuracyM.toFixed(0)} m`
         : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
+      if (statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
       rerouteFromEstimate();
     }
 
@@ -1789,18 +1821,32 @@
     // magnetometer flickers. The map stays north-up: only the line turns. The
     // line is a FIXED length so it reads the same regardless of GPS accuracy.
     const HEADING_LINE_M = 4;
-    /** Redraw the fixed-length heading line from the live marker. */
-    function updateHeadingLine() {
+    // The heading line is redrawn on every orientation event (10-60 Hz); that
+    // is far more often than the map needs, so throttle the source update.
+    let lastHeadingPaint = -Infinity;
+    const HEADING_PAINT_MS = 60;
+    /** Redraw the fixed-length heading line from the live marker (throttled). */
+    function updateHeadingLine(force = false) {
       if (!livePosMarker || !map.getSource('location-heading') || lastHeadingDeg == null) return;
+      const now = performance.now();
+      if (!force && now - lastHeadingPaint < HEADING_PAINT_MS) return;
+      lastHeadingPaint = now;
       const p = livePosMarker.getLngLat();
-      const tip = turf.destination([p.lng, p.lat], HEADING_LINE_M, lastHeadingDeg, { units: 'meters' });
-      map.getSource('location-heading').setData(
-        turf.lineString([[p.lng, p.lat], tip.geometry.coordinates]));
+      const mpd = metresPerDegree(p.lat);
+      const br = lastHeadingDeg * Math.PI / 180;
+      const lat = p.lat + (Math.cos(br) * HEADING_LINE_M) / mpd.lat;
+      const lon = p.lng + (Math.sin(br) * HEADING_LINE_M) / mpd.lon;
+      map.getSource('location-heading').setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: [[p.lng, p.lat], [lon, lat]] } }],
+      });
     }
     function updateHeadingDisplay(headingRad) {
       const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
       lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
-      compassDisplay.textContent = `${Math.round(deg)}°`;
+      const txt = `${Math.round(deg)}°`;
+      if (compassDisplay.textContent !== txt) compassDisplay.textContent = txt;
       updateHeadingLine();
     }
 
@@ -2147,10 +2193,13 @@
 
     function followCameraCenter(ll) {
       // Look-ahead is a 3D concept (the camera faces the heading); 2D centres
-      // the walker exactly. No heading yet -> exact centre either way.
+      // the walker exactly. No heading yet -> exact centre either way. Plain
+      // trig (not turf) - this runs every animation frame.
       if (!is3D || lastHeadingDeg == null) return ll;
-      return turf.destination(ll, FOLLOW_LOOK_AHEAD_M, lastHeadingDeg,
-        { units: 'meters' }).geometry.coordinates;
+      const mpd = metresPerDegree(ll[1]);
+      const br = lastHeadingDeg * Math.PI / 180;
+      return [ll[0] + (Math.sin(br) * FOLLOW_LOOK_AHEAD_M) / mpd.lon,
+              ll[1] + (Math.cos(br) * FOLLOW_LOOK_AHEAD_M) / mpd.lat];
     }
 
     function startFollowLoop() {
@@ -2164,10 +2213,8 @@
         const target = followCameraCenter(followCenter);
         const cur = map.getCenter();
         const a = 1 - Math.exp(-FOLLOW_CENTER_RATE * dt);
-        const jump = {
-          center: [cur.lng + (target[0] - cur.lng) * a,
-                   cur.lat + (target[1] - cur.lat) * a],
-        };
+        const nextLng = cur.lng + (target[0] - cur.lng) * a;
+        const nextLat = cur.lat + (target[1] - cur.lat) * a;
         // Mode owns orientation: 3D turns to the heading and angles at 50
         // deg; 2D is north-up and top-down. The loop drives both because an
         // applyViewMode easeTo cannot survive the loop's jumpTo.
@@ -2175,11 +2222,17 @@
         const curB = map.getBearing();
         // Shortest path across the +/-180 seam, or the map spins the long way.
         const delta = ((bearingTarget - curB + 540) % 360) - 180;
-        jump.bearing = curB + delta * (1 - Math.exp(-FOLLOW_BEARING_RATE * dt));
+        const nextBearing = curB + delta * (1 - Math.exp(-FOLLOW_BEARING_RATE * dt));
         const pitchTarget = is3D ? FOLLOW_PITCH_3D : 0;
         const curP = map.getPitch();
-        jump.pitch = curP + (pitchTarget - curP) * (1 - Math.exp(-FOLLOW_PITCH_RATE * dt));
-        map.jumpTo(jump);
+        const nextPitch = curP + (pitchTarget - curP) * (1 - Math.exp(-FOLLOW_PITCH_RATE * dt));
+        // Only touch the camera when it has actually moved - a stationary
+        // walker would otherwise re-jump identical transforms every frame.
+        const moved = Math.abs(nextLng - cur.lng) > 1e-7 || Math.abs(nextLat - cur.lat) > 1e-7
+          || Math.abs(nextBearing - curB) > 0.05 || Math.abs(nextPitch - curP) > 0.05;
+        if (moved) {
+          map.jumpTo({ center: [nextLng, nextLat], bearing: nextBearing, pitch: nextPitch });
+        }
         followRaf = requestAnimationFrame(step);
       };
       followRaf = requestAnimationFrame(step);

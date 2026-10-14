@@ -19,7 +19,7 @@
 import { metresPerDegree } from './geo.mjs';
 import { wrapAngle, shortestDelta, clamp } from './motion.mjs';
 
-const DEFAULT_COUNT = 200;
+const DEFAULT_COUNT = 1000;
 const DEG = Math.PI / 180;
 
 function gaussian() {
@@ -295,6 +295,7 @@ export class ParticleFilter {
     this.lat = new Float64Array(count);
     this.heading = new Float64Array(count);
     this.weight = new Float64Array(count);
+    this._pt = [0, 0];   // scratch lon/lat (avoids per-sample allocation)
     this.headingBias = 0;
     // When the walker is outside the bound building, PDR must NOT be tied to
     // the floor-plan raster (skybridges, the gaps between buildings and any
@@ -400,15 +401,13 @@ export class ParticleFilter {
    */
   _move(i, eastM, northM, dist, heading) {
     const fromLon = this.lon[i], fromLat = this.lat[i];
-    const straight = this._advance(fromLon, fromLat,
-      ...offsetLL(fromLon, fromLat, eastM, northM));
-    const moved = distM(fromLon, fromLat, straight[0], straight[1]);
-    if (moved < dist * 0.9 || !this.isWalkable([straight[0], straight[1]])) {
-      this._respawn(i, heading);
-      return;
-    }
-    this.lon[i] = straight[0];
-    this.lat[i] = straight[1];
+    const mpd = metresPerDegree(fromLat);
+    const toLon = fromLon + eastM / mpd.lon, toLat = fromLat + northM / mpd.lat;
+    const p = this._advance(fromLon, fromLat, toLon, toLat);
+    const moved = distM(fromLon, fromLat, p[0], p[1]);
+    if (moved < dist * 0.9) { this._respawn(i, heading); return; }
+    this.lon[i] = p[0];
+    this.lat[i] = p[1];
   }
 
   /**
@@ -439,23 +438,28 @@ export class ParticleFilter {
 
   /**
    * Walk from a (walkable) point toward (toLon,toLat), stopping at the last
-   * walkable sample. Prevents stepping across a wall.
+   * walkable sample. Prevents stepping across a wall. Writes into the reusable
+   * `_pt` scratch array (no per-sample allocation) and returns it.
    */
   _advance(fromLon, fromLat, toLon, toLat) {
+    const pt = this._pt;
     const len = distM(fromLon, fromLat, toLon, toLat);
     if (len <= this.segmentStepM) {
-      return this.isWalkable([toLon, toLat]) ? [toLon, toLat] : [fromLon, fromLat];
+      pt[0] = toLon; pt[1] = toLat;
+      if (!this.isWalkable(pt)) { pt[0] = fromLon; pt[1] = fromLat; }
+      return pt;
     }
     const steps = Math.ceil(len / this.segmentStepM);
     let lastLon = fromLon, lastLat = fromLat;
     for (let s = 1; s <= steps; s++) {
       const t = s / steps;
-      const x = fromLon + (toLon - fromLon) * t;
-      const y = fromLat + (toLat - fromLat) * t;
-      if (!this.isWalkable([x, y])) break;
-      lastLon = x; lastLat = y;
+      pt[0] = fromLon + (toLon - fromLon) * t;
+      pt[1] = fromLat + (toLat - fromLat) * t;
+      if (!this.isWalkable(pt)) break;
+      lastLon = pt[0]; lastLat = pt[1];
     }
-    return [lastLon, lastLat];
+    pt[0] = lastLon; pt[1] = lastLat;
+    return pt;
   }
 
   /** Weight particles by walkability, apply the priors, then resample. */

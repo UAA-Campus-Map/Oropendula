@@ -948,9 +948,31 @@ is not registered in `buildings-config.json`, so it is not searchable.
   `ensureParticleLayer()` (retried while the style loads) and refreshed from
   `renderEstimate`, for both GPS and PDR sources. 2D only - flat dots sit at
   ground level and read wrong under a pitched 3D view (the 3D avatar remains).
+  **Performance**: map source updates are throttled (`PARTICLE_PAINT_MS = 100`)
+  but the WHOLE cloud is drawn (no sub-sampling), so map rendering never keeps
+  up with the sensors. The filter itself is cheap (~1 us/particle/step).
 - The **heading indicator** is a `location-heading` line drawn from the live
   marker along the smoothed heading, at a **fixed `HEADING_LINE_M = 4 m`**
-  length (so it reads the same at any GPS accuracy). `updateHeadingLine()` is
-  called both on heading updates and from `renderEstimate`, so the line stays
-  attached to the marker as it moves.
+  length (so it reads the same at any GPS accuracy). It is redrawn on every
+  orientation event (10-60 Hz), so the source update is throttled
+  (`HEADING_PAINT_MS = 60`) and computed with plain trig (no turf). The compass
+  text is only written when it changes. `updateHeadingLine()` is also called
+  from `renderEstimate` so the line stays attached to the marker as it moves.
+- The 3D live-avatar geometry (`live3DData`, a polygon build + `turf.circle`)
+  is only rebuilt when `is3D`; in 2D nothing 3D is computed per step.
+- **Frontend performance notes.** Benchmarked frequent tasks (Node): the
+  sensor/estimator math is all sub-microsecond - `StepDetector.push` ~0.16 us,
+  `HeadingTracker.pushCompass` ~0.12 us, `GpsStepCalibrator.addStep` ~0.7 us,
+  `stats()` ~0.8 us, `metresPerDegree` ~0.17 us. The particle filter is
+  **O(count) per step at ~1 us/particle** (`predict` ~0.92, `estimate` ~0.08;
+  mobile ~3-4x slower). `count` default is **1000** (safe ~3-4 ms/step on a
+  phone; up to ~4k affordable on mobile, ~16k desktop within a 16 ms frame),
+  and raising it costs only filter CPU, NOT render cost. The **render loop is
+  O(1) per frame** (follow rAF: constant camera math, skips `jumpTo` when
+  converged) and the particle layer's `setData` is **O(min(count, 500))** and
+  throttled, so it is decoupled from `count`. Other fixes: throttle map
+  `setData` (particles 100 ms, heading-line 60 ms); defer the ~70 ms re-route
+  Dijkstra off the frame (`requestIdleCallback`, throttled 3 m / 5 s); the
+  follow loop uses plain trig instead of `turf.destination`; compass/status DOM
+  text is only written when it changes.
 - Serve with `python3 -m http.server 8765` → http://localhost:8765.
