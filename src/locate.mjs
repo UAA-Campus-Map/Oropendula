@@ -266,10 +266,24 @@ export class ParticleFilter {
   constructor({ isWalkable, nearestWalkable, count = DEFAULT_COUNT, headingNoiseDeg = 8,
     headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.20, roughenM = 0.20,
     segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
-    stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3 } = {}) {
+    stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3,
+    adaptive = false, maxCount = count, minCount = Math.max(64, Math.floor(count / 8)),
+    binM = 1.0, binHeadingDeg = 30, kldEpsilon = 0.02, kldZ = 2.33,
+    persistentHeadingDeg = 0 } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
+    // The filter can RESIZE. It starts at `count`; when `adaptive`, every
+    // resample chooses a KLD-sampled count in [minCount, maxCount], so a global
+    // (campus-wide) prior can start huge and shed particles as each step prunes
+    // the hypothesis set. Non-adaptive keeps a fixed count (arrays = count).
     this.count = count;
+    this.maxCount = Math.max(count, maxCount);
+    this.minCount = adaptive ? Math.max(1, Math.min(minCount, this.maxCount)) : count;
+    this.adaptive = !!adaptive && this.maxCount > this.minCount;
+    this.binM = binM;
+    this.binHeading = binHeadingDeg * Math.PI / 180;
+    this.kldEpsilon = kldEpsilon;
+    this.kldZ = kldZ;
     this.headingNoise = headingNoiseDeg * Math.PI / 180;
     // Uniform random heading jitter applied to every particle each step.
     this.headingJitter = headingJitterDeg * Math.PI / 180;
@@ -291,11 +305,33 @@ export class ParticleFilter {
     this.stallEpsM = stallEpsM;
     this.stallSteps = stallSteps;
     this.relaxSteps = relaxSteps;
-    this.lon = new Float64Array(count);
-    this.lat = new Float64Array(count);
-    this.heading = new Float64Array(count);
-    this.weight = new Float64Array(count);
+    const cap = this.maxCount;
+    this.lon = new Float64Array(cap);
+    this.lat = new Float64Array(cap);
+    this.heading = new Float64Array(cap);
+    this.weight = new Float64Array(cap);
+    // Scratch buffers for the allocation-free ping-pong resample.
+    this._lon2 = new Float64Array(cap);
+    this._lat2 = new Float64Array(cap);
+    this._h2 = new Float64Array(cap);
+    // Persistent per-particle heading OFFSET. With the default i.i.d. per-step
+    // jitter (persistentHeadingDeg = 0) every particle re-randomises its heading
+    // each step, so a trajectory's SHAPE carries no information and a global
+    // belief can never collapse (it just diffuses). With a persistent offset the
+    // particle keeps one coherent heading error, so matching the measured turns
+    // prunes hypotheses hard - the "each step cuts the count" behaviour.
+    this.persistentHeading = persistentHeadingDeg * DEG;
+    this._hOff = new Float64Array(cap);
+    this._hOff2 = new Float64Array(cap);
+    this._bins = this.adaptive ? new Set() : null;
+    this._binRefLon = null;
+    this._binRefLat = null;
+    this.lastK = 0;
     this._pt = [0, 0];   // scratch lon/lat (avoids per-sample allocation)
+    this._mpd = metresPerDegree(0);   // per-step metres-per-degree cache
+    // Steps at most this long may use the 2-sample fast path in `_advance`
+    // (a short step cannot jump the ~0.6 m clearance band).
+    this._fastAdvanceMaxM = 1.0;
     this.headingBias = 0;
     // When the walker is outside the bound building, PDR must NOT be tied to
     // the floor-plan raster (skybridges, the gaps between buildings and any
@@ -307,6 +343,7 @@ export class ParticleFilter {
     this.lastHeading = null;   // measured heading at the previous step
     this.reversed = false;     // this step followed a ~180 deg U-turn
     this.accuracyM = Infinity; // the arbiter's trusted accuracy radius
+    this._globalMode = false;  // no positional prior (global / no-georeference)
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
@@ -344,6 +381,8 @@ export class ParticleFilter {
       const h = spreadDeg == null ? Math.random() * 2 * Math.PI
         : heading + gaussianClamped(spreadDeg * DEG, Math.PI / 2);
       this.heading[i] = h;
+      this._hOff[i] = this.persistentHeading
+        ? gaussianClamped(this.persistentHeading, Math.PI / 2) : 0;
     }
     this.weight.fill(1 / this.count);
     this.initialized = true;
@@ -356,10 +395,66 @@ export class ParticleFilter {
     this.version++;
   }
 
-  /** Advance every particle one step along its heading. */
-  predict(stepLengthM, headingRad, { accuracyM = Infinity } = {}) {
+  /** Set the active particle count (clamped to [1, maxCount]). */
+  resetCount(n = this.maxCount) {
+    this.count = Math.max(1, Math.min(this.maxCount, n | 0));
+    return this.count;
+  }
+
+  /**
+   * GLOBAL localization seed: scatter particles UNIFORMLY over the walkable
+   * area of a lon/lat box - or an ARRAY of boxes (e.g. one per same-level
+   * building, which raises the acceptance rate and spreads the cloud across all
+   * of them). No positional prior at all: every walkable cell equally likely,
+   * every heading possible. Pure rejection (never snaps a rejected point - a
+   * spiral search per reject would be catastrophic when most of a campus bbox
+   * is empty space).
+   *
+   * @param {{minLon,maxLon,minLat,maxLat}|Array} boxOrBoxes
+   * @param {{count?:number, samples?:number}} [opts]
+   */
+  seedUniform(boxOrBoxes, { count = this.count, samples } = {}) {
+    this.resetCount(count);
+    const boxes = Array.isArray(boxOrBoxes) ? boxOrBoxes : [boxOrBoxes];
+    const tries = samples ?? this.count * 20 + 1000;
+    let i = 0, t = 0;
+    while (i < this.count && t < tries) {
+      t++;
+      const box = boxes[(Math.random() * boxes.length) | 0];
+      const lon = box.minLon + Math.random() * (box.maxLon - box.minLon);
+      const lat = box.minLat + Math.random() * (box.maxLat - box.minLat);
+      if (!this.isWalkable([lon, lat])) continue;
+      this.lon[i] = lon;
+      this.lat[i] = lat;
+      this.heading[i] = Math.random() * 2 * Math.PI;
+      this._hOff[i] = this.persistentHeading
+        ? gaussianClamped(this.persistentHeading, Math.PI / 2) : 0;
+      i++;
+    }
+    this.count = i;   // fewer if the box(es) had little walkable area
+    if (this.count === 0) { this.initialized = false; return this.count; }
+    const w = 1 / this.count;
+    for (let j = 0; j < this.count; j++) this.weight[j] = w;
+    this.initialized = true;
+    this.lastHeading = null;
+    this.reversed = false;
+    this.stallCount = 0;
+    this.relaxLeft = 0;
+    this._prevMean = null;
+    const b0 = boxes[0];
+    this._binRefLon = (b0.minLon + b0.maxLon) / 2;
+    this._binRefLat = (b0.minLat + b0.maxLat) / 2;
+    this.version++;
+    return this.count;
+  }
+
+  predict(stepLengthM, headingRad, { accuracyM = Infinity, globalMode = false } = {}) {
     if (!this.initialized) return;
     this.accuracyM = accuracyM;
+    // Global mode: no positional prior at all (no accuracy cap, no forward
+    // hemisphere) - the cloud is a set of "where could I be" hypotheses and has
+    // no trusted mean, so confining it to the mean would collapse it.
+    this._globalMode = globalMode;
 
     // A ~180 deg swing in the measured heading is an intentional U-turn. This
     // step must not punish the (now-behind) particles or the cloud would
@@ -368,19 +463,25 @@ export class ParticleFilter {
       && Math.abs(shortestDelta(this.lastHeading, headingRad)) > this.reversal;
     this.lastHeading = headingRad;
 
+    // One metres-per-degree for the whole step: latitude varies by <0.001 deg
+    // across a floor, so recomputing it per particle (40k times) was pure waste.
+    const mpd = metresPerDegree(this.lat[0]);
+    this._mpd = mpd;
+    const jitter = this.headingJitter, distNoise = this.distanceNoise, latNoise = this.lateralNoiseM;
+    const bias = this.headingBias, hOff = this._hOff;
     for (let i = 0; i < this.count; i++) {
       // Uniform random heading jitter in +/- headingJitter (default +/-35 deg).
-      const h = headingRad + this.headingBias + (Math.random() * 2 - 1) * this.headingJitter;
-      const d = Math.max(0.05, stepLengthM * (1 + gaussian() * this.distanceNoise));
+      const h = headingRad + bias + hOff[i] + (Math.random() * 2 - 1) * jitter;
+      const d = Math.max(0.05, stepLengthM * (1 + gaussian() * distNoise));
       // Lateral jitter PERPENDICULAR to the travel direction (not on the east
       // axis), so the cloud spreads across the corridor rather than along it.
-      const lat = gaussian() * this.lateralNoiseM;
-      const e = Math.sin(h) * d + Math.cos(h) * lat;
-      const n = Math.cos(h) * d - Math.sin(h) * lat;
+      const l = gaussian() * latNoise;
+      const sh = Math.sin(h), ch = Math.cos(h);
+      const e = sh * d + ch * l;
+      const n = ch * d - sh * l;
       if (this.freeRoam) {
-        const [plon, plat] = offsetLL(this.lon[i], this.lat[i], e, n);
-        this.lon[i] = plon;
-        this.lat[i] = plat;
+        this.lon[i] += e / mpd.lon;
+        this.lat[i] += n / mpd.lat;
       } else {
         this._move(i, e, n, d, h);
       }
@@ -407,10 +508,11 @@ export class ParticleFilter {
    */
   _move(i, eastM, northM, dist, heading) {
     const fromLon = this.lon[i], fromLat = this.lat[i];
-    const mpd = metresPerDegree(fromLat);
+    const mpd = this._mpd;
     const toLon = fromLon + eastM / mpd.lon, toLat = fromLat + northM / mpd.lat;
     const p = this._advance(fromLon, fromLat, toLon, toLat);
-    const moved = distM(fromLon, fromLat, p[0], p[1]);
+    const ddx = (p[0] - fromLon) * mpd.lon, ddy = (p[1] - fromLat) * mpd.lat;
+    const moved = Math.sqrt(ddx * ddx + ddy * ddy);
     if (moved < dist * 0.9) { this._respawn(i, heading); return; }
     this.lon[i] = p[0];
     this.lat[i] = p[1];
@@ -431,6 +533,7 @@ export class ParticleFilter {
     if (this.freeRoam || this.isWalkable([plon, plat])) { this.lon[i] = plon; this.lat[i] = plat; }
     else { this.lon[i] = bx; this.lat[i] = by; }
     this.heading[i] = heading;
+    this._hOff[i] = src >= 0 ? this._hOff[src] : 0;
   }
 
   /** Index of a random particle that still carries weight, or -1. */
@@ -449,11 +552,26 @@ export class ParticleFilter {
    */
   _advance(fromLon, fromLat, toLon, toLat) {
     const pt = this._pt;
-    const len = distM(fromLon, fromLat, toLon, toLat);
+    const mpd = this._mpd;
+    const dx = (toLon - fromLon) * mpd.lon, dy = (toLat - fromLat) * mpd.lat;
+    const len = Math.sqrt(dx * dx + dy * dy);
     if (len <= this.segmentStepM) {
       pt[0] = toLon; pt[1] = toLat;
       if (!this.isWalkable(pt)) { pt[0] = fromLon; pt[1] = fromLat; }
       return pt;
+    }
+    // FAST PATH. The clearance raster inflates every wall by ~0.3 m each side
+    // (a ~0.6 m blocked band), so a short step whose midpoint and endpoint are
+    // both clear cannot have jumped a wall - test those two instead of sweeping
+    // every 0.1 m. Only fall through to the sweep when a sample is blocked.
+    if (len <= this._fastAdvanceMaxM) {
+      const mx = fromLon + (toLon - fromLon) * 0.5, my = fromLat + (toLat - fromLat) * 0.5;
+      pt[0] = mx; pt[1] = my;
+      if (this.isWalkable(pt)) {
+        pt[0] = toLon; pt[1] = toLat;
+        if (this.isWalkable(pt)) return pt;
+      }
+      // blocked somewhere on the segment -> full sweep below
     }
     const steps = Math.ceil(len / this.segmentStepM);
     let lastLon = fromLon, lastLat = fromLat;
@@ -537,8 +655,8 @@ export class ParticleFilter {
     const mpd = metresPerDegree(mean.lat);
     const fe = forwardHeading == null ? 0 : Math.sin(forwardHeading);
     const fn = forwardHeading == null ? 0 : Math.cos(forwardHeading);
-    const useRear = forwardHeading != null && !relaxed && !this.reversed;
-    const useCap = !relaxed && isFinite(this.accuracyM);
+    const useRear = forwardHeading != null && !relaxed && !this.reversed && !this._globalMode;
+    const useCap = !relaxed && isFinite(this.accuracyM) && !this._globalMode;
     const cap2 = this.accuracyM * this.accuracyM;
     for (let i = 0; i < this.count; i++) {
       const de = (this.lon[i] - mean.lon) * mpd.lon;
@@ -583,25 +701,60 @@ export class ParticleFilter {
     this._prevMean = mean;
   }
 
+  /**
+   * Kullback-Leibler divergence sample size (Fox 2003), given `k` occupied
+   * bins. Grows with the spread of the (resampled) belief.
+   */
+  _kldCount(k) {
+    if (k <= 1) return this.minCount;
+    const e = this.kldEpsilon, z = this.kldZ;
+    const a = 2 / (9 * (k - 1));
+    const t = 1 - a + Math.sqrt(a) * z;
+    return Math.ceil(((k - 1) / (2 * e)) * t * t * t);
+  }
+
   _resample() {
-    const { count, weight } = this;
-    const outLon = new Float64Array(count), outLat = new Float64Array(count);
-    const outH = new Float64Array(count);
-    const step = 1 / count;
+    const n = this.count;
+    const { weight } = this;
+    const sLon = this._lon2, sLat = this._lat2, sH = this._h2, sHO = this._hOff2;
+    const step = 1 / n;
     let r = Math.random() * step, c = weight[0], idx = 0;
-    for (let i = 0; i < count; i++) {
+    const bins = this.adaptive ? this._bins : null;
+    if (bins) bins.clear();
+    if (this._binRefLon === null) { this._binRefLon = this.lon[0]; this._binRefLat = this.lat[0]; }
+    const mpd = metresPerDegree(this._binRefLat);
+    const invBinX = mpd.lon / this.binM, invBinY = mpd.lat / this.binM;
+    const invH = 1 / this.binHeading;
+    let k = 0;
+    for (let i = 0; i < n; i++) {
       const u = r + i * step;
-      while (u > c && idx < count - 1) { idx++; c += weight[idx]; }
-      outLon[i] = this.lon[idx]; outLat[i] = this.lat[idx]; outH[i] = this.heading[idx];
+      while (u > c && idx < n - 1) { idx++; c += weight[idx]; }
+      // Roughening so copies do not stay identical forever.
+      const re = gaussian() * this.roughenM, rn = gaussian() * this.roughenM;
+      const plon = this.lon[idx] + re / mpd.lon, plat = this.lat[idx] + rn / mpd.lat;
+      const h = this.heading[idx] + gaussian() * this.headingNoise * 0.5;
+      sLon[i] = plon; sLat[i] = plat; sH[i] = h; sHO[i] = this._hOff[idx];
+      if (bins) {
+        const bx = Math.round((plon - this._binRefLon) * invBinX) + 2048;
+        const by = Math.round((plat - this._binRefLat) * invBinY) + 2048;
+        const bh = Math.round(h * invH) & 63;
+        const key = bx * 1048576 + by * 64 + bh;
+        if (!bins.has(key)) { bins.add(key); k++; }
+      }
     }
-    // Roughening so copies do not stay identical forever.
-    for (let i = 0; i < count; i++) {
-      const [plon, plat] = offsetLL(outLon[i], outLat[i],
-        gaussian() * this.roughenM, gaussian() * this.roughenM);
-      this.lon[i] = plon; this.lat[i] = plat;
-      this.heading[i] = outH[i] + gaussian() * this.headingNoise * 0.5;
-    }
-    this.weight.fill(1 / count);
+    // Ping-pong: swap the scratch buffers in as the live ones.
+    let tmp;
+    tmp = this.lon; this.lon = this._lon2; this._lon2 = tmp;
+    tmp = this.lat; this.lat = this._lat2; this._lat2 = tmp;
+    tmp = this.heading; this.heading = this._h2; this._h2 = tmp;
+    tmp = this._hOff; this._hOff = this._hOff2; this._hOff2 = tmp;
+    // Shrink (never grow past what we resampled from) to the KLD count.
+    this.count = this.adaptive
+      ? Math.max(this.minCount, Math.min(n, this._kldCount(k)))
+      : n;
+    this.lastK = k;   // occupied bins of the last resample (diagnostics)
+    const w = 1 / this.count;
+    for (let i = 0; i < this.count; i++) this.weight[i] = w;
   }
 
   _recover() {

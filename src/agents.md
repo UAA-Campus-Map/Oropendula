@@ -655,6 +655,29 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   arbiter also seeds on the first plausible GPS fix. Without this, steps are
   counted and heading is fine but the marker never moves (the "PDR not
   implemented" bug).
+- **Adaptive count, global seeds, and a shape-preserving heading mode** (build
+  toward no-georeference localization). `ParticleFilter` gained:
+  - `adaptive` + `maxCount`/`minCount`: the active `count` is chosen per resample
+    by **KLD-sampling** (Fox 2003) over lat/lon/heading bins, so a big global
+    prior can shed particles as the belief narrows; fixed-count filters are
+    unchanged (`adaptive:false`). Arrays are allocated at `maxCount`; the
+    resample is allocation-free (ping-pong buffers).
+  - `seedUniform(box)`: scatter particles uniformly over a floor's walkable area
+    (no positional prior) - a whole-floor / campus cold start.
+  - `persistentHeadingDeg`: draw ONE heading offset per particle instead of
+    i.i.d. per-step jitter, so a trajectory's SHAPE constrains the belief.
+  - Perf: one `metresPerDegree` per step (was per particle), a 2-sample fast
+    path in `_advance` (a step <= 1 m cannot jump the ~0.6 m clearance band),
+    and no per-resample array allocation (fixed-1000 `predict` ~0.73 -> ~0.43 ms).
+  - **Measured finding (important):** with PDR ALONE the belief does NOT
+    collapse - over a 24-step square+hallway the occupied 1 m bins stayed at
+    ~4-8k (most of a floor), so KLD pins N at `maxCount`. A straight hallway is
+    translation-invariant; even a square leaves many candidates. "Each step cuts
+    the particles" is therefore NOT true for pure PDR - it only happens once an
+    ABSOLUTE observation lands (a point / a known floor or room entry), or with a
+    hard grid-prune. 40k runs at ~9-13 ms/step (desktop Node); mobile ~3-4x, so
+    run it OFF the render thread or time-slice it, and start from a KNOWN FLOOR
+    (~8k bins) rather than the whole campus.
 - **The filter trusts the compass (≤90° off) and the arbiter's accuracy.**
   `ParticleFilter` now enforces, on top of the existing soft wall weighting
   (non-walkable = 0.02) and resampling:
