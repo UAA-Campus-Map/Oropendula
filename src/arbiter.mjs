@@ -261,6 +261,9 @@ export class PositionArbiter {
       heading: this.heading,
       spreadM: pdr ? pdr.spreadM : (useGps ? useGps.accuracy : null),
       gpsAccuracyM: g ? g.accuracy : null,
+      // Multi-hypothesis step length (1 when the mixture is disabled).
+      stepScale: this.filter?.stepScaleEstimate?.() ?? 1,
+      stepScaleConfidence: this.filter?.stepScaleConfidence?.() ?? 0,
     };
   }
 }

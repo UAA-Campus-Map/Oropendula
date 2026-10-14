@@ -195,6 +195,14 @@
       animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .splash-status {
+      margin-top: 6px;
+      min-height: 1.2em;
+      max-width: 80vw;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.9;
+    }
 
     /* Keep the basemap controls and attribution out of the way of the UI. */
     .maplibregl-ctrl-bottom-left,
@@ -558,6 +566,45 @@
       cursor: pointer;
     }
     .cal-seg button.active { background: var(--accent); color: #fff; }
+    /* Toggle switch (step-length refinement). */
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .switch {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: none;
+      width: 48px;
+      height: 28px;
+      margin: 0;
+      border-radius: 999px;
+      background: var(--line);
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s;
+    }
+    .switch:checked { background: var(--accent); }
+    .switch:checked::after { transform: translateX(20px); }
+    .steplen-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; }
+    .steplen-legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+    .steplen-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .cal-error { color: #dc2626; font-size: 13px; margin: 0; }
     .cal-callout {
       padding: 12px 14px;
@@ -583,6 +630,10 @@
       transition: width 0.35s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .progress-label { margin-top: 7px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+    /* Start/end flags for the guided indoor calibration walk. */
+    .cal-flag-marker { filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.45)); pointer-events: none; }
+    .cal-flag-marker svg { display: block; }
 
     /* ---- compact guided-walk bar (map stays visible) -------------------- */
     #cal-guide {
@@ -683,6 +734,7 @@
       }
       #bottom-bar { left: auto; right: calc(150px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); }
       #cal-modal { align-items: center; padding: 24px; }
+      #menu-btn { display: none; }   /* calibration is a phone-only flow */
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -700,6 +752,7 @@
     <div class="splash-name">Navigator</div>
     <div class="splash-sub">Indoor campus navigation</div>
     <div class="spinner" aria-hidden="true"></div>
+    <div id="splash-status" class="splash-status" role="status" aria-live="polite">Starting…</div>
   </div>
 
   <header id="topbar">
@@ -847,14 +900,14 @@
           <div class="cal-field">
             <span class="info-label">Your height</span>
             <div style="display:flex;align-items:center;gap:10px">
-              <input id="cal-height-value" class="cal-input" type="number" inputmode="decimal"
-                     min="100" max="250" step="1" value="175" />
               <div class="cal-seg" id="cal-height-unit">
-                <button type="button" data-unit="cm" class="active">cm</button>
-                <button type="button" data-unit="ftin">ft·in</button>
+                <button type="button" data-unit="ftin" class="active">ft·in</button>
+                <button type="button" data-unit="cm">cm</button>
               </div>
+              <input id="cal-height-value" class="cal-input" type="number" inputmode="decimal"
+                     min="100" max="250" step="1" value="175" hidden />
             </div>
-            <div id="cal-height-ftin" hidden style="display:flex;align-items:center;gap:8px">
+            <div id="cal-height-ftin" style="display:flex;align-items:center;gap:8px">
               <input id="cal-height-ft" class="cal-input" type="number" inputmode="numeric"
                      min="3" max="7" step="1" value="5" />
               <span>ft</span>
@@ -874,7 +927,7 @@
         <div class="cal-screen" data-screen="gps" hidden>
           <div class="cal-callout">
             Go <strong>outside</strong>, tap start, then walk in a straight line for about
-            50 m with GPS on. Turning around is fine — pause when you turn; each leg counts.
+            165 ft with GPS on. Turning around is fine — pause when you turn; each leg counts.
           </div>
           <button id="cal-gps-start" class="cal-btn cal-primary" style="width:100%">Turn on GPS &amp; start walking</button>
           <div class="info-section">
@@ -943,6 +996,18 @@
                    style="width:100%"
                    title="Drag to correct the compass heading (adds this offset to every reading)" />
           </div>
+          <div class="info-section">
+            <div class="info-label">Step length refinement</div>
+            <p class="hint">Experimental: the particle clouds adapt to your actual walking pace.
+              Colour = candidate step length; the winning cloud grows after turns and doorways.</p>
+            <label class="switch-row">
+              <span>Enable refinement</span>
+              <input type="checkbox" id="steplen-toggle" class="switch" />
+            </label>
+            <div class="cal-row"><span>PDR step length</span><span id="steplen-readout" class="cal-val">&mdash;</span></div>
+            <div class="cal-row"><span>Cloud confidence</span><span id="steplen-conf" class="cal-val">&mdash;</span></div>
+            <div id="steplen-legend" class="steplen-legend"></div>
+          </div>
           <div class="info-label" style="margin-top:8px">Graph</div>
           <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
           <button id="cal-advanced-back" class="cal-btn" style="width:100%">Back</button>
@@ -972,11 +1037,18 @@
   </div>
 
   <script>
-    // Hide the splash once the app reports it is ready (or gives up).
+    // Hide the splash once the app reports it is ready (or gives up), mirroring
+    // the live status line so the loading screen says what is happening.
     (function () {
       var splash = document.getElementById('splash');
       var status = document.getElementById('status-text');
+      var splashStatus = document.getElementById('splash-status');
       var done = false;
+      function reflect() {
+        if (splashStatus && status && status.textContent) {
+          splashStatus.textContent = status.textContent;
+        }
+      }
       function hide() {
         if (done || !splash) return;
         done = true;
@@ -985,7 +1057,9 @@
       }
       if (status && !window.MutationObserver) { setTimeout(hide, 4000); return; }
       if (status) {
+        reflect();
         new MutationObserver(function () {
+          reflect();
           if (/ready|fail|no walls|error/i.test(status.textContent)) hide();
         }).observe(status, { childList: true, characterData: true, subtree: true });
       }
@@ -1057,13 +1131,42 @@
     let firstPathPoint = null;
     let firstPathFloor = null;   // floor shown when the start was tapped
 
+    // --- units ---------------------------------------------------------------
+    // The UI shows Imperial measurements. All internal math stays metric
+    // (metres); only the display strings below are converted.
+    const FT_PER_M = 3.280839895;
+    const MI_PER_M = 1 / 1609.344;
+    const IN_PER_M = 39.37007874;
+    /** A walking distance: feet, switching to miles past a quarter mile. */
+    function distanceText(m) {
+      const mi = m * MI_PER_M;
+      return mi >= 0.25 ? `${mi.toFixed(2)} mi` : `${Math.round(m * FT_PER_M)} ft`;
+    }
+    /** A step (or other short) length in inches. */
+    function stepLenText(m) { return `${(m * IN_PER_M).toFixed(1)} in`; }
+    /** A speed in feet per second. */
+    function speedText(mps) { return `${(mps * FT_PER_M).toFixed(1)} ft/s`; }
+
+    // --- multi-hypothesis step length (experimental, off by default) ---------
+    // Candidate multipliers on the model step length. With refinement on, each
+    // particle belongs to one candidate and the cloud adapts to the walker's
+    // actual pace at turns (see locate.mjs). The clouds are colour-coded so the
+    // winner is visible on the map.
+    const STEP_HYPOTHESES = [0.80, 0.867, 0.933, 1.0, 1.067, 1.133, 1.20];
+    const STEP_HYPOTHESIS_COLORS = [
+      '#e0533d', '#e08f3d', '#e0c83d', '#7fd13d', '#3dd1c0', '#3d7fe0', '#8e3de0',
+    ];
+    const DEFAULT_PARTICLE_COLOR = '#e0533d';
+    let stepRefineOn = false;
+    const stepRefine = { ema: null, baseline: null, metres: 0 };
+
     // Guided walking-model calibration (the modal). Three methods feed the
     // step-length model: estimate from height, auto-calibrate outdoors from
     // GPS, or a guided indoor walk between two known room doors.
     const calWizard = {
       method: null,        // 'height' | 'gps' | 'indoor'
       screen: 'choose',
-      heightUnit: 'cm',
+      heightUnit: 'ftin',  // Imperial is the default where both exist
       startRoom: null,     // { building, floor, room } for the indoor walk
       startDoor: null,     // [lon, lat] the walker stands beside
       target: null,        // { text, door, meters, route, floorId }
@@ -1071,6 +1174,9 @@
       steps: 0,
       gpsWatching: false,  // waiting for GPS auto-calibration to certify
     };
+    // Flags marking the guided indoor walk: green at the start door, a
+    // checkered flag at the target door.
+    let calStartMarker = null, calEndMarker = null;
 
     // UI Elements
     const menuBtn = document.getElementById('menu-btn');
@@ -1109,6 +1215,20 @@
     const calProgressLabel = document.getElementById('cal-progress-label');
     const calScreens = [...calModal.querySelectorAll('.cal-screen')];
 
+    // Step-length refinement controls.
+    const stepLenToggle = document.getElementById('steplen-toggle');
+    const stepLenReadout = document.getElementById('steplen-readout');
+    const stepLenConf = document.getElementById('steplen-conf');
+    const stepLenLegend = document.getElementById('steplen-legend');
+    // Desktop/testing shortcut: ?refine=1 enables the experimental mixture
+    // (the locator, created later, picks it up in ensureLocator).
+    try {
+      if (new URLSearchParams(location.search).has('refine')) {
+        stepRefineOn = true;
+        stepLenToggle.checked = true;
+      }
+    } catch (e) { /* ignore */ }
+
     // Event listeners
     menuBtn.addEventListener('click', () => { openCalModal(); ensureSensors(); });
     document.getElementById('cal-close').addEventListener('click', closeCalModal);
@@ -1116,6 +1236,15 @@
     calModal.querySelector('.modal-backdrop').addEventListener('click', closeCalModal);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !calModal.hidden) closeCalModal();
+    });
+    // If the viewport grows to desktop while the modal is open, drop it.
+    const desktopMq = window.matchMedia('(min-width: 900px)');
+    desktopMq.addEventListener?.('change', (e) => {
+      if (e.matches && !calModal.hidden) {
+        calModal.hidden = true;
+        document.getElementById('cal-guide').hidden = true;
+        clearCalFlags();
+      }
     });
 
     locationBtn.addEventListener('click', startLiveLocate);
@@ -1244,6 +1373,7 @@
     });
     document.getElementById('cal-advanced-btn').addEventListener('click', () => showCalScreen('advanced'));
     document.getElementById('cal-advanced-back').addEventListener('click', () => showCalScreen('choose'));
+    stepLenToggle.addEventListener('change', () => setStepRefinement(stepLenToggle.checked));
     // Height inputs.
     document.getElementById('cal-height-unit').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-unit]');
@@ -1288,6 +1418,7 @@
     function closeCalModal() {
       calModal.hidden = true;
       document.getElementById('cal-guide').hidden = true;
+      clearCalFlags();
       calWizard.armed = false;
       calWizard.gpsWatching = false;
       try { sessionStorage.setItem('cal-modal-dismissed', '1'); } catch (e) { /* ignore */ }
@@ -1325,6 +1456,7 @@
     function selectCalMethod(method) {
       calWizard.method = method;
       document.getElementById('cal-guide').hidden = true;
+      clearCalFlags();
       ensureSensors();   // this tap is the user gesture the sensors need
       if (method === 'height') {
         updateHeightPreview();
@@ -1380,18 +1512,18 @@
       const cm = currentHeightCm();
       const ok = cm >= 100 && cm <= 250;
       document.getElementById('cal-height-result').textContent =
-        ok ? `${((cm / 100) * STRIDE_HEIGHT_FACTOR).toFixed(2)} m` : '—';
+        ok ? stepLenText((cm / 100) * STRIDE_HEIGHT_FACTOR) : '—';
     }
 
     function applyCalFromHeight() {
       const cm = currentHeightCm();
       if (!(cm >= 100 && cm <= 250)) {
-        statusText.textContent = 'Enter a height between 100 and 250 cm';
+        statusText.textContent = 'Enter a height between 3 ft 3 in and 8 ft 2 in';
         return;
       }
       const base = (cm / 100) * STRIDE_HEIGHT_FACTOR;
       applyStride(base, 'from height');
-      showCalDone(`Step length set to ${base.toFixed(3)} m (estimated from height)`);
+      showCalDone(`Step length set to ${stepLenText(base)} (estimated from height)`);
     }
 
     function startGpsCalibration() {
@@ -1402,6 +1534,41 @@
     }
 
     // --- indoor walk: doors from the graph ----------------------------------
+    /**
+     * A DOM element for a calibration marker. `kind` is 'start' (a generic map
+     * pin) or 'end' (a checkered flag). Built as inline SVG so it needs no
+     * external assets, and anchored at its tip so it sits on the door.
+     */
+    function calibrationFlag(kind) {
+      const el = document.createElement('div');
+      el.className = 'cal-flag-marker';
+      if (kind === 'start') {
+        el.innerHTML = `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+          <path d="M12 22s7-6.4 7-11.5a7 7 0 1 0-14 0C5 15.6 12 22 12 22z"
+                fill="#22c55e" stroke="#ffffff" stroke-width="1.5"/>
+          <circle cx="12" cy="10.5" r="2.7" fill="#ffffff"/>
+        </svg>`;
+        return el;
+      }
+      const checkers = [
+        [0, 0, '#0f172a'], [1, 0, '#ffffff'], [2, 0, '#0f172a'], [3, 0, '#ffffff'],
+        [0, 1, '#ffffff'], [1, 1, '#0f172a'], [2, 1, '#ffffff'], [3, 1, '#0f172a'],
+        [0, 2, '#0f172a'], [1, 2, '#ffffff'], [2, 2, '#0f172a'], [3, 2, '#ffffff'],
+      ];
+      const flagBody = checkers.map(([cx, cy, fill]) =>
+        `<rect x="${7 + cx * 3}" y="${3 + cy * 3}" width="3" height="3" fill="${fill}"/>`).join('');
+      el.innerHTML = `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+        <line x1="6" y1="2" x2="6" y2="22" stroke="#0f172a" stroke-width="2" stroke-linecap="round"/>
+        ${flagBody}
+      </svg>`;
+      return el;
+    }
+
+    function clearCalFlags() {
+      if (calStartMarker) { calStartMarker.remove(); calStartMarker = null; }
+      if (calEndMarker) { calEndMarker.remove(); calEndMarker = null; }
+    }
+
     function shuffleInPlace(a) {
       for (let i = a.length - 1; i > 0; i--) {
         const j = (Math.random() * (i + 1)) | 0;
@@ -1494,8 +1661,8 @@
     /**
      * A same-floor room whose door is a short (8-35 m) walk from the start door,
      * reachable entirely indoors AND without passing through any other room's
-     * door. The route between the two doors is the known distance the walk
-     * measures step length against.
+     * door. The straight-line span between the two doorways is the known
+     * distance the walk measures step length against.
      */
     function pickIndoorTarget(floor, startDoor) {
       const cands = [];
@@ -1515,9 +1682,14 @@
         });
         if (!route || !(route.segments ?? []).length) continue;
         if (route.segments.some((s) => s.tier !== 'indoor')) continue;  // same floor only
-        if (route.totalMeters < 8 || route.totalMeters > 35) continue;
         if (!routeKeepsToCorridor(route, floor, startDoor, c.door)) continue;
-        return { ...c, route, meters: route.totalMeters };
+        // The walker goes door to door, so the known distance is the direct span
+        // between the two doorways. The routed length adds the short detour the
+        // graph takes *inside* each doorway (door points sit just inside the
+        // room), which inflates the step-length estimate.
+        const directM = distM(startDoor, c.door);
+        if (directM < 8 || directM > 35) continue;
+        return { ...c, route, meters: directM };
       }
       return null;
     }
@@ -1566,11 +1738,17 @@
       calWizard.armed = false;
       calWizard.steps = 0;
 
-      // Guide on the map: show the route and fly to the start door, with a
-      // destination marker so the target door is visible.
+      // Guide on the map: show the route, mark the start door with a green flag
+      // and the target door with a checkered flag, then frame the whole walk.
       destinationFloor = target.floorId;
-      if (destinationMarker) destinationMarker.setLngLat(target.door);
-      else destinationMarker = new maplibregl.Marker().setLngLat(target.door).addTo(map);
+      // The flags replace any destination pin; reroute is suppressed during the
+      // calibration anyway, so a stale destination marker would only confuse.
+      if (destinationMarker) { destinationMarker.remove(); destinationMarker = null; }
+      clearCalFlags();
+      calStartMarker = new maplibregl.Marker({ element: calibrationFlag('start'), anchor: 'bottom' })
+        .setLngLat(startDoor).addTo(map);
+      calEndMarker = new maplibregl.Marker({ element: calibrationFlag('end'), anchor: 'bottom' })
+        .setLngLat(target.door).addTo(map);
       const lvl = floorLevels.indexOf(hit.floor.floorId) + 1;
       if (lvl > 0) setFloor(lvl);
       showRoute(target.route);
@@ -1581,10 +1759,10 @@
       document.getElementById('cal-target-room').textContent = `${target.text}`;
       document.getElementById('cal-start-door').textContent =
         `${hit.building.sourceId ?? hit.building.id} ${hit.room.floorId}`;
-      document.getElementById('cal-target-dist').textContent = `${target.meters.toFixed(0)} m`;
+      document.getElementById('cal-target-dist').textContent = distanceText(target.meters);
       document.getElementById('guide-target').textContent = `Walk to ${target.text}`;
       document.getElementById('guide-sub').textContent =
-        `Floor ${floorLevelOf(target.floorId)} · ${target.meters.toFixed(0)} m · ${buildingLabel(hit.building.id)}`;
+        `Floor ${floorLevelOf(target.floorId)} · ${distanceText(target.meters)} · ${buildingLabel(hit.building.id)}`;
       showCalScreen('indoor-walk');
       setWalkUI();
       minimizeCalGuide();   // hide the modal so the map/route is visible
@@ -1656,16 +1834,15 @@
       }
       const base = meters / steps;
       if (!(base >= 0.3 && base <= 1.3)) {
-        errEl.textContent = `That works out to ${base.toFixed(2)} m/step, which looks off — try again.`;
+        errEl.textContent = `That works out to ${stepLenText(base)}, which looks off — try again.`;
         errEl.hidden = false;
         resetWalkButton();
         expandCalGuide();
         return;
       }
       applyStride(base, 'indoors');
-      seedFromCalibrationTarget();   // the walker is standing at the target door
       setCalProgress(1, 'Step 3 of 3 · Recorded');
-      showCalDone(`Step length set to ${base.toFixed(3)} m (${meters.toFixed(0)} m over ${steps} steps)`);
+      showCalDone(`Step length set to ${stepLenText(base)} (${distanceText(meters)} over ${steps} steps)`);
     }
 
     /**
@@ -1700,7 +1877,7 @@
         localStorage.setItem('pdr-step-manual', '1');
       } catch (e) { /* ignore */ }
       updateAutocalUI();
-      statusText.textContent = `Step length set to ${baseM.toFixed(3)} m (${source})`;
+      statusText.textContent = `Step length set to ${stepLenText(baseM)} (${source})`;
     }
 
     function showCalDone(summary) {
@@ -1713,8 +1890,87 @@
       showCalScreen('done');
     }
 
+    // --- step-length refinement (experimental) ------------------------------
+    /** Build the colour legend from the hypothesis palette. */
+    function populateStepLenLegend() {
+      stepLenLegend.replaceChildren(...STEP_HYPOTHESES.map((lam, i) => {
+        const span = document.createElement('span');
+        const dot = document.createElement('i');
+        dot.style.background = STEP_HYPOTHESIS_COLORS[i % STEP_HYPOTHESIS_COLORS.length];
+        span.appendChild(dot);
+        span.appendChild(document.createTextNode(`${lam.toFixed(2)}\u00d7`));
+        return span;
+      }));
+    }
+
+    /** Turn the multi-hypothesis mixture on/off on the current locator. */
+    function setStepRefinement(on) {
+      stepRefineOn = !!on;
+      stepLenToggle.checked = stepRefineOn;
+      stepRefine.ema = null;
+      stepRefine.baseline = null;
+      stepRefine.metres = 0;
+      if (locator?.filter) {
+        if (stepRefineOn) {
+          locator.filter.setStepHypotheses(STEP_HYPOTHESES, { migrate: true, mut: 0.02 });
+        } else {
+          locator.filter.setStepHypotheses(null);
+        }
+      }
+      // Recolour / clear the cloud immediately.
+      if (locator?.filter) locator.filter.version++;
+      updateParticles(true);
+      statusText.textContent = stepRefineOn
+        ? 'Step-length refinement on \u2014 walk with a few turns'
+        : 'Step-length refinement off';
+    }
+
+    /** Paint the readout from the live mixture. */
+    function updateStepLenReadout() {
+      const filter = locator?.filter;
+      if (!stepRefineOn || !filter?.lambdas) {
+        stepLenReadout.textContent = '\u2014';
+        stepLenConf.textContent = '\u2014';
+        return;
+      }
+      const scale = filter.stepScaleEstimate();
+      stepLenReadout.textContent = stepLenText(stepModel.base * scale);
+      stepLenConf.textContent = `${Math.round(filter.stepScaleConfidence() * 100)}%`;
+    }
+
+    /**
+     * Gated, RELATIVE update of the model step length. The estimate carries a
+     * constant bias (heading-jitter forward loss), so we act on its CHANGE from
+     * its own recent baseline, not its absolute value: after enough constrained
+     * distance, a sustained shift nudges `stepModel.base` by at most 2%.
+     */
+    function maybeRefineStepLength() {
+      if (!stepRefineOn || !positionSeeded) return;
+      const filter = locator?.filter;
+      if (!filter?.lambdas || filter.freeRoam) return;
+      const s = filter.stepScaleEstimate();
+      stepRefine.ema = stepRefine.ema == null ? s : stepRefine.ema * 0.85 + s * 0.15;
+      if (stepRefine.baseline == null) { stepRefine.baseline = stepRefine.ema; return; }
+      if (stepRefine.metres < 60) return;
+      const ratio = stepRefine.ema / stepRefine.baseline;
+      if (ratio < 0.97 || ratio > 1.03) {
+        const target = stepModel.base * ratio;
+        const newBase = Math.max(stepModel.base * 0.98, Math.min(stepModel.base * 1.02, target));
+        if (Math.abs(newBase - stepModel.base) >= 0.002) {
+          stepModel.base = newBase;
+          filter.resetStepHypotheses();   // re-centre the prior on the new base
+          statusText.textContent = `Step length refined to ${stepLenText(newBase)}`;
+          updateAutocalUI();
+        }
+        stepRefine.baseline = stepRefine.ema;
+        stepRefine.metres = 0;
+      }
+    }
+
     /** Open the modal at boot when the walker has never calibrated. */
     function autoOpenCalibrationModal() {
+      // Calibration needs a phone's sensors - never pop the modal on desktop.
+      if (window.matchMedia('(min-width: 900px)').matches) return;
       const calibrated = manualCalApplied
         || (storedAutoCal && storedAutoCal.confidencePct >= 90);
       if (calibrated) return;
@@ -1776,14 +2032,14 @@
     /** Live rows that update on every fix/step, even before any sample. */
     function paintAutocalLive(live) {
       autocalGpsEl.textContent = live.fixAccuracyM == null ? '\u2014'
-        : `\u00b1${live.fixAccuracyM.toFixed(0)} m`
-          + (live.fixSpeedMps != null ? ` \u00b7 ${live.fixSpeedMps.toFixed(2)} m/s` : '');
+        : `\u00b1${Math.round(live.fixAccuracyM * FT_PER_M)} ft`
+          + (live.fixSpeedMps != null ? ` \u00b7 ${speedText(live.fixSpeedMps)}` : '');
       autocalStretchEl.textContent = live.stretch.steps > 0
         ? `${live.stretch.steps} steps \u00b7 ${live.stretch.seconds.toFixed(1)} s`
         : '\u2014';
       autocalLastlegEl.textContent = !live.lastAttempt ? 'measuring\u2026'
         : live.lastAttempt.ok
-          ? `accepted ${live.lastAttempt.baseM.toFixed(3)} m`
+          ? `accepted ${stepLenText(live.lastAttempt.baseM)}`
           : `rejected: ${AUTOCAL_REJECT[live.lastAttempt.reason] ?? 'no usable stretch'}`;
     }
 
@@ -1810,10 +2066,10 @@
       if (s.baseM == null && storedAutoCal) {
         autocalStatusEl.textContent =
           `Auto-calibrated earlier (90% interval \u00b1${storedAutoCal.ci90RelPct.toFixed(1)}%)`;
-        autocalLengthEl.textContent = `${storedAutoCal.baseM.toFixed(3)} m`;
+        autocalLengthEl.textContent = `${stepLenText(storedAutoCal.baseM)}`;
         autocalConfEl.textContent = `${storedAutoCal.confidencePct.toFixed(0)}% (target 90%)`;
         autocalCiEl.textContent =
-          `\u00b1${storedAutoCal.ci90RelPct.toFixed(1)}% (\u00b1${(storedAutoCal.baseM * storedAutoCal.ci90RelPct).toFixed(0)} cm)`;
+          `\u00b1${storedAutoCal.ci90RelPct.toFixed(1)}% (\u00b1${((storedAutoCal.baseM * storedAutoCal.ci90RelPct) / 2.54).toFixed(1)} in)`;
         autocalMixEl.textContent = '\u2014';
         autocalDataEl.textContent = 'stored';
         certified = true;
@@ -1837,14 +2093,14 @@
         autocalStatusEl.textContent = s.calibrated
           ? `Calibrated: 90% interval \u00b1${s.ci90RelPct.toFixed(1)}%`
           : `Calibrating\u2026 ${s.confidencePct.toFixed(0)}% sure within \u00b16%`;
-        autocalLengthEl.textContent = `${s.baseM.toFixed(3)} m`;
+        autocalLengthEl.textContent = `${stepLenText(s.baseM)}`;
         autocalConfEl.textContent = `${s.confidencePct.toFixed(0)}% (target 90%)`;
         autocalCiEl.textContent =
-          `\u00b1${s.ci90RelPct.toFixed(1)}% (\u00b1${(s.baseM * s.ci90RelPct).toFixed(0)} cm)`;
+          `\u00b1${s.ci90RelPct.toFixed(1)}% (\u00b1${((s.baseM * s.ci90RelPct) / 2.54).toFixed(1)} in)`;
         autocalMixEl.textContent =
           `${s.samples.speedSharePct.toFixed(0)}% / ${(100 - s.samples.speedSharePct).toFixed(0)}%`;
         autocalDataEl.textContent = `${s.samples.total} segments \u00b7 ` +
-          `${s.samples.steps} steps \u00b7 ${s.samples.distanceM.toFixed(0)} m`;
+          `${s.samples.steps} steps \u00b7 ${distanceText(s.samples.distanceM)}`;
       }
 
       setCalStateIcon(certified || manualCalApplied);
@@ -1871,7 +2127,7 @@
       if (calWizard.method === 'gps' && calWizard.gpsWatching) {
         const conf = s.confidencePct ?? 0;
         if (s.calibrated) {
-          showCalDone(`Step length set to ${s.baseM.toFixed(3)} m (GPS calibration)`);
+          showCalDone(`Step length set to ${stepLenText(s.baseM)} (GPS calibration)`);
         } else {
           setCalProgress(Math.min(1, conf / 90), `Calibrating\u2026 ${conf.toFixed(0)}% of the way`);
         }
@@ -2378,10 +2634,10 @@
       let label = step.kind, detail = '';
       if (step.kind === 'indoor') {
         label = `Inside ${buildingLabel(step.building)}`;
-        detail = `Floor ${step.floor} · ${Math.round(step.meters)} m`;
+        detail = `Floor ${step.floor} · ${distanceText(step.meters)}`;
       } else if (step.kind === 'outdoor') {
         label = 'Walk outside';
-        detail = `${Math.round(step.meters)} m`;
+        detail = distanceText(step.meters);
       } else if (step.kind === 'elevator') {
         label = 'Take the elevator'; detail = `Floor ${step.from} → ${step.to}`;
       } else if (step.kind === 'stairs') {
@@ -2438,12 +2694,12 @@
       const mins = Math.floor(route.totalSeconds / 60);
       const secs = Math.round(route.totalSeconds % 60);
       const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-      statusText.textContent = `Route is ${Math.round(route.totalMeters)} m · ${time}`;
+      statusText.textContent = `Route is ${distanceText(route.totalMeters)} · ${time}`;
       if (routeCard) {
         const query = searchInput.value.trim();
         if (routeTitle) routeTitle.textContent = query ? `To ${query}` : route.summary;
         if (routeMeta) routeMeta.textContent =
-          `${Math.round(route.totalMeters)} m · ${time} walk`;
+          `${distanceText(route.totalMeters)} · ${time} walk`;
         if (routeSteps) routeSteps.replaceChildren(...routePreviewSteps(route).map(routeStepEl));
         routeCard.hidden = false;
       }
@@ -2662,6 +2918,7 @@
     } catch (e) { /* ignore */ }
     // Paint the button dot + panel from the stored calibration (if any).
     updateAutocalUI();
+    populateStepLenLegend();
     // Paint the restored compass trim (the bias itself is applied in
     // startMotion, once the sensor tracker exists).
     headingTrimEl.value = String(headingTrimDeg);
@@ -2805,6 +3062,8 @@
         isWalkable: pdrWalkable, nearestWalkable,
         count: 1000, adaptive: true, maxCount: GLOBAL_SEED, minCount: 1000,
       });
+      // Keep the experimental step-length mixture on across a floor re-bind.
+      if (stepRefineOn) filter.setStepHypotheses(STEP_HYPOTHESES, { migrate: true, mut: 0.02 });
       locator = {
         building: pick.building, floor: pick.floor, filter, isWalkable,
         arbiter: new PositionArbiter({
@@ -2966,7 +3225,7 @@
             // 1, a peaked one > 1. Scale-invariant, so a 40k global cloud is as
             // visible as a 1k local one; the cloud sharpens into corridors.
             'circle-radius': ['interpolate', ['linear'], ['get', 'w'], 0, 1.4, 1, 2.6, 5, 4.2],
-            'circle-color': '#e0533d',
+            'circle-color': ['get', 'c'],
             'circle-opacity': ['interpolate', ['linear'], ['get', 'w'], 0, 0.10, 1, 0.34, 5, 0.9],
           },
         });
@@ -2995,11 +3254,15 @@
       lastParticleVersion = filter ? filter.version : -1;
       // Draw EVERY particle (no sub-sampling) - the whole cloud is the point.
       const n = pts.length || 1;
+      const hasHyp = !!filter?.lambdas;
       const features = new Array(pts.length);
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
+        const color = hasHyp
+          ? STEP_HYPOTHESIS_COLORS[p.g % STEP_HYPOTHESIS_COLORS.length]
+          : DEFAULT_PARTICLE_COLOR;
         features[i] = {
-          type: 'Feature', properties: { w: p.w * n },
+          type: 'Feature', properties: { w: p.w * n, c: color },
           geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
         };
       }
@@ -3033,10 +3296,12 @@
         if (el.style.display !== disp) el.style.display = disp;
       }
       const statusTxt = est.source === 'gps'
-        ? `GPS ±${est.accuracyM.toFixed(0)} m`
-        : `Dead reckoning ±${est.accuracyM.toFixed(0)} m`;
+        ? `GPS ±${Math.round(est.accuracyM * FT_PER_M)} ft`
+        : `Dead reckoning ±${Math.round(est.accuracyM * FT_PER_M)} ft`;
       if (statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
       rerouteFromEstimate();
+      updateStepLenReadout();
+      maybeRefineStepLength();
     }
 
     // Compass display / heading indicator, driven by the SMOOTHED heading from
@@ -3218,10 +3483,9 @@
           if (!locator || !motion.heading.hasHeading) return;
           const heading = motion.heading.heading;
           locator.arbiter.setHeading(heading);
-          locator.arbiter.step({
-            stepLengthM: stepModel.lengthFor(cadenceHz),
-            headingRad: heading,
-          });
+          const stepLengthM = stepModel.lengthFor(cadenceHz);
+          locator.arbiter.step({ stepLengthM, headingRad: heading });
+          if (stepRefineOn) stepRefine.metres += stepLengthM;
           const est = locator.arbiter.estimate(t);
           applyCorridorHeading(est, heading);
           renderEstimate(est);

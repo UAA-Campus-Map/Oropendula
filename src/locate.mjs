@@ -269,7 +269,16 @@ export class ParticleFilter {
     stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3,
     adaptive = false, maxCount = count, minCount = Math.max(64, Math.floor(count / 8)),
     binM = 1.0, binHeadingDeg = 30, kldEpsilon = 0.02, kldZ = 2.33,
-    persistentHeadingDeg = 0 } = {}) {
+    persistentHeadingDeg = 0,
+    // --- multi-hypothesis step length (optional; null = classic single cloud)
+    // `hypotheses` is an array of multipliers on `stepLengthM` (e.g.
+    // [0.80 .. 1.20]). Each particle belongs to one hypothesis; the mixture
+    // weight of a hypothesis is updated from its map evidence. Straight
+    // corridors are translation-invariant and give equal evidence (no
+    // adaptation); turns/doorways break the symmetry and select. See
+    // `stepScaleEstimate()`.
+    hypotheses = null, hypSigma = 0.12, hypAlpha = 0.2, hypRho = 0.99,
+    hypRespawn = true, hypMigrate = false, hypMut = 0.02 } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
     // The filter can RESIZE. It starts at `count`; when `adaptive`, every
@@ -351,6 +360,156 @@ export class ParticleFilter {
     // uses it to skip rebuilding the particle overlay for GPS-only estimates
     // that leave the PDR cloud untouched.
     this.version = 0;
+
+    // --- multi-hypothesis step length ----------------------------------------
+    // When `lambdas` is null the filter behaves exactly as before. Otherwise
+    // every particle carries a hypothesis index (`group`) and advances by
+    // `stepLengthM * lambdas[group]`. A per-hypothesis mixture weight (derived
+    // from how many of its particles stay walkable) adapts, with a log-normal
+    // prior centred on the model's own step length and exponential forgetting.
+    this.lambdas = hypotheses ? Float64Array.from(hypotheses) : null;
+    this.K = this.lambdas ? this.lambdas.length : 0;
+    this.hypSigma = hypSigma;
+    this.hypAlpha = hypAlpha;
+    this.hypRho = hypRho;
+    this.hypRespawn = hypRespawn;
+    this.hypMigrate = hypMigrate;
+    this.hypMut = hypMut;
+    this._priorLog = null;
+    this.groupLogW = null;
+    this.groupW = null;
+    this.group = null;
+    this._group2 = null;
+    this._gLive = null;
+    this._gSize = null;
+    this._gBlocked = null;
+    if (this.lambdas) {
+      this._group2 = new Int8Array(cap);
+      this.group = new Int8Array(cap);
+      this._gLive = new Int32Array(this.K);
+      this._gSize = new Int32Array(this.K);
+      this._gBlocked = new Int32Array(this.K);
+      this.groupW = new Float64Array(this.K);
+      this._recomputePrior();
+      this.resetStepHypotheses();
+    }
+  }
+
+  /**
+   * Log-prior over hypotheses: a log-normal centred on the model's step length
+   * (lambda = 1), so the mixture is gently pulled back to the model and cannot
+   * run away on weak evidence.
+   */
+  _recomputePrior() {
+    const s2 = 2 * this.hypSigma * this.hypSigma;
+    this._priorLog = new Float64Array(this.K);
+    for (let k = 0; k < this.K; k++) {
+      const x = Math.log(this.lambdas[k]);
+      this._priorLog[k] = -(x * x) / s2;
+    }
+  }
+
+  /**
+   * Set (or clear) the step-length hypotheses. `lambdas` is an array of
+   * multipliers on the model step length, or null to return to a single cloud.
+   */
+  setStepHypotheses(lambdas, { sigma, alpha, rho, migrate, mut } = {}) {
+    if (sigma != null) this.hypSigma = sigma;
+    if (alpha != null) this.hypAlpha = alpha;
+    if (rho != null) this.hypRho = rho;
+    if (migrate != null) this.hypMigrate = migrate;
+    if (mut != null) this.hypMut = mut;
+    if (!lambdas) {
+      this.lambdas = null; this.K = 0;
+      this._priorLog = this.groupLogW = this.groupW = this.group = null;
+      this._group2 = this._gLive = this._gSize = this._gBlocked = null;
+      return;
+    }
+    this.lambdas = Float64Array.from(lambdas);
+    this.K = this.lambdas.length;
+    const cap = this.maxCount;
+    this._group2 = new Int8Array(cap);
+    this.group = new Int8Array(cap);
+    this._gLive = new Int32Array(this.K);
+    this._gSize = new Int32Array(this.K);
+    this._gBlocked = new Int32Array(this.K);
+    this.groupW = new Float64Array(this.K);
+    this._recomputePrior();
+    this._assignGroups();
+    this.resetStepHypotheses();
+  }
+
+  /** Re-centre the mixture on the prior (uniform weights before the prior). */
+  resetStepHypotheses() {
+    if (!this.lambdas) return;
+    this.groupLogW = new Float64Array(this.K);
+    this._normaliseHypotheses();
+  }
+
+  /** Distribute particles over hypotheses in a round-robin (even start). */
+  _assignGroups() {
+    if (!this.lambdas || !this.group) return;
+    for (let i = 0; i < this.maxCount; i++) this.group[i] = i % this.K;
+  }
+
+  /** groupW = softmax(groupLogW + priorLog); refresh groupW in place. */
+  _normaliseHypotheses() {
+    const K = this.K, lw = this.groupLogW, pr = this._priorLog;
+    let mx = -Infinity;
+    for (let k = 0; k < K; k++) { const v = lw[k] + pr[k]; if (v > mx) mx = v; }
+    let sum = 0;
+    for (let k = 0; k < K; k++) { const v = Math.exp(lw[k] + pr[k] - mx); this.groupW[k] = v; sum += v; }
+    if (sum <= 0) { this.groupW.fill(1 / K); return; }
+    for (let k = 0; k < K; k++) this.groupW[k] /= sum;
+  }
+
+  /**
+   * The current step-length estimate (multiplier on the model step length):
+   * the mixture-mean of the hypotheses. Returns 1 when disabled.
+   */
+  stepScaleEstimate() {
+    if (!this.lambdas) return 1;
+    let m = 0;
+    for (let k = 0; k < this.K; k++) m += this.groupW[k] * this.lambdas[k];
+    return m;
+  }
+
+  /** Confidence in the estimate: the weight of the leading hypothesis (0..1). */
+  stepScaleConfidence() {
+    if (!this.lambdas) return 0;
+    let mx = 0;
+    for (let k = 0; k < this.K; k++) if (this.groupW[k] > mx) mx = this.groupW[k];
+    return mx;
+  }
+
+  /** The mixture weights (a copy), for diagnostics. Empty when disabled. */
+  stepHypotheses() {
+    if (!this.lambdas) return [];
+    return Array.from(this.groupW, (w, k) => ({ lambda: this.lambdas[k], weight: w }));
+  }
+
+  /**
+   * One step of mixture-weight adaptation. Each hypothesis is scored by its
+   * live fraction (how many of its particles stayed walkable); the log-weight
+   * is updated with exponential forgetting, then normalised with the prior.
+   * A straight corridor gives every hypothesis ~equal live fraction, so this is
+   * a no-op there - only geometry that breaks the translation symmetry (a turn,
+   * a doorway, a corridor end) moves the mixture.
+   */
+  _updateHypotheses() {
+    const K = this.K;
+    for (let k = 0; k < K; k++) {
+      const size = this._gSize[k];
+      if (size === 0) continue;                  // no particles: leave its weight
+      // A hypothesis whose particles keep getting wall-blocked (their step
+      // length overshoots/undershoots the geometry) is implausible. A straight
+      // corridor blocks everyone equally, so the evidence ratio is ~1 and the
+      // mixture does not move.
+      const clean = 1 - this._gBlocked[k] / size;
+      const ev = Math.max(0.02, clean);
+      this.groupLogW[k] = this.hypRho * this.groupLogW[k] + this.hypAlpha * Math.log(ev);
+    }
+    this._normaliseHypotheses();
   }
 
   /**
@@ -392,6 +551,8 @@ export class ParticleFilter {
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
+    // A fresh anchor re-centres the step-length mixture on the model.
+    if (this.lambdas) { this._assignGroups(); this.resetStepHypotheses(); }
     this.version++;
   }
 
@@ -441,6 +602,7 @@ export class ParticleFilter {
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
+    if (this.lambdas) { this._assignGroups(); this.resetStepHypotheses(); }
     const b0 = boxes[0];
     this._binRefLon = (b0.minLon + b0.maxLon) / 2;
     this._binRefLat = (b0.minLat + b0.maxLat) / 2;
@@ -469,10 +631,13 @@ export class ParticleFilter {
     this._mpd = mpd;
     const jitter = this.headingJitter, distNoise = this.distanceNoise, latNoise = this.lateralNoiseM;
     const bias = this.headingBias, hOff = this._hOff;
+    const lambdas = this.lambdas, groups = this.group;
+    if (lambdas) this._gBlocked.fill(0);
     for (let i = 0; i < this.count; i++) {
       // Uniform random heading jitter in +/- headingJitter (default +/-35 deg).
       const h = headingRad + bias + hOff[i] + (Math.random() * 2 - 1) * jitter;
-      const d = Math.max(0.05, stepLengthM * (1 + gaussian() * distNoise));
+      const lam = lambdas ? lambdas[groups[i]] : 1;
+      const d = Math.max(0.05, stepLengthM * lam * (1 + gaussian() * distNoise));
       // Lateral jitter PERPENDICULAR to the travel direction (not on the east
       // axis), so the cloud spreads across the corridor rather than along it.
       const l = gaussian() * latNoise;
@@ -513,7 +678,12 @@ export class ParticleFilter {
     const p = this._advance(fromLon, fromLat, toLon, toLat);
     const ddx = (p[0] - fromLon) * mpd.lon, ddy = (p[1] - fromLat) * mpd.lat;
     const moved = Math.sqrt(ddx * ddx + ddy * ddy);
-    if (moved < dist * 0.9) { this._respawn(i, heading); return; }
+    if (moved < dist * 0.9) {
+      if (this.lambdas) this._gBlocked[this.group[i]]++;
+      if (this.lambdas && !this.hypRespawn) { this.weight[i] = 0; return; }
+      this._respawn(i, heading);
+      return;
+    }
     this.lon[i] = p[0];
     this.lat[i] = p[1];
   }
@@ -525,7 +695,7 @@ export class ParticleFilter {
    * have reached. Its heading is the step heading (measured +/- jitter).
    */
   _respawn(i, heading) {
-    const src = this._pickSurvivor();
+    const src = this._pickSurvivor(this.group && !this.hypMigrate ? this.group[i] : -1);
     const bx = src >= 0 ? this.lon[src] : this.lon[i];
     const by = src >= 0 ? this.lat[src] : this.lat[i];
     const [plon, plat] = offsetLL(bx, by,
@@ -534,10 +704,29 @@ export class ParticleFilter {
     else { this.lon[i] = bx; this.lat[i] = by; }
     this.heading[i] = heading;
     this._hOff[i] = src >= 0 ? this._hOff[src] : 0;
+    // Step-length hypotheses: a wall-blocked particle may MIGRATE to the
+    // surviving particle's hypothesis instead of dying. Its position is still
+    // inherited (localisation is preserved); only the step-length offset
+    // changes. Wrong hypotheses therefore drain into the ones that keep
+    // threading the geometry. A little random mutation keeps exploration alive.
+    if (this.lambdas) {
+      if (this.hypMigrate && src >= 0) this.group[i] = this.group[src];
+      if (this.hypMut > 0 && Math.random() < this.hypMut) {
+        this.group[i] = (Math.random() * this.K) | 0;
+      }
+    }
   }
 
-  /** Index of a random particle that still carries weight, or -1. */
-  _pickSurvivor() {
+  /**
+   * Index of a random particle that still carries weight, or -1. With the
+   * step-length hypotheses a same-hypothesis survivor is preferred, so a killed
+   * particle is never re-seeded from a different step length.
+   */
+  _pickSurvivor(groupIdx = -1) {
+    for (let t = 0; t < 12; t++) {
+      const j = (Math.random() * this.count) | 0;
+      if (this.weight[j] > 0 && (groupIdx < 0 || this.group[j] === groupIdx)) return j;
+    }
     for (let t = 0; t < 12; t++) {
       const j = (Math.random() * this.count) | 0;
       if (this.weight[j] > 0) return j;
@@ -615,11 +804,15 @@ export class ParticleFilter {
       return;
     }
     let total = 0, live = 0;
+    const trackGroups = !!this.lambdas;
+    const hardFloor = trackGroups && !this.hypRespawn;
+    if (trackGroups) { this._gLive.fill(0); this._gSize.fill(0); }
     for (let i = 0; i < this.count; i++) {
-      const w = this.isWalkable([this.lon[i], this.lat[i]]) ? 1 : 0.02;  // hard-ish floor
+      const w = this.isWalkable([this.lon[i], this.lat[i]]) ? 1 : (hardFloor ? 0 : 0.02);
       this.weight[i] = w;
       total += w;
       if (w > 0.5) live++;
+      if (trackGroups) { this._gSize[this.group[i]]++; if (w > 0.5) this._gLive[this.group[i]]++; }
     }
     if (total <= 0) return;
     for (let i = 0; i < this.count; i++) this.weight[i] /= total;
@@ -629,6 +822,19 @@ export class ParticleFilter {
       this._recover();
       if (relaxed) this.relaxLeft--;
       return;
+    }
+
+    // Step-length hypotheses: award each hypothesis its live-fraction evidence.
+    // Skipped on a U-turn / relaxed / global step (the geometry is uninformative
+    // or the cloud is deliberately unconstrained), and outdoors.
+    if (trackGroups && !this._globalMode && !this.reversed && !relaxed) {
+      if (this.hypMigrate) {
+        // Migration mode: particles physically move between hypotheses, so the
+        // population share IS the belief (no separate log-weight update).
+        for (let k = 0; k < this.K; k++) this.groupW[k] = this._gSize[k] / this.count;
+      } else {
+        this._updateHypotheses();
+      }
     }
 
     this._applyPriors(forwardHeading, relaxed);
@@ -714,6 +920,7 @@ export class ParticleFilter {
   }
 
   _resample() {
+    if (this.lambdas) return this._resampleHypotheses();
     const n = this.count;
     const { weight } = this;
     const sLon = this._lon2, sLat = this._lat2, sH = this._h2, sHO = this._hOff2;
@@ -753,6 +960,105 @@ export class ParticleFilter {
       ? Math.max(this.minCount, Math.min(n, this._kldCount(k)))
       : n;
     this.lastK = k;   // occupied bins of the last resample (diagnostics)
+    const w = 1 / this.count;
+    for (let i = 0; i < this.count; i++) this.weight[i] = w;
+  }
+
+  /** Index of the heaviest particle (fallback when a group is empty). */
+  _heaviestIndex() {
+    let best = 0, bw = -1;
+    for (let i = 0; i < this.count; i++) if (this.weight[i] > bw) { bw = this.weight[i]; best = i; }
+    return best;
+  }
+
+  /**
+   * Group-aware resample for the multi-hypothesis mode. Each hypothesis keeps
+   * its OWN sub-population (never resampled across hypotheses, so a hypothesis
+   * can never collapse to nothing); particles are reallocated to hypotheses in
+   * proportion to the mixture weights. Within a hypothesis the usual
+   * walkability-weighted systematic resampling applies, so localisation still
+   * works per hypothesis. The adaptive KLD target count is derived from the
+   * current cloud's occupied bins.
+   */
+  _resampleHypotheses() {
+    const K = this.K;
+    const n0 = this.count;
+    const weight = this.weight, group = this.group;
+    const cap = this.maxCount;
+
+    // Target count (adaptive only): KLD over the CURRENT cloud's occupied bins.
+    let target = n0;
+    if (this.adaptive) {
+      const bins = this._bins;
+      bins.clear();
+      if (this._binRefLon === null) { this._binRefLon = this.lon[0]; this._binRefLat = this.lat[0]; }
+      const mpd = metresPerDegree(this._binRefLat);
+      const invBinX = mpd.lon / this.binM, invBinY = mpd.lat / this.binM, invH = 1 / this.binHeading;
+      let occ = 0;
+      for (let i = 0; i < n0; i++) {
+        const bx = Math.round((this.lon[i] - this._binRefLon) * invBinX) + 2048;
+        const by = Math.round((this.lat[i] - this._binRefLat) * invBinY) + 2048;
+        const bh = Math.round(this.heading[i] * invH) & 63;
+        const key = bx * 1048576 + by * 64 + bh;
+        if (!bins.has(key)) { bins.add(key); occ++; }
+      }
+      this.lastK = occ;
+      target = Math.max(this.minCount, Math.min(n0, this._kldCount(occ)));
+    }
+
+    // Allocate the target population across hypotheses by mixture weight.
+    const alloc = new Int32Array(K);
+    let sum = 0;
+    for (let k = 0; k < K; k++) { alloc[k] = Math.max(1, Math.round(this.groupW[k] * target)); sum += alloc[k]; }
+    if (sum !== target) {
+      let big = 0;
+      for (let k = 1; k < K; k++) if (alloc[k] > alloc[big]) big = k;
+      alloc[big] = Math.max(1, alloc[big] + (target - sum));
+    }
+
+    const sLon = this._lon2, sLat = this._lat2, sH = this._h2, sHO = this._hOff2, sG = this._group2;
+    const idxs = new Int32Array(n0);
+    const cw = new Float64Array(n0);
+    const mpd = metresPerDegree(this._binRefLat ?? (this.lat[0] || 0));
+    let out = 0;
+    for (let k = 0; k < K && out < cap; k++) {
+      let m = 0, csum = 0;
+      for (let i = 0; i < n0; i++) {
+        if (group[i] === k && weight[i] > 0) { idxs[m] = i; csum += weight[i]; m++; }
+      }
+      const take = Math.min(alloc[k], cap - out);
+      if (m === 0 || csum <= 0) {
+        // Empty hypothesis: keep it alive by cloning the heaviest particle.
+        for (let j = 0; j < take; j++) {
+          const src = this._heaviestIndex();
+          sLon[out] = this.lon[src] + gaussian() * this.roughenM / mpd.lon;
+          sLat[out] = this.lat[src] + gaussian() * this.roughenM / mpd.lat;
+          sH[out] = this.heading[src] + gaussian() * this.headingNoise * 0.5;
+          sHO[out] = this._hOff[src]; sG[out] = k; out++;
+        }
+        continue;
+      }
+      let acc = 0;
+      for (let x = 0; x < m; x++) { acc += weight[idxs[x]]; cw[x] = acc; }
+      const stride = csum / take;
+      let r = Math.random() * stride, ci = 0;
+      for (let j = 0; j < take && out < cap; j++) {
+        const u = r + j * stride;
+        while (u > cw[ci] && ci < m - 1) ci++;
+        const src = idxs[ci];
+        sLon[out] = this.lon[src] + gaussian() * this.roughenM / mpd.lon;
+        sLat[out] = this.lat[src] + gaussian() * this.roughenM / mpd.lat;
+        sH[out] = this.heading[src] + gaussian() * this.headingNoise * 0.5;
+        sHO[out] = this._hOff[src]; sG[out] = k; out++;
+      }
+    }
+    let tmp;
+    tmp = this.lon; this.lon = this._lon2; this._lon2 = tmp;
+    tmp = this.lat; this.lat = this._lat2; this._lat2 = tmp;
+    tmp = this.heading; this.heading = this._h2; this._h2 = tmp;
+    tmp = this._hOff; this._hOff = this._hOff2; this._hOff2 = tmp;
+    tmp = this.group; this.group = this._group2; this._group2 = tmp;
+    this.count = out;
     const w = 1 / this.count;
     for (let i = 0; i < this.count; i++) this.weight[i] = w;
   }
@@ -838,8 +1144,10 @@ export class ParticleFilter {
   points() {
     if (!this.initialized) return [];
     const out = [];
+    const hasGroups = !!this.group;
     for (let i = 0; i < this.count; i++) {
-      out.push({ lon: this.lon[i], lat: this.lat[i], w: this.weight[i] });
+      out.push({ lon: this.lon[i], lat: this.lat[i], w: this.weight[i],
+                 g: hasGroups ? this.group[i] : 0 });
     }
     return out;
   }
