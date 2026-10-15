@@ -948,6 +948,10 @@
                    style="width:100%"
                    title="Drag to correct the compass heading (adds this offset to every reading)" />
           </div>
+          <div class="info-section">
+            <div class="info-label">Walking model</div>
+            <div class="cal-row"><span>Step length</span><span id="steplen-current" class="cal-val">&mdash;</span></div>
+          </div>
           <div class="info-label" style="margin-top:8px">Graph</div>
           <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
           <button id="cal-advanced-back" class="cal-btn" style="width:100%">Back</button>
@@ -1133,6 +1137,7 @@
     const autocalCiEl = document.getElementById('autocal-ci');
     const autocalMixEl = document.getElementById('autocal-mix');
     const autocalDataEl = document.getElementById('autocal-data');
+    const stepLenCurrentEl = document.getElementById('steplen-current');
 
     // Calibration modal elements.
     const calModal = document.getElementById('cal-modal');
@@ -1893,6 +1898,11 @@
     function updateAutocalUI() {
       const s = gpsCal.stats();
       let certified = s.calibrated;
+      // The advanced "Compass & graph" panel shows the live model step length.
+      if (stepLenCurrentEl) {
+        const len = stepLenText(stepModel.base);
+        if (stepLenCurrentEl.textContent !== len) stepLenCurrentEl.textContent = len;
+      }
       paintAutocalLive(s.live);
 
       if (s.baseM == null && storedAutoCal) {
