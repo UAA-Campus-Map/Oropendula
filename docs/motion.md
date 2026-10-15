@@ -53,7 +53,7 @@ sample. `gyroSign` maps device-frame rotation to our bearing convention.
 One unknown per person: the base step length at a reference cadence. The model
 scales it roughly proportionally to cadence and clamps it — deliberately simple
 and ML-free, aimed at the 4–5 m accuracy target. The base is what calibration
-(walk, GPS, height, or the particle-filter refinement in `locate.mjs`) tunes.
+(walk a known line, GPS, or height estimate) tunes.
 
 ## `createMotion` and sensor permissions
 

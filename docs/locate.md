@@ -77,41 +77,6 @@ between corrections; the floor plan is what stops it drifting through walls.
 (Measured: over a square+hallway, pure PDR keeps ~4–8k of the 1 m bins occupied —
 the belief does *not* collapse on its own.)
 
-## Multi-hypothesis step length (experimental)
-
-**The problem.** People do not walk at one fixed pace; the cadence model is a
-heuristic. But step length is only weakly observable from map matching.
-
-**The idea.** Instead of estimating a step length directly, keep **K discrete
-step-length hypotheses** — multipliers `λ` on `stepLengthM`, e.g.
-`[0.80 … 1.20]`. Each particle belongs to one hypothesis and advances by
-`stepLengthM · λ`. Hypotheses are scored by the geometry, and the belief is the
-**population share** per hypothesis.
-
-- **Why not a per-particle continuous scale?** That suffers *parameter
-  impoverishment*: resampling collapses the scale distribution, and a persistent
-  scale is biased by the filter's own heading-jitter forward-loss. Discrete
-  sub-populations are stable and easy to reason about.
-- **Where the signal comes from.** A straight corridor is translation-invariant,
-  so every hypothesis survives equally — **no information, no adaptation**. At a
-  turn, a doorway or a corridor end, the symmetry breaks: a wrong cumulative
-  distance puts the particle in a wall, and it dies. Survivors are the right
-  length. The mixture moves only at those constraints.
-- **Migration (`hypMigrate`).** A wall-blocked particle **adopts a survivor's
-  hypothesis** instead of dying. Its position is still inherited, so localisation
-  is preserved — only the step-length offset changes. Wrong hypotheses drain into
-  the ones that keep threading the geometry. A small random **mutation**
-  (`hypMut`) keeps exploration alive.
-- **Where it works / limits.** Under the app's aggressive heading jitter the
-  absolute estimate carries a ~+4–5 % bias (heading-jitter forward loss), so it
-  is a **relative** signal: the app keys its gated update on the *change*
-  (`base *= est/baseline`). It orders slow < normal < fast reliably after a few
-  turns, but should be treated as a slow refinement, not a precise measurement.
-
-API: `setStepHypotheses(lambdas, { sigma, alpha, rho, migrate, mut })`,
-`resetStepHypotheses()`, `stepScaleEstimate()`, `stepScaleConfidence()`,
-`stepHypotheses()`. Default **off** (a single cloud).
-
 ## Corridor heading helpers
 
 - `corridorAxis` ray-casts the free space around a point and returns the axis
@@ -127,8 +92,8 @@ API: `setStepHypotheses(lambdas, { sigma, alpha, rho, migrate, mut })`,
 - `setFreeRoam(on, isAllowed?)` lifts the floor-plan constraint outdoors
   (skybridges, gaps between buildings, unmapped walkways), optionally constrained
   by an `isAllowed(ll)` predicate so PDR cannot cut through a building.
-- `points()` returns `{ lon, lat, w, g }` for the map overlay (`w` is relative
-  weight, `g` the hypothesis index); empty until seeded.
+- `points()` returns `{ lon, lat, w }` for the map overlay (`w` is relative
+  weight); empty until seeded.
 - `version` is bumped whenever the cloud changes, so the renderer can skip
   rebuilding the overlay for GPS-only estimates.
 - Fixed particle count (`DEFAULT_COUNT = 1000`); arrays are sized once and the

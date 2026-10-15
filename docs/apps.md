@@ -27,12 +27,6 @@ bottom-left action pills, a branded splash, and subtle haptics.
   end are marked with flags (a green pin and a checkered flag); the route is
   framed on the map. `recordIndoorWalk` computes `distance / steps` and applies
   it.
-- **Step-length refinement (experimental, off by default).** A toggle in the
-  calibration modal's *Compass & graph* screen enables the multi-hypothesis
-  mixture in `locate.mjs` (`STEP_HYPOTHESES`, migration). The particle clouds are
-  **colour-coded per candidate step length** (a legend is shown), and a **gated,
-  relative** update nudges `stepModel.base` after enough constrained walking.
-  `?refine=1` enables it at boot for desktop inspection.
 
 ### Units
 Internal math is metric. The **UI shows Imperial**: `distanceText` (feet, miles
@@ -41,8 +35,7 @@ estimator defaults to **ft·in** with a cm toggle.
 
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
-  drawn from `ParticleFilter.points()`; colour comes from each particle's
-  hypothesis `g` when refinement is on.
+  drawn from `ParticleFilter.points()`.
 - `positionSeeded` suppresses the live marker and re-routing until an absolute
   source (GPS, "I'm Here", or a finished calibration) has seeded the cloud — the
   boot seed at the map centre is a guess and must not move the map.
@@ -52,9 +45,8 @@ estimator defaults to **ft·in** with a cm toggle.
 ## `index.html` — the original demo
 
 The older desktop-friendly UI, same pipeline. It retains the line-walk
-"Calibrate walking model" panel and gained the same **step-length refinement
-toggle** (in the sidebar) and **colour-coded clouds**. `?dev=1` reveals the
-developer "Find Path" button and the on-map particle overlay.
+"Calibrate walking model" panel. `?dev=1` reveals the developer "Find Path"
+button and the on-map particle overlay.
 
 ## `import.html` — the authoring tool
 

@@ -566,45 +566,6 @@
       cursor: pointer;
     }
     .cal-seg button.active { background: var(--accent); color: #fff; }
-    /* Toggle switch (step-length refinement). */
-    .switch-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .switch {
-      appearance: none;
-      -webkit-appearance: none;
-      flex: none;
-      width: 48px;
-      height: 28px;
-      margin: 0;
-      border-radius: 999px;
-      background: var(--line);
-      position: relative;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .switch::after {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: var(--shadow-sm);
-      transition: transform 0.2s;
-    }
-    .switch:checked { background: var(--accent); }
-    .switch:checked::after { transform: translateX(20px); }
-    .steplen-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; }
-    .steplen-legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
-    .steplen-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .cal-error { color: #dc2626; font-size: 13px; margin: 0; }
     .cal-callout {
       padding: 12px 14px;
@@ -987,18 +948,6 @@
                    style="width:100%"
                    title="Drag to correct the compass heading (adds this offset to every reading)" />
           </div>
-          <div class="info-section">
-            <div class="info-label">Step length refinement</div>
-            <p class="hint">Experimental: the particle clouds adapt to your actual walking pace.
-              Colour = candidate step length; the winning cloud grows after turns and doorways.</p>
-            <label class="switch-row">
-              <span>Enable refinement</span>
-              <input type="checkbox" id="steplen-toggle" class="switch" />
-            </label>
-            <div class="cal-row"><span>PDR step length</span><span id="steplen-readout" class="cal-val">&mdash;</span></div>
-            <div class="cal-row"><span>Cloud confidence</span><span id="steplen-conf" class="cal-val">&mdash;</span></div>
-            <div id="steplen-legend" class="steplen-legend"></div>
-          </div>
           <div class="info-label" style="margin-top:8px">Graph</div>
           <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
           <button id="cal-advanced-back" class="cal-btn" style="width:100%">Back</button>
@@ -1138,19 +1087,6 @@
     /** A speed in feet per second. */
     function speedText(mps) { return `${(mps * FT_PER_M).toFixed(1)} ft/s`; }
 
-    // --- multi-hypothesis step length (experimental, off by default) ---------
-    // Candidate multipliers on the model step length. With refinement on, each
-    // particle belongs to one candidate and the cloud adapts to the walker's
-    // actual pace at turns (see locate.mjs). The clouds are colour-coded so the
-    // winner is visible on the map.
-    const STEP_HYPOTHESES = [0.80, 0.867, 0.933, 1.0, 1.067, 1.133, 1.20];
-    const STEP_HYPOTHESIS_COLORS = [
-      '#e0533d', '#e08f3d', '#e0c83d', '#7fd13d', '#3dd1c0', '#3d7fe0', '#8e3de0',
-    ];
-    const DEFAULT_PARTICLE_COLOR = '#e0533d';
-    let stepRefineOn = false;
-    const stepRefine = { ema: null, baseline: null, metres: 0 };
-
     // Guided walking-model calibration (the modal). Three methods feed the
     // step-length model: estimate from height, auto-calibrate outdoors from
     // GPS, or a guided indoor walk between two known room doors.
@@ -1204,20 +1140,6 @@
     const calProgressFill = document.getElementById('cal-progress-fill');
     const calProgressLabel = document.getElementById('cal-progress-label');
     const calScreens = [...calModal.querySelectorAll('.cal-screen')];
-
-    // Step-length refinement controls.
-    const stepLenToggle = document.getElementById('steplen-toggle');
-    const stepLenReadout = document.getElementById('steplen-readout');
-    const stepLenConf = document.getElementById('steplen-conf');
-    const stepLenLegend = document.getElementById('steplen-legend');
-    // Desktop/testing shortcut: ?refine=1 enables the experimental mixture
-    // (the locator, created later, picks it up in ensureLocator).
-    try {
-      if (new URLSearchParams(location.search).has('refine')) {
-        stepRefineOn = true;
-        stepLenToggle.checked = true;
-      }
-    } catch (e) { /* ignore */ }
 
     // Event listeners
     menuBtn.addEventListener('click', () => { openCalModal(); ensureSensors(); });
@@ -1359,7 +1281,6 @@
     });
     document.getElementById('cal-advanced-btn').addEventListener('click', () => showCalScreen('advanced'));
     document.getElementById('cal-advanced-back').addEventListener('click', () => showCalScreen('choose'));
-    stepLenToggle.addEventListener('change', () => setStepRefinement(stepLenToggle.checked));
     // Height inputs.
     document.getElementById('cal-height-unit').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-unit]');
@@ -1874,83 +1795,6 @@
       document.getElementById('cal-done-summary').textContent =
         summary ?? 'Walking model calibrated.';
       showCalScreen('done');
-    }
-
-    // --- step-length refinement (experimental) ------------------------------
-    /** Build the colour legend from the hypothesis palette. */
-    function populateStepLenLegend() {
-      stepLenLegend.replaceChildren(...STEP_HYPOTHESES.map((lam, i) => {
-        const span = document.createElement('span');
-        const dot = document.createElement('i');
-        dot.style.background = STEP_HYPOTHESIS_COLORS[i % STEP_HYPOTHESIS_COLORS.length];
-        span.appendChild(dot);
-        span.appendChild(document.createTextNode(`${lam.toFixed(2)}\u00d7`));
-        return span;
-      }));
-    }
-
-    /** Turn the multi-hypothesis mixture on/off on the current locator. */
-    function setStepRefinement(on) {
-      stepRefineOn = !!on;
-      stepLenToggle.checked = stepRefineOn;
-      stepRefine.ema = null;
-      stepRefine.baseline = null;
-      stepRefine.metres = 0;
-      if (locator?.filter) {
-        if (stepRefineOn) {
-          locator.filter.setStepHypotheses(STEP_HYPOTHESES, { migrate: true, mut: 0.02 });
-        } else {
-          locator.filter.setStepHypotheses(null);
-        }
-      }
-      // Recolour / clear the cloud immediately.
-      if (locator?.filter) locator.filter.version++;
-      updateParticles(true);
-      statusText.textContent = stepRefineOn
-        ? 'Step-length refinement on \u2014 walk with a few turns'
-        : 'Step-length refinement off';
-    }
-
-    /** Paint the readout from the live mixture. */
-    function updateStepLenReadout() {
-      const filter = locator?.filter;
-      if (!stepRefineOn || !filter?.lambdas) {
-        stepLenReadout.textContent = '\u2014';
-        stepLenConf.textContent = '\u2014';
-        return;
-      }
-      const scale = filter.stepScaleEstimate();
-      stepLenReadout.textContent = stepLenText(stepModel.base * scale);
-      stepLenConf.textContent = `${Math.round(filter.stepScaleConfidence() * 100)}%`;
-    }
-
-    /**
-     * Gated, RELATIVE update of the model step length. The estimate carries a
-     * constant bias (heading-jitter forward loss), so we act on its CHANGE from
-     * its own recent baseline, not its absolute value: after enough constrained
-     * distance, a sustained shift nudges `stepModel.base` by at most 2%.
-     */
-    function maybeRefineStepLength() {
-      if (!stepRefineOn || !positionSeeded) return;
-      const filter = locator?.filter;
-      if (!filter?.lambdas || filter.freeRoam) return;
-      const s = filter.stepScaleEstimate();
-      stepRefine.ema = stepRefine.ema == null ? s : stepRefine.ema * 0.85 + s * 0.15;
-      if (stepRefine.baseline == null) { stepRefine.baseline = stepRefine.ema; return; }
-      if (stepRefine.metres < 60) return;
-      const ratio = stepRefine.ema / stepRefine.baseline;
-      if (ratio < 0.97 || ratio > 1.03) {
-        const target = stepModel.base * ratio;
-        const newBase = Math.max(stepModel.base * 0.98, Math.min(stepModel.base * 1.02, target));
-        if (Math.abs(newBase - stepModel.base) >= 0.002) {
-          stepModel.base = newBase;
-          filter.resetStepHypotheses();   // re-centre the prior on the new base
-          statusText.textContent = `Step length refined to ${stepLenText(newBase)}`;
-          updateAutocalUI();
-        }
-        stepRefine.baseline = stepRefine.ema;
-        stepRefine.metres = 0;
-      }
     }
 
     /** Open the modal at boot when the walker has never calibrated. */
@@ -2904,7 +2748,6 @@
     } catch (e) { /* ignore */ }
     // Paint the button dot + panel from the stored calibration (if any).
     updateAutocalUI();
-    populateStepLenLegend();
     // Paint the restored compass trim (the bias itself is applied in
     // startMotion, once the sensor tracker exists).
     headingTrimEl.value = String(headingTrimDeg);
@@ -3036,8 +2879,6 @@
       const filter = new ParticleFilter({
         isWalkable: pdrWalkable, nearestWalkable, count: 1000,
       });
-      // Keep the experimental step-length mixture on across a floor re-bind.
-      if (stepRefineOn) filter.setStepHypotheses(STEP_HYPOTHESES, { migrate: true, mut: 0.02 });
       locator = {
         building: pick.building, floor: pick.floor, filter, isWalkable,
         arbiter: new PositionArbiter({
@@ -3147,7 +2988,7 @@
             // 1, a peaked one > 1. Scale-invariant, so a 40k global cloud is as
             // visible as a 1k local one; the cloud sharpens into corridors.
             'circle-radius': ['interpolate', ['linear'], ['get', 'w'], 0, 1.4, 1, 2.6, 5, 4.2],
-            'circle-color': ['get', 'c'],
+            'circle-color': '#e0533d',
             'circle-opacity': ['interpolate', ['linear'], ['get', 'w'], 0, 0.10, 1, 0.34, 5, 0.9],
           },
         });
@@ -3163,8 +3004,7 @@
       if (is3D) return;
       const filter = locator?.filter;
       // A GPS-only estimate (or a repeated render) does not move the PDR
-      // cloud; skip the O(count) rebuild + map upload unless it changed (or a
-      // caller forces it, e.g. toggling step-length refinement).
+      // cloud; skip the O(count) rebuild + map upload unless it changed.
       if (!force && filter && filter.version === lastParticleVersion) return;
       const now = performance.now();
       if (!force && now - lastParticlePaint < PARTICLE_PAINT_MS) return;
@@ -3176,15 +3016,11 @@
       lastParticleVersion = filter ? filter.version : -1;
       // Draw EVERY particle (no sub-sampling) - the whole cloud is the point.
       const n = pts.length || 1;
-      const hasHyp = !!filter?.lambdas;
       const features = new Array(pts.length);
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
-        const color = hasHyp
-          ? STEP_HYPOTHESIS_COLORS[p.g % STEP_HYPOTHESIS_COLORS.length]
-          : DEFAULT_PARTICLE_COLOR;
         features[i] = {
-          type: 'Feature', properties: { w: p.w * n, c: color },
+          type: 'Feature', properties: { w: p.w * n },
           geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
         };
       }
@@ -3222,8 +3058,6 @@
         : `Dead reckoning ±${Math.round(est.accuracyM * FT_PER_M)} ft`;
       if (statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
       rerouteFromEstimate();
-      updateStepLenReadout();
-      maybeRefineStepLength();
     }
 
     // Compass display / heading indicator, driven by the SMOOTHED heading from
@@ -3407,7 +3241,6 @@
           locator.arbiter.setHeading(heading);
           const stepLengthM = stepModel.lengthFor(cadenceHz);
           locator.arbiter.step({ stepLengthM, headingRad: heading });
-          if (stepRefineOn) stepRefine.metres += stepLengthM;
           const est = locator.arbiter.estimate(t);
           applyCorridorHeading(est, heading);
           renderEstimate(est);

@@ -69,4 +69,4 @@ early/late agreement.
 
 - [`motion.md`](motion.md) — `StepLengthModel` provides the reference cadence.
 - [`apps.md`](apps.md) — how `base` is applied and shown.
-- [`locate.md`](locate.md) — the weaker, map-only step-length refinement.
+- [`locate.md`](locate.md) — the map-matching particle filter (consumes the step model).

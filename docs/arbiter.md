@@ -11,8 +11,7 @@ Public API: `gps(fix)`, `step({ stepLengthM, headingRad })`,
 `pdrAccuracy()`, `insideBuilding(fix)`, `isPlausible(fix)`.
 
 `estimate(t)` returns
-`{ lon, lat, source, accuracyM, heading, spreadM, gpsAccuracyM, stepScale,
-stepScaleConfidence }`.
+`{ lon, lat, source, accuracyM, heading, spreadM, gpsAccuracyM }`.
 
 ## Why it's built this way
 
@@ -52,8 +51,6 @@ The arbiter's inputs are the raw GPS fix and the raw steps + heading from
 - `anchor()` re-seeds with a known heading spread (±30°) and marks the source
   `pdr`; `clearGps()` forgets the fix so a wrong fix cannot win again after a
   manual anchor.
-- `estimate()` also passes through the particle filter's experimental
-  `stepScale`/`stepScaleConfidence` (1 / 0 when the mixture is off).
 
 ## See also
 
