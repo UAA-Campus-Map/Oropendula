@@ -695,7 +695,9 @@
       // marginally nearest - stacked floors share a footprint).
       ensureLocator(ll, floorOfView());
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
-      locator.arbiter.anchor(ll, { spreadM: 3 });
+      // Manual "I'm Here": the tap is treated as an almost-exact position, so
+      // seed the cloud with a minimal spread (1 m) rather than the usual 3 m.
+      locator.arbiter.anchor(ll, { spreadM: 1 });
       headingDriftCal.reset();
       setCorridorBadge(false);
       renderEstimate(locator.arbiter.estimate(performance.now()));
@@ -1803,7 +1805,12 @@
       // through a building, while a gap between buildings, or a bridge passing
       // over a building with no floor here, stays usable.
       const isOutsideBuildings = (ll) => !isWalkable(ll);
-      const filter = new ParticleFilter({ isWalkable: pdrWalkable, nearestWalkable });
+      const filter = new ParticleFilter({
+        isWalkable: pdrWalkable, nearestWalkable,
+        // Seeding uses the STRICT union (no off-plan margin) so a manual anchor
+        // never spawns particles outside the building.
+        seedWalkable: isWalkable,
+      });
       locator = {
         building: pick.building, floor: pick.floor, filter, isWalkable,
         arbiter: new PositionArbiter({

@@ -256,6 +256,9 @@ export class HeadingDriftCalibrator {
  * @param {object}   opts
  * @param {Function} opts.isWalkable       (lonLat) -> bool, from navgraph
  * @param {Function} [opts.nearestWalkable] (lonLat) -> lonLat|null, for recovery
+ * @param {Function} [opts.seedWalkable]   (lonLat) -> bool, STRICT walkability used
+ *        only when seeding (no off-plan margin), so a manual anchor never
+ *        spawns particles outside the building. Defaults to `isWalkable`.
  * @param {number}   [opts.count=200]
  * @param {number}   [opts.headingNoiseDeg=8]   per-step heading jitter
  * @param {number}   [opts.distanceNoise=0.12]  per-step distance jitter, fraction of step
@@ -267,9 +270,11 @@ export class ParticleFilter {
     headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.20, roughenM = 0.20,
     segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
     stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3,
-    persistentHeadingDeg = 0 } = {}) {
+    persistentHeadingDeg = 0, seedWalkable = null } = {}) {
     this.isWalkable = isWalkable;
     this.nearestWalkable = nearestWalkable;
+    // Stricter predicate for seeding (no off-plan margin); see `seed`.
+    this.seedWalkable = seedWalkable;
     // Fixed particle count (arrays are sized to it).
     this.count = count;
     this.headingNoise = headingNoiseDeg * Math.PI / 180;
@@ -352,12 +357,26 @@ export class ParticleFilter {
     // The compass cannot be more than ~90 deg off, so a KNOWN heading bounds
     // the spread to +/-90 deg; only an unknown heading keeps the full circle.
     const spreadDeg = heading == null ? null : Math.min(headingSpreadDeg, 90);
+    // Line-of-sight seeding, so a particle may never appear on the far side of
+    // a wall (another room) or past the building edge: walk the straight line
+    // from the anchor and stop at the last clear sample. The strict
+    // `seedWalkable` (no off-plan margin) keeps it inside the building.
+    const walk = this.seedWalkable ?? this.isWalkable;
+    // An imprecise tap can land in a wall; start the spray from the nearest
+    // walkable spot so the probe below has a valid origin.
+    let base = [lon, lat];
+    if (!this.freeRoam && !walk(base)) base = this.nearestWalkable?.(base) ?? base;
+    this._mpd = metresPerDegree(base[1]);
     for (let i = 0; i < this.count; i++) {
       const e = gaussian() * spreadM, n = gaussian() * spreadM;
-      const [plon, plat] = offsetLL(lon, lat, e, n);
-      const fixed = this.freeRoam ? [plon, plat]
-        : this.isWalkable([plon, plat]) ? [plon, plat]
-          : (this.nearestWalkable?.([plon, plat]) ?? [plon, plat]);
+      let fixed;
+      if (this.freeRoam) {
+        fixed = offsetLL(base[0], base[1], e, n);
+      } else {
+        const [plon, plat] = offsetLL(base[0], base[1], e, n);
+        const p = this._advance(base[0], base[1], plon, plat, walk);
+        fixed = [p[0], p[1]];
+      }
       this.lon[i] = fixed[0];
       this.lat[i] = fixed[1];
       const h = spreadDeg == null ? Math.random() * 2 * Math.PI
@@ -475,14 +494,14 @@ export class ParticleFilter {
    * walkable sample. Prevents stepping across a wall. Writes into the reusable
    * `_pt` scratch array (no per-sample allocation) and returns it.
    */
-  _advance(fromLon, fromLat, toLon, toLat) {
+  _advance(fromLon, fromLat, toLon, toLat, walk = this.isWalkable) {
     const pt = this._pt;
     const mpd = this._mpd;
     const dx = (toLon - fromLon) * mpd.lon, dy = (toLat - fromLat) * mpd.lat;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len <= this.segmentStepM) {
       pt[0] = toLon; pt[1] = toLat;
-      if (!this.isWalkable(pt)) { pt[0] = fromLon; pt[1] = fromLat; }
+      if (!walk(pt)) { pt[0] = fromLon; pt[1] = fromLat; }
       return pt;
     }
     // FAST PATH. The clearance raster inflates every wall by ~0.3 m each side
@@ -492,9 +511,9 @@ export class ParticleFilter {
     if (len <= this._fastAdvanceMaxM) {
       const mx = fromLon + (toLon - fromLon) * 0.5, my = fromLat + (toLat - fromLat) * 0.5;
       pt[0] = mx; pt[1] = my;
-      if (this.isWalkable(pt)) {
+      if (walk(pt)) {
         pt[0] = toLon; pt[1] = toLat;
-        if (this.isWalkable(pt)) return pt;
+        if (walk(pt)) return pt;
       }
       // blocked somewhere on the segment -> full sweep below
     }
@@ -504,7 +523,7 @@ export class ParticleFilter {
       const t = s / steps;
       pt[0] = fromLon + (toLon - fromLon) * t;
       pt[1] = fromLat + (toLat - fromLat) * t;
-      if (!this.isWalkable(pt)) break;
+      if (!walk(pt)) break;
       lastLon = pt[0]; lastLat = pt[1];
     }
     pt[0] = lastLon; pt[1] = lastLat;
