@@ -303,9 +303,11 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
    * 4. Reconstruct path by backtracking through prev array
    * 5. Return path as array of [lon,lat] points (including start and end)
    * 
-   * Early termination: when we pop a node from the priority queue that is visible
-   * from the goal, the first such node gives the shortest path to goal (Dijkstra property).
-   * 
+   * Early termination: the final hop to the goal click is a free straight line,
+   * not a graph edge, so the path minimises graph cost + goal stub cost. The
+   * search keeps the best total seen and stops once the popped node's graph
+   * cost alone exceeds it (then no later node can improve).
+   *
    * @param {number[]} startLL - [lon, lat] of start point
    * @param {number[]} endLL - [lon, lat] of end point
    * @returns {number[][]|null} Path as [[lon,lat],...], or null if unreachable
@@ -351,14 +353,20 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
     }
 
     let goal = -1;
+    let bestTotal = Infinity;
     while (open.size) {
       const u = open.pop();
       if (done[u]) continue;
       done[u] = 1;
+      // The last hop to the goal click is a free straight line (not a graph
+      // edge), so the first goal-visible node popped is NOT necessarily the
+      // best total: keep the minimum of graph cost + stub cost, and stop once
+      // no remaining node can beat it (the heap pops in increasing cost order).
       if (seesGoal[u]) {
-        goal = u;
-        break;     // cheapest node that sees the target - Dijkstra guarantees shortest
+        const total = cost[u] + goalCost[u];
+        if (total < bestTotal) { bestTotal = total; goal = u; }
       }
+      if (cost[u] >= bestTotal) break;
       // Relax adjacent edges
       for (const [v, w] of adj[u]) {
         const nd = cost[u] + w;

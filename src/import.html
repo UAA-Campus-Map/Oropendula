@@ -33,7 +33,7 @@
       border: 2px dashed #999; border-radius: 8px; padding: 14px; text-align: center;
       color: #666; margin: 8px 0;
     }
-    #drop.over { border-color: #2980b; background: #eaf4fb; }
+    #drop.over { border-color: #2980b9; background: #eaf4fb; }
     #status { margin-top: 8px; color: #555; white-space: pre-wrap; }
     .hint { color: #888; font-size: 11px; margin: 8px 0 0; }
     hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
@@ -299,7 +299,7 @@
     map.on('load', () => {
       addFillLayer('imp-walls', '#c0392b', 1.6);
       addFillLayer('imp-walls-ghost', '#999999', 1);
-      addFillLayer('imp-footprint', '#2980b', 1.6);
+      addFillLayer('imp-footprint', '#2980b9', 1.6);
       addLabelLayer('imp-labels');
       // Exterior door dots (manual red, algorithm orange).
       if (!map.getSource('imp-exits')) map.addSource('imp-exits', { type: 'geojson', data: empty });
@@ -639,7 +639,7 @@
       datumMarker.setLngLat(datumLL);
 
       if (!handleMarker) {
-        handleMarker = new maplibregl.Marker({ color: '#2980b', draggable: true });
+        handleMarker = new maplibregl.Marker({ color: '#2980b9', draggable: true });
         handleMarker.on('dragend', () => {
           // Read the placement at event time: the marker outlives any number
           // of refreshes, so values captured at creation would go stale.

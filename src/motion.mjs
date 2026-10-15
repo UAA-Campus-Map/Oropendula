@@ -25,7 +25,7 @@
 export const TWO_PI = Math.PI * 2;
 const DEG = Math.PI / 180;
 
-/** Wrap an angle to (-PI, PI]. */
+/** Wrap an angle to [-PI, PI]. */
 export function wrapAngle(a) {
   a = a % TWO_PI;
   if (a > Math.PI) a -= TWO_PI;
@@ -33,7 +33,7 @@ export function wrapAngle(a) {
   return a;
 }
 
-/** Shortest signed rotation from `a` to `b`, in (-PI, PI]. */
+/** Shortest signed rotation from `a` to `b`, in [-PI, PI]. */
 export function shortestDelta(a, b) {
   return wrapAngle(b - a);
 }

@@ -685,9 +685,11 @@ export class ParticleFilter {
       if (w > bestW) { bestW = w; bestLon = this.lon[i]; bestLat = this.lat[i]; bestHeading = this.heading[i]; }
     }
     let denom = wsum;
+    let offPlan = false;
     if (wsum <= 0) {
       // Everything is off-plan: fall back to the raw weighted mean so there is
       // still a report (an anchor / GPS fix / the stall guard recovers).
+      offPlan = true;
       for (let i = 0; i < this.count; i++) {
         const w = this.weight[i];
         denom += w;
@@ -708,7 +710,9 @@ export class ParticleFilter {
     const mpd = metresPerDegree(lat);
     let varSum = 0;
     for (let i = 0; i < this.count; i++) {
-      if (snap && !this.isWalkable([this.lon[i], this.lat[i]])) continue;
+      // In the off-plan fallback every particle is off-plan, so the walkability
+      // filter would discard them all and report a false spread of 0.
+      if (snap && !offPlan && !this.isWalkable([this.lon[i], this.lat[i]])) continue;
       const e = (this.lon[i] - lon) * mpd.lon;
       const n = (this.lat[i] - lat) * mpd.lat;
       varSum += this.weight[i] * (e * e + n * n);

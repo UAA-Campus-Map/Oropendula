@@ -1293,9 +1293,11 @@
       document.getElementById('cal-height-value').hidden = ftin;
       if (ftin) {
         const cm = parseFloat(document.getElementById('cal-height-value').value) || 175;
-        const totalIn = cm / 2.54;
+        // Round to whole inches first, then split, so the inches field can
+        // never read "12" (e.g. 5 ft 12 in instead of 6 ft 0 in).
+        const totalIn = Math.round(cm / 2.54);
         document.getElementById('cal-height-ft').value = String(Math.floor(totalIn / 12));
-        document.getElementById('cal-height-in').value = String(Math.round(totalIn % 12));
+        document.getElementById('cal-height-in').value = String(totalIn % 12);
       }
       updateHeightPreview();
     });
@@ -2442,7 +2444,7 @@
           flush();
           steps.push({ kind: s.tier, from: s.fromFloor, to: s.toFloor, building: s.building,
                        ll: s.ll ?? polyMid(s.polyline),
-                       floorId: s.to ?? s.from ?? null });
+                       floorId: s.toFloor ?? s.fromFloor ?? null });
         }
       }
       flush();
@@ -2822,18 +2824,22 @@
       // dead-reckon away into the void.
       const PDR_OFFPLAN_MARGIN_M = 3;
       // One pass over the plans: as soon as any plan contains the point and
-      // says it is body-clear, the point is walkable; otherwise it is walkable
-      // only if it sits within the bounded off-plan margin of some plan.
+      // says it is body-clear, the point is walkable. If the point lies inside
+      // a plan but that plan says it is blocked (a wall), it stays blocked -
+      // the off-plan margin only applies when the point is outside EVERY
+      // plan's bounds (otherwise a wall next to a neighbouring plan's edge
+      // would be treated as open).
       const pdrWalkable = (ll) => {
-        let near = false;
+        let inAny = false, near = false;
         for (const gr of levelGraphs) {
           if (gr.inBounds(ll)) {
+            inAny = true;
             if (gr.isWalkable(ll)) return true;
           } else if (!near && gr.inBounds(ll, PDR_OFFPLAN_MARGIN_M)) {
             near = true;
           }
         }
-        return near;
+        return inAny ? false : near;
       };
       // Proximity buckets so the plan the point is actually near is searched
       // first (a plan the point is far outside must NOT be handed the full

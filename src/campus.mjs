@@ -1165,7 +1165,6 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
       const B = nodes[j];
       if (B.building === A.building) continue;
       if (B.kind !== 'door' || !atGround(B)) continue;
-      outdoorEdges++;
       let sec = null;
       const a = outdoorRuns[i], b = outdoorRuns[j];
       if (a && b) {
@@ -1175,7 +1174,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
       if (sec === null && (!outdoor || outdoor.segmentClear(A.ll, B.ll, 2))) {
         sec = (distLL(A.ll, B.ll, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT;
       }
-      if (sec !== null) link(i, j, sec, {kind: 'outdoor'});
+      if (sec !== null) { link(i, j, sec, {kind: 'outdoor'}); outdoorEdges++; }
     }
   }
 
