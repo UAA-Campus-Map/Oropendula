@@ -1653,13 +1653,16 @@
     // trim) so the slider never has to know about the relative-frame offset.
     let headingTrimDeg = 0;
     let baseHeadingBias = 0;
-    // Hallway compass-drift correction: while the walker goes straight down a
-    // clearly elongated (>9:1) corridor, nudge the heading bias toward the
-    // corridor axis; stop on an intentional turn. The correction is
-    // SESSION-ONLY - it deliberately does NOT touch localStorage, so a reload
-    // returns to the walk-calibrated bias.
+    // Hallway compass-drift correction: while the walker goes straight down an
+    // elongated (>6:1) corridor, nudge the heading bias toward the corridor
+    // axis; stop on an intentional turn. The gate was 9:1 (fired on ~8% of real
+    // walkable samples); 6:1 roughly doubles that (~14%) while still rejecting
+    // squarish rooms. maxM = 17 m caps each ray (measurable chord up to 34 m);
+    // the old 15 m cap could not reach 9:1 on a hallway wider than 3.3 m. The
+    // correction is SESSION-ONLY - it deliberately does NOT touch localStorage,
+    // so a reload returns to the walk-calibrated bias.
     const headingDriftCal = new HeadingDriftCalibrator();
-    const CORRIDOR_OPTS = { aspectRatio: 9, maxM: 15 };
+    const CORRIDOR_OPTS = { aspectRatio: 6, maxM: 17 };
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -1737,32 +1740,23 @@
       const levelGraphs = sameLevel.map((x) => x.f.navGraph);
       const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
       // Each raster stops at its own wall bbox (padded by one clearance);
-      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall,
-      // it is just the end of the plan, so the PDR filter must not treat it as
-      // one - otherwise the cloud piles up in a line along the bbox and the
-      // walker "can't get past it" (atria/open corridor ends and the gaps
-      // between separate plans). Inside a plan the walls still block; just past
-      // a plan's edge the space is unmapped and free, but only for a BOUNDED
-      // margin - beyond it the space counts as blocked so the estimate cannot
-      // dead-reckon away into the void.
-      const PDR_OFFPLAN_MARGIN_M = 3;
-      // One pass over the plans: as soon as any plan contains the point and
-      // says it is body-clear, the point is walkable. If the point lies inside
-      // a plan but that plan says it is blocked (a wall), it stays blocked -
-      // the off-plan margin only applies when the point is outside EVERY
-      // plan's bounds (otherwise a wall next to a neighbouring plan's edge
-      // would be treated as open).
+      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall, it
+      // is just the end of the mapped plan. Walls must still block INSIDE a
+      // plan, but outside every plan the space is unmapped - the walker may
+      // legitimately be there (outdoors), so PDR is NOT snapped back to the plan
+      // and may dead-reckon away freely. This is what lets outdoor PDR work:
+      // the cloud walks out of a door and keeps going, with no GPS fix needed.
       const pdrWalkable = (ll) => {
-        let inAny = false, near = false;
+        let inAny = false;
         for (const gr of levelGraphs) {
           if (gr.inBounds(ll)) {
             inAny = true;
             if (gr.isWalkable(ll)) return true;
-          } else if (!near && gr.inBounds(ll, PDR_OFFPLAN_MARGIN_M)) {
-            near = true;
           }
         }
-        return inAny ? false : near;
+        // Inside a plan but blocked by a wall -> blocked; outside every plan ->
+        // free (unmapped space, e.g. the outdoors).
+        return !inAny;
       };
       // Proximity buckets so the plan the point is actually near is searched
       // first (a plan the point is far outside must NOT be handed the full
@@ -1775,15 +1769,16 @@
         return GRAPH_MARGINS_M.length;
       };
       /**
-       * Nearest walkable point across the same-level plans. Short-circuits when
-       * the point is already walkable (then it IS the nearest), searches the
-       * nearest plan first, and caps each later search by the best distance
-       * found so far - so off-plan plans do a few rings, not the full radius.
-       * (The naive union spiralled every plan at radius 500: ~430 ms per
-       * "I'm Here" / floor change.)
+       * Nearest STRICTLY-walkable point across the same-level plans (real
+       * mapped space only - never the free off-plan void - so GPS-validity and
+       * recovery still snap onto the plan). Short-circuits when the point is
+       * already walkable, searches the nearest plan first, and caps each later
+       * search by the best distance found so far - so off-plan plans do a few
+       * rings, not the full radius. (The naive union spiralled every plan at
+       * radius 500: ~430 ms per "I'm Here" / floor change.)
        */
       const nearestWalkable = (ll, maxRadius) => {
-        if (pdrWalkable(ll)) return ll;
+        if (isWalkable(ll)) return ll;
         const cap0 = maxRadius ?? 60;
         const ordered = levelGraphs
           .map((gr) => ({ gr, rank: boundsRank(gr, ll) }))

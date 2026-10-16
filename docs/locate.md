@@ -91,7 +91,9 @@ the belief does *not* collapse on its own.)
 
 - `setFreeRoam(on, isAllowed?)` lifts the floor-plan constraint outdoors
   (skybridges, gaps between buildings, unmapped walkways), optionally constrained
-  by an `isAllowed(ll)` predicate so PDR cannot cut through a building.
+  by an `isAllowed(ll)` predicate so PDR cannot cut through a building. Note
+  that off-plan space is also free by default (see `pdrWalkable` in the app), so
+  outdoor PDR works even without free roam / GPS.
 - `points()` returns `{ lon, lat, w }` for the map overlay (`w` is relative
   weight); empty until seeded.
 - `version` is bumped whenever the cloud changes, so the renderer can skip

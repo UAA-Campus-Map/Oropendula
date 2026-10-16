@@ -567,6 +567,44 @@
     }
     .cal-seg button.active { background: var(--accent); color: #fff; }
     .cal-error { color: #dc2626; font-size: 13px; margin: 0; }
+    /* Toggle switch (anchor-based step refinement). */
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 6px 0;
+      cursor: pointer;
+    }
+    .switch {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: none;
+      width: 48px;
+      height: 28px;
+      margin: 0;
+      border-radius: 999px;
+      background: var(--line);
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s;
+    }
+    .switch:checked { background: var(--accent); }
+    .switch:checked::after { transform: translateX(20px); }
     .cal-callout {
       padding: 12px 14px;
       border-radius: 14px;
@@ -951,6 +989,15 @@
           <div class="info-section">
             <div class="info-label">Walking model</div>
             <div class="cal-row"><span>Step length</span><span id="steplen-current" class="cal-val">&mdash;</span></div>
+            <label class="switch-row">
+              <span>Refine step length from my pins</span>
+              <input type="checkbox" id="anchor-cal-toggle" class="switch" />
+            </label>
+            <p class="hint">Just place the pin (I'm Here) wherever you know your
+              position. The walk since your previous pin refines your step length
+              whenever that stretch was straight and on one floor — no dedicated
+              calibration walk needed.</p>
+            <div id="anchor-cal-status" class="info-value" style="color:var(--muted);font-size:0.75rem">Off</div>
           </div>
           <div class="info-label" style="margin-top:8px">Graph</div>
           <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
@@ -1039,6 +1086,7 @@
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
+    import { AnchorStepCalibrator } from './anchorcal.mjs';
     import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
@@ -1138,6 +1186,8 @@
     const autocalMixEl = document.getElementById('autocal-mix');
     const autocalDataEl = document.getElementById('autocal-data');
     const stepLenCurrentEl = document.getElementById('steplen-current');
+    const anchorCalToggle = document.getElementById('anchor-cal-toggle');
+    const anchorCalStatusEl = document.getElementById('anchor-cal-status');
 
     // Calibration modal elements.
     const calModal = document.getElementById('cal-modal');
@@ -1233,10 +1283,34 @@
       // Manual "I'm Here": the tap is treated as an almost-exact position, so
       // seed the cloud with a minimal spread (1 m) rather than the usual 3 m.
       locator.arbiter.anchor(ll, { spreadM: 1 });
+      // Feed the anchor-based step-length estimator (phase 1: straight legs).
+      anchorCal.addAnchor({
+        t: performance.now(), ll,
+        buildingId: locator.building.id, floorId: locator.floor.floorId,
+      }, segmentWalkable);
       headingDriftCal.reset();
       setCorridorBadge(false);
       renderEstimate(locator.arbiter.estimate(performance.now()));
       statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
+      updateAutocalUI();   // refresh the walking-model panel / step length
+    }
+
+    /**
+     * Is the straight span a->b on walkable ground (the strict level union)?
+     * Sampled at 0.1 m so it agrees with the router's clearance raster. Used by
+     * the anchor calibrator: two marks across a wall are never a straight walk.
+     */
+    function segmentWalkable(a, b) {
+      if (!locator || typeof locator.isWalkable !== 'function') return false;
+      const m = metresPerDegree((a[1] + b[1]) / 2);
+      const dx = (b[0] - a[0]) * m.lon, dy = (b[1] - a[1]) * m.lat;
+      const len = Math.hypot(dx, dy);
+      const steps = Math.max(1, Math.ceil(len / 0.1));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        if (!locator.isWalkable([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])) return false;
+      }
+      return true;
     }
 
     /**
@@ -1868,6 +1942,19 @@
       plausibility: 'reading implausible',
     };
 
+    /** Reject reasons for the anchor-based refinement (straight legs only). */
+    const ANCHOR_REJECT = {
+      floor: 'changed floor or building',
+      steps: 'too few steps between the marks',
+      distance: 'marks too close together',
+      pause: 'stopped mid-walk',
+      curve: 'not a straight walk',
+      turn: 'turned during the walk',
+      heading: 'marks not along the walk',
+      wall: 'straight line crosses a wall',
+      plausibility: 'reading implausible',
+    };
+
     /** Live rows that update on every fix/step, even before any sample. */
     function paintAutocalLive(live) {
       autocalGpsEl.textContent = live.fixAccuracyM == null ? '\u2014'
@@ -1906,6 +1993,26 @@
         if (stepLenCurrentEl.textContent !== len) stepLenCurrentEl.textContent = len;
       }
       paintAutocalLive(s.live);
+
+      // Anchor-based refinement (phase 1: straight legs between manual marks).
+      const a = anchorCal.stats();
+      if (anchorCalOn && a.calibrated) certified = true;
+      if (anchorCalStatusEl) {
+        let txt;
+        if (!anchorCalOn) txt = 'Off';
+        else if (a.calibrated) {
+          txt = `Refined: \u00b1${a.ci90RelPct.toFixed(1)}% over ${a.samples.total} legs`;
+        } else if (a.samples.total > 0) {
+          txt = `Refining\u2026 ${a.confidencePct.toFixed(0)}% \u00b7 ${a.samples.total} leg${a.samples.total === 1 ? '' : 's'}`;
+        } else if (a.sincePinSteps > 0) {
+          txt = `${a.sincePinSteps} step${a.sincePinSteps === 1 ? '' : 's'} since your last pin`;
+        } else if (a.lastAttempt && a.lastAttempt.ok === false) {
+          txt = `Last leg rejected: ${ANCHOR_REJECT[a.lastAttempt.reason] ?? a.lastAttempt.reason}`;
+        } else {
+          txt = 'Drop the pin wherever you know where you are';
+        }
+        if (anchorCalStatusEl.textContent !== txt) anchorCalStatusEl.textContent = txt;
+      }
 
       if (s.baseM == null && storedAutoCal) {
         autocalStatusEl.textContent =
@@ -1952,16 +2059,24 @@
         ? 'Step length calibrated (within \u00b16% at 90% confidence)'
         : 'Step length calibration - walk with GPS on';
 
-      if (s.calibrated && s.baseM != null
-          && (autoCalBaseApplied == null || Math.abs(s.baseM - autoCalBaseApplied) > 0.002)) {
-        stepModel.base = s.baseM;
-        autoCalBaseApplied = s.baseM;
+      // Apply the best certified base: when the toggle is on and the anchor
+      // calibrator is certified it wins; otherwise the GPS auto-calibration.
+      let applied = null;
+      if (anchorCalOn && a.calibrated && a.baseM != null) applied = { baseM: a.baseM };
+      else if (s.calibrated && s.baseM != null) applied = { baseM: s.baseM };
+      if (applied && (autoCalBaseApplied == null || Math.abs(applied.baseM - autoCalBaseApplied) > 0.002)) {
+        stepModel.base = applied.baseM;
+        autoCalBaseApplied = applied.baseM;
+        try { localStorage.setItem('pdr-step-base', String(applied.baseM)); } catch (e) { /* ignore */ }
+      }
+      // Remember the latest certified GPS calibration for the "calibrated
+      // earlier" display (independent of which source was just applied).
+      if (s.calibrated && s.baseM != null) {
         storedAutoCal = {
           baseM: s.baseM, ci90RelPct: s.ci90RelPct,
           confidencePct: s.confidencePct, t: Date.now(),
         };
         try {
-          localStorage.setItem('pdr-step-base', String(s.baseM));
           localStorage.setItem('pdr-step-auto', JSON.stringify(storedAutoCal));
         } catch (e) { /* ignore */ }
       }
@@ -2728,6 +2843,14 @@
       cadenceRef: stepModel.cadenceRef,
       cadenceGain: stepModel.gain,
     });
+    // Opportunistic step-length refinement from two manual "I'm Here" marks
+    // (anchorcal.mjs, phase 1: straight legs on one floor). Toggle-gated; only
+    // applied once certified, the same +-6% @ 90% gate as the GPS calibrator.
+    const anchorCal = new AnchorStepCalibrator({
+      cadenceRef: stepModel.cadenceRef,
+      cadenceGain: stepModel.gain,
+    });
+    let anchorCalOn = false;          // the "Refine from my placements" toggle
     let manualCalApplied = false;     // a known-distance calibration was applied
     let autoCalBaseApplied = null;    // last base the auto-calibrator wrote
     let storedAutoCal = null;         // last certified auto-calibration (persisted)
@@ -2736,13 +2859,17 @@
     // trim) so the slider never has to know about the relative-frame offset.
     let headingTrimDeg = 0;
     let baseHeadingBias = 0;
-    // Hallway compass-drift correction: while the walker goes straight down a
-    // clearly elongated (>9:1) corridor, nudge the heading bias toward the
-    // corridor axis; stop on an intentional turn. The correction is
-    // SESSION-ONLY - it deliberately does NOT touch localStorage, so a reload
-    // returns to the walk-calibrated bias.
+    // Hallway compass-drift correction: while the walker goes straight down an
+    // elongated (>6:1) corridor, nudge the heading bias toward the corridor
+    // axis; stop on an intentional turn. The gate was 9:1, which fired on only
+    // ~8% of real walkable samples; 6:1 roughly doubles that (measured ~14%)
+    // while still rejecting squarish rooms. maxM = 17 m caps each ray, so the
+    // measurable chord is up to 34 m - a 15 m cap could not reach 9:1 on a
+    // hallway wider than 3.3 m no matter how long it was (e.g. AASC 2nd floor).
+    // The correction is SESSION-ONLY - it deliberately does NOT touch
+    // localStorage, so a reload returns to the walk-calibrated bias.
     const headingDriftCal = new HeadingDriftCalibrator();
-    const CORRIDOR_OPTS = { aspectRatio: 9, maxM: 15 };
+    const CORRIDOR_OPTS = { aspectRatio: 6, maxM: 17 };
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -2759,7 +2886,16 @@
       if (!(storedAutoCal && storedAutoCal.confidencePct >= 90)) storedAutoCal = null;
       manualCalApplied = localStorage.getItem('pdr-step-manual') === '1'
         || (savedBase > 0 && !storedAutoCal);
+      anchorCalOn = localStorage.getItem('pdr-anchor-cal') === '1';
     } catch (e) { /* ignore */ }
+    anchorCal.setEnabled(anchorCalOn);
+    anchorCalToggle.checked = anchorCalOn;
+    anchorCalToggle.addEventListener('change', () => {
+      anchorCalOn = anchorCalToggle.checked;
+      anchorCal.setEnabled(anchorCalOn);
+      try { localStorage.setItem('pdr-anchor-cal', anchorCalOn ? '1' : '0'); } catch (e) { /* ignore */ }
+      updateAutocalUI();
+    });
     // Paint the button dot + panel from the stored calibration (if any).
     updateAutocalUI();
     // Paint the restored compass trim (the bias itself is applied in
@@ -2826,32 +2962,23 @@
       const levelGraphs = sameLevel.map((x) => x.f.navGraph);
       const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
       // Each raster stops at its own wall bbox (padded by one clearance);
-      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall,
-      // it is just the end of the plan, so the PDR filter must not treat it as
-      // one - otherwise the cloud piles up in a line along the bbox and the
-      // walker "can't get past it" (atria/open corridor ends and the gaps
-      // between separate plans). Inside a plan the walls still block; just past
-      // a plan's edge the space is unmapped and free, but only for a BOUNDED
-      // margin - beyond it the space counts as blocked so the estimate cannot
-      // dead-reckon away into the void.
-      const PDR_OFFPLAN_MARGIN_M = 3;
-      // One pass over the plans: as soon as any plan contains the point and
-      // says it is body-clear, the point is walkable. If the point lies inside
-      // a plan but that plan says it is blocked (a wall), it stays blocked -
-      // the off-plan margin only applies when the point is outside EVERY
-      // plan's bounds (otherwise a wall next to a neighbouring plan's edge
-      // would be treated as open).
+      // `isWalkable` is false everywhere beyond it. That edge is NOT a wall, it
+      // is just the end of the mapped plan. Walls must still block INSIDE a
+      // plan, but outside every plan the space is unmapped - the walker may
+      // legitimately be there (outdoors), so PDR is NOT snapped back to the plan
+      // and may dead-reckon away freely. This is what lets outdoor PDR work:
+      // the cloud walks out of a door and keeps going, with no GPS fix needed.
       const pdrWalkable = (ll) => {
-        let inAny = false, near = false;
+        let inAny = false;
         for (const gr of levelGraphs) {
           if (gr.inBounds(ll)) {
             inAny = true;
             if (gr.isWalkable(ll)) return true;
-          } else if (!near && gr.inBounds(ll, PDR_OFFPLAN_MARGIN_M)) {
-            near = true;
           }
         }
-        return inAny ? false : near;
+        // Inside a plan but blocked by a wall -> blocked; outside every plan ->
+        // free (unmapped space, e.g. the outdoors).
+        return !inAny;
       };
       // Proximity buckets so the plan the point is actually near is searched
       // first (a plan the point is far outside must NOT be handed the full
@@ -2864,15 +2991,16 @@
         return GRAPH_MARGINS_M.length;
       };
       /**
-       * Nearest walkable point across the same-level plans. Short-circuits when
-       * the point is already walkable (then it IS the nearest), searches the
-       * nearest plan first, and caps each later search by the best distance
-       * found so far - so off-plan plans do a few rings, not the full radius.
-       * (The naive union spiralled every plan at radius 500: ~430 ms per
-       * "I'm Here" / floor change.)
+       * Nearest STRICTLY-walkable point across the same-level plans (real
+       * mapped space only - never the free off-plan void - so GPS-validity and
+       * recovery still snap onto the plan). Short-circuits when the point is
+       * already walkable, searches the nearest plan first, and caps each later
+       * search by the best distance found so far - so off-plan plans do a few
+       * rings, not the full radius. (The naive union spiralled every plan at
+       * radius 500: ~430 ms per "I'm Here" / floor change.)
        */
       const nearestWalkable = (ll, maxRadius) => {
-        if (pdrWalkable(ll)) return ll;
+        if (isWalkable(ll)) return ll;
         const cap0 = maxRadius ?? 60;
         const ordered = levelGraphs
           .map((gr) => ({ gr, rank: boundsRank(gr, ll) }))
@@ -3259,6 +3387,9 @@
           updateAutocalUIThrottled(t);
           if (!locator || !motion.heading.hasHeading) return;
           const heading = motion.heading.heading;
+          // Step channel of the anchor-based refinement: the applied heading
+          // (bias + trim) at each step, for the straight-leg reconstruction.
+          anchorCal.addStep({ t, headingRad: heading, cadenceHz });
           locator.arbiter.setHeading(heading);
           const stepLengthM = stepModel.lengthFor(cadenceHz);
           locator.arbiter.step({ stepLengthM, headingRad: heading });

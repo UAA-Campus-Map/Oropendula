@@ -487,8 +487,13 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   The axis comes from **`corridorAxis`** (locate.mjs), a runtime ray-cast from
   the current PDR estimate over `navGraph.isWalkable`: it measures the full free
   chord ALONG a candidate bearing vs the full chord ACROSS it and demands
-  **aspect ratio ≥ 9:1** (`maxM = 15 m` bounds the widest detectable hallway at
-  `2·maxM/9 ≈ 3.3 m`). The sum-of-opposite-rays geometry makes the gate honest:
+  **aspect ratio ≥ 6:1** (`maxM = 17 m` caps each ray, so the measurable chord
+  is up to 34 m; the widest detectable hallway is `2·maxM/6 ≈ 5.7 m`). The gate
+  was 9:1 with `maxM = 15 m`, which fired on only ~8% of real walkable samples
+  and could not even reach 9:1 on a hallway wider than 3.3 m; 6:1 with the 17 m
+  ray roughly doubles the rate (~14%, measured over 2160 samples on all 18
+  floors) while still rejecting squarish rooms. The sum-of-opposite-rays geometry
+  makes the gate honest:
   open rooms/atria, wide lobbies, intersections (the cross-corridor blows up the
   across-run) and L-corners (both chords long) all return `null`, so the heading
   is only snapped where the axis is unambiguous. A coarse 24-direction sweep
@@ -520,13 +525,12 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
     Measured 777 ms -> 22 ms per `ensureLocator`, same nearest points.
   - **The filter gets a lenient `pdrWalkable`:** `navgraph.inBounds(ll)` tells
     "outside the raster" apart from "blocked by a wall", and `pdrWalkable(ll)`
-    is `inBounds ? isWalkable : inBounds(ll, PDR_OFFPLAN_MARGIN_M)`. Inside a
-    plan (or any same-level neighbour's plan) the walls still block; **just past
-    a plan's edge the unmapped space is free for a bounded margin** (3 m) so the
-    cloud follows the walker through a data-edge opening instead of piling on
-    the invisible bbox line - but beyond the margin it is blocked so the estimate
-    cannot dead-reckon away into the void. (`nearestWalkable` stays strict, so
-    recovery still snaps to real walkable space.)
+    is `inBounds ? isWalkable : true`. Inside a plan (or any same-level
+    neighbour's plan) the walls still block; **outside every plan the unmapped
+    space is free and unbounded**, so outdoor PDR works: the cloud walks out of
+    a door and keeps dead-reckoning, with no GPS fix needed. (`nearestWalkable`
+    stays strict - real mapped space only - so GPS-validity and recovery still
+    snap onto the plan.)
   - **A manual floor change re-binds the live locator**
     (`rebindLocatorToView`, wired to the +/- picker). The displayed floor is
     authoritative, exactly as for "I'm Here": stacked floors share a footprint,

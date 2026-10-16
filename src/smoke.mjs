@@ -23,6 +23,7 @@ import { convexHull, hullSamples, bestFitRigid } from './align.mjs';
 import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
 import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
+import { AnchorStepCalibrator } from './anchorcal.mjs';
 import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
 import { PositionArbiter } from './arbiter.mjs';
 
@@ -76,6 +77,7 @@ const ALL_CATEGORIES = [
   'align',       // floor auto-align (synthetic)
   'walkability', // navgraph isWalkable/nearestWalkable over real floors
   'pdr',         // particle filter (synthetic maps)
+  'corridor',    // hallway lock trigger rate on the real floors
   'arbiter',     // GPS/PDR arbiter (synthetic map)
   'portals',     // portal sanity + portal cache (real floors)
   'router',      // building router + exit reachability + tests 1-8
@@ -83,6 +85,7 @@ const ALL_CATEGORIES = [
   'multifloor',  // multi-floor routing, skybridges, connector anchors
   'motion',      // StepDetector / HeadingTracker / StepLengthModel
   'autocal',     // GPS step-length auto-calibration
+  'anchorcal',   // step-length refinement from manual anchors
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 if (process.argv.includes('--list') || process.argv.includes('-h') || process.argv.includes('--help')) {
@@ -103,7 +106,7 @@ if (_unknown.length) {
 const ACTIVE = _args.length ? new Set(_args) : new Set(ALL_CATEGORIES);
 const want = (c) => ACTIVE.has(c);
 // Which groups need the (slow) real-floor load: wall raster + portals.
-const NEEDS_FLOORS = ['walkability', 'portals', 'router', 'osm', 'multifloor'];
+const NEEDS_FLOORS = ['walkability', 'portals', 'router', 'osm', 'multifloor', 'corridor'];
 const needsFloors = NEEDS_FLOORS.some(want);
 if (_args.length) console.log(`Running categories: ${[...ACTIVE].join(', ')}\n`);
 
@@ -344,6 +347,44 @@ console.log('\nWalkability accessor:');
   const [wlon, wlat] = buildings[0].floors[0].obstacleLines[0][0];
   check('a point far outside is not walkable', g0.isWalkable([wlon + 1, wlat + 1]) === false);
   check('nearestWalkable returns null far from any floor', g0.nearestWalkable([wlon + 1, wlat + 1]) === null);
+}
+
+// ---------------------------------------------------------------------------
+// Hallway lock (corridorAxis) on the real floor plans. The aspect gate is what
+// decides how often the lock can fire; validate a lower gate fires it more
+// often across real walkable space without becoming trigger-happy.
+// ---------------------------------------------------------------------------
+if (want('corridor')) {
+console.log('\nHallway lock on real floors (corridorAxis trigger rate):');
+  const OLD_RATIO = 9, NEW_RATIO = 6, MAXM = 17, STRIDE_M = 2.5, CAP = 120;
+  let oldHit = 0, newHit = 0, total = 0;
+  for (const floors of floorBasis) {
+    for (const fb of floors) {
+      const g = fb.navGraph;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [[ax, ay], [bx, by]] of fb.lines) {
+        x0 = Math.min(x0, ax, bx); x1 = Math.max(x1, ax, bx);
+        y0 = Math.min(y0, ay, by); y1 = Math.max(y1, ay, by);
+      }
+      if (!isFinite(x0)) continue;
+      const mpd = metresPerDegree((y0 + y1) / 2);
+      const dLon = STRIDE_M / mpd.lon, dLat = STRIDE_M / mpd.lat;
+      let n = 0;
+      for (let lon = x0; lon <= x1 && n < CAP; lon += dLon) {
+        for (let lat = y0; lat <= y1 && n < CAP; lat += dLat) {
+          const p = [lon, lat];
+          if (!g.isWalkable(p)) continue;
+          n++; total++;
+          if (corridorAxis(g.isWalkable, p, { aspectRatio: OLD_RATIO, maxM: MAXM }) != null) oldHit++;
+          if (corridorAxis(g.isWalkable, p, { aspectRatio: NEW_RATIO, maxM: MAXM }) != null) newHit++;
+        }
+      }
+    }
+  }
+  const rateOld = oldHit / Math.max(1, total), rateNew = newHit / Math.max(1, total);
+  check('the lower aspect gate fires the hallway lock more often on real floors',
+    rateNew > rateOld * 1.3 && rateNew < 0.6,
+    `ratio ${OLD_RATIO}: ${(rateOld * 100).toFixed(1)}% -> ${NEW_RATIO}: ${(rateNew * 100).toFixed(1)}% (${total} samples)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -2321,4 +2362,130 @@ function feedCalWalk(cal, opts = {}) {
 }
 
 }
+
+// ---------------------------------------------------------------------------
+// Anchor step-length calibration (anchorcal.mjs) - synthetic straight walks.
+// ---------------------------------------------------------------------------
+if (want('anchorcal')) {
+console.log('\nAnchor step-length calibration (anchorcal.mjs):');
+  const lon0 = -149.83, lat0 = 61.19;
+  const mpd = metresPerDegree(lat0);
+  const toLL = (e, n) => [lon0 + e / mpd.lon, lat0 + n / mpd.lat];
+  const BASE = 0.72, CAD = 1.8, N = 30;
+  const dist = N * BASE;                          // 30 steps at the reference cadence
+  const anchor = (t, e, n, floor = '01') =>
+    ({ t, ll: toLL(e, n), buildingId: 'B', floorId: floor });
+  // One straight leg: mark A, walk N steps at `heading`, mark B `dist` along it.
+  const feed = (cal, { t0 = 0, heading = 0, n = N, gapMs = 0, gapAt = n,
+    floor = '01', clear = () => true } = {}) => {
+    cal.addAnchor(anchor(t0, 0, 0, floor), clear);
+    for (let i = 1; i <= n; i++) {
+      cal.addStep({ t: t0 + i * 1000 + (i > gapAt ? gapMs : 0), headingRad: heading, cadenceHz: CAD });
+    }
+    const B = anchor(t0 + n * 1000 + gapMs + 1,
+      Math.sin(heading) * dist, Math.cos(heading) * dist, floor);
+    return cal.addAnchor(B, clear);
+  };
+
+  // Straight legs from exact marks recover the base and certify.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    feed(cal, { t0: 0 });
+    feed(cal, { t0: 60000 });
+    const s = cal.stats();
+    check('straight anchor legs recover the base step length',
+      s.baseM != null && Math.abs(s.baseM - BASE) < 0.01,
+      s.baseM != null ? `${s.baseM.toFixed(3)} m` : 'none');
+    check('two straight legs certify (within +-6% @ 90%)',
+      s.calibrated, s.missing.join(',') || `conf ${s.confidencePct.toFixed(0)}%`);
+  }
+
+  // A curve (headings spanning 180 deg) is not a straight walk.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    cal.addAnchor(anchor(0, 0, 0), () => true);
+    for (let i = 1; i <= N; i++) {
+      cal.addStep({ t: i * 1000, headingRad: (i / N) * Math.PI, cadenceHz: CAD });
+    }
+    const r = cal.addAnchor(anchor(31000, 0, dist), () => true);
+    check('a curved walk is rejected', r === null && cal.lastAttempt.reason === 'curve',
+      cal.lastAttempt.reason);
+  }
+
+  // The mean heading must point from A to B.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    cal.addAnchor(anchor(0, 0, 0), () => true);
+    for (let i = 1; i <= N; i++) cal.addStep({ t: i * 1000, headingRad: Math.PI / 2, cadenceHz: CAD });
+    const r = cal.addAnchor(anchor(31000, 0, dist), () => true);   // walked east, B is north
+    check('a walk not pointing at the second mark is rejected',
+      r === null && cal.lastAttempt.reason === 'heading', cal.lastAttempt.reason);
+  }
+
+  // A straight span across a wall is not the walked distance.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    const r = feed(cal, { clear: () => false });
+    check('a mark pair across a wall is rejected',
+      r === null && cal.lastAttempt.reason === 'wall', cal.lastAttempt.reason);
+  }
+
+  // Changing floor between the marks is never a straight leg.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    cal.addAnchor(anchor(0, 0, 0, '01'), () => true);
+    for (let i = 1; i <= N; i++) cal.addStep({ t: i * 1000, headingRad: 0, cadenceHz: CAD });
+    const r = cal.addAnchor(anchor(31000, 0, dist, '02'), () => true);
+    check('a floor change is rejected', r === null && cal.lastAttempt.reason === 'floor',
+      cal.lastAttempt.reason);
+  }
+
+  // A pause inside the leg breaks it into two walks.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    const r = feed(cal, { gapMs: 2000, gapAt: 15 });
+    check('a pause mid-walk is rejected', r === null && cal.lastAttempt.reason === 'pause',
+      cal.lastAttempt.reason);
+  }
+
+  // Off by default: nothing is collected, and toggling off clears the leg.
+  {
+    const cal = new AnchorStepCalibrator();
+    check('the anchor calibrator is off by default',
+      !cal.enabled && cal.stats().status === 'idle' && cal.stats().samples.total === 0);
+    cal.setEnabled(true);
+    cal.addAnchor(anchor(0, 0, 0), () => true);
+    cal.addStep({ t: 1000, headingRad: 0, cadenceHz: CAD });
+    check('steps since the last pin are tracked',
+      cal.stats().sincePinSteps === 1, `${cal.stats().sincePinSteps}`);
+    cal.setEnabled(false);
+    check('turning it off discards the in-progress leg',
+      cal.lastAnchor === null && cal.steps.length === 0 && cal.stats().samples.total === 0);
+  }
+
+  // Opportunistic: a non-straight stretch is skipped, and the next straight
+  // stretch (starting from that pin) still calibrates.
+  {
+    const cal = new AnchorStepCalibrator();
+    cal.setEnabled(true);
+    // leg 1: curved -> rejected
+    cal.addAnchor(anchor(0, 0, 0), () => true);
+    for (let i = 1; i <= N; i++) {
+      cal.addStep({ t: i * 1000, headingRad: (i / N) * Math.PI, cadenceHz: CAD });
+    }
+    const r1 = cal.addAnchor(anchor(31000, 0, dist), () => true);
+    // leg 2: straight from the new pin -> accepted
+    const r2 = feed(cal, { t0: 40000 });
+    check('a non-straight stretch is skipped, the next straight one calibrates',
+      r1 === null && r2 != null && Math.abs(r2.baseM - BASE) < 0.01,
+      r2 != null ? `${r2.baseM.toFixed(3)} m` : 'none');
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : failures + ' FAILURES'}`);process.exit(failures === 0 ? 0 : 1);
