@@ -977,7 +977,14 @@
         <div class="cal-screen" data-screen="advanced" hidden>
           <div class="info-section">
             <div class="info-label">Heading</div>
-            <div id="compass" class="info-value">0°</div>
+            <div class="cal-row">
+              <span>Raw</span>
+              <span id="compass-raw" class="info-value">0°</span>
+            </div>
+            <div class="cal-row">
+              <span>Corrected</span>
+              <span id="compass" class="info-value">0°</span>
+            </div>
             <div class="cal-row">
               <span>Compass trim</span>
               <span id="heading-trim-val" class="cal-val">0°</span>
@@ -1170,6 +1177,7 @@
     const searchGo = document.getElementById('search-go');
 
     const compassDisplay = document.getElementById('compass');
+    const compassRawDisplay = document.getElementById('compass-raw');
     const statusText = document.getElementById('status-text');
     const graphStats = document.getElementById('graph-stats');
     const calStateIcon = document.getElementById('cal-state-icon');
@@ -1895,8 +1903,8 @@
 
     // --- transient notice (the #corridor-badge pill) ------------------------
     // The badge doubles as the app's transient notice: it shows the corridor
-    // lock while active, or a short message (e.g. a gyro-fusion offset change)
-    // that takes precedence until it expires.
+    // lock while active, or a short message that takes precedence until it
+    // expires.
     const CORRIDOR_BADGE_TEXT = 'Heading locked to hallway';
     let corridorLocked = false;
     let noticeText = null;
@@ -1916,23 +1924,6 @@
       renderCorridorBadge();
       clearTimeout(noticeTimer);
       noticeTimer = setTimeout(() => { noticeText = null; renderCorridorBadge(); }, ms);
-    }
-    // Gyro-compass fusion reports offset changes through `offsetRevision`;
-    // announce them so the user sees why the heading did not jump on a
-    // magnetic disturbance. Throttled so a sustained disturbance is one notice.
-    let lastOffsetRevision = 0;
-    let lastOffsetNoticeAt = -Infinity;
-    function announceCompassOffsetChange() {
-      if (!motion) return;
-      const h = motion.heading;
-      if (h.offsetRevision === lastOffsetRevision) return;
-      lastOffsetRevision = h.offsetRevision;
-      const deg = h.lastOffsetDelta * 180 / Math.PI;
-      const now = performance.now();
-      if (Math.abs(deg) >= 3 && now - lastOffsetNoticeAt > 1200) {
-        lastOffsetNoticeAt = now;
-        showNotice(`Compass offset ${deg >= 0 ? '+' : ''}${deg.toFixed(0)}\u00b0 (magnetic disturbance)`);
-      }
     }
 
     // --- hallway compass-drift correction -----------------------------------
@@ -3273,11 +3264,16 @@
           geometry: { type: 'LineString', coordinates: [[p.lng, p.lat], [lon, lat]] } }],
       });
     }
-    function updateHeadingDisplay(headingRad) {
+    function updateHeadingDisplay(headingRad, rawRad) {
       const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
       lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
       const txt = `${Math.round(deg)}°`;
       if (compassDisplay.textContent !== txt) compassDisplay.textContent = txt;
+      if (compassRawDisplay && rawRad != null) {
+        const rdeg = ((rawRad * 180 / Math.PI) + 360) % 360;
+        const rtxt = `${Math.round(rdeg)}°`;
+        if (compassRawDisplay.textContent !== rtxt) compassRawDisplay.textContent = rtxt;
+      }
       updateHeadingLine();
     }
 
@@ -3435,10 +3431,9 @@
           applyCorridorHeading(est, heading);
           renderEstimate(est);
         },
-        onHeading: ({ heading }) => {
+        onHeading: ({ heading, raw }) => {
           if (locator) locator.arbiter.setHeading(heading);
-          updateHeadingDisplay(heading);
-          announceCompassOffsetChange();
+          updateHeadingDisplay(heading, raw);
         },
         onStatus: ({ type }) => {
           if (type === 'permission-denied') {

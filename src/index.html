@@ -493,7 +493,14 @@
 
     <div class="info-section">
       <div class="info-label">Heading</div>
-      <div id="compass" class="info-value">0°</div>
+      <div class="cal-row">
+        <span>Raw</span>
+        <span id="compass-raw" class="info-value">0°</span>
+      </div>
+      <div class="cal-row">
+        <span>Corrected</span>
+        <span id="compass" class="info-value">0°</span>
+      </div>
       <div class="cal-row">
         <span>Compass trim</span>
         <span id="heading-trim-val" class="cal-val">0°</span>
@@ -584,6 +591,7 @@
     const sidebar = document.getElementById('sidebar');
     const sidebarHandle = document.getElementById('sidebar-handle');
     const compassDisplay = document.getElementById('compass');
+    const compassRawDisplay = document.getElementById('compass-raw');
     const statusText = document.getElementById('status-text');
     const graphStats = document.getElementById('graph-stats');
     const calStartPtBtn = document.getElementById('cal-start-pt');
@@ -2011,11 +2019,16 @@
           geometry: { type: 'LineString', coordinates: [[p.lng, p.lat], [lon, lat]] } }],
       });
     }
-    function updateHeadingDisplay(headingRad) {
+    function updateHeadingDisplay(headingRad, rawRad) {
       const deg = ((headingRad * 180 / Math.PI) + 360) % 360;
       lastHeadingDeg = deg;   // Follow + the 3D avatar's facing wedge
       const txt = `${Math.round(deg)}°`;
       if (compassDisplay.textContent !== txt) compassDisplay.textContent = txt;
+      if (compassRawDisplay && rawRad != null) {
+        const rdeg = ((rawRad * 180 / Math.PI) + 360) % 360;
+        const rtxt = `${Math.round(rdeg)}°`;
+        if (compassRawDisplay.textContent !== rtxt) compassRawDisplay.textContent = rtxt;
+      }
       updateHeadingLine();
     }
 
@@ -2170,7 +2183,7 @@
           applyCorridorHeading(est, heading);
           renderEstimate(est);
         },
-        onHeading: ({ heading }) => {
+        onHeading: ({ heading, raw }) => {
           // During the calibration walk, accumulate the heading so we can
           // measure the offset against the line's true bearing.
           if (calibration.active) {
@@ -2179,7 +2192,7 @@
             calibration.headingSamples++;
           }
           if (locator) locator.arbiter.setHeading(heading);
-          updateHeadingDisplay(heading);
+          updateHeadingDisplay(heading, raw);
         },
         onStatus: ({ type }) => {
           if (type === 'permission-denied') statusText.textContent = 'Motion sensor access denied';
