@@ -1859,6 +1859,93 @@ function runSteps(det, samples) {
   let biased = 0;
   for (let i = 0; i < 200; i++) biased = c.pushCompass(0, i * 20);
   check('compass bias calibration applies', Math.abs(wrapAngle(biased - 10 * Math.PI / 180)) < 0.02, `${(biased * 180 / Math.PI).toFixed(1)} deg`);
+
+  // Gyro-compass fusion: a compass jump the gyro does not corroborate is a
+  // magnetic disturbance - it moves the learned offset, not the heading.
+  {
+    const DEG = Math.PI / 180;
+    const h = new HeadingTracker({ tau: 0.3, gyroFuseGain: 0.8 });
+    for (let k = 0; k < 40; k++) h.pushCompass(0, k * 20);       // settle at north
+    for (let k = 0; k < 8; k++) h.pushGyro(0, 1000 + k * 20);    // gyro: no rotation
+    h.pushCompass(30 * DEG, 1170);                               // compass jumps 30 deg
+    check('a compass jump with no gyro is absorbed into the offset',
+      Math.abs(wrapAngle(h.autoOffset + 0.8 * 30 * DEG)) < 1 * DEG &&
+      Math.abs(wrapAngle(h.heading)) < 6 * DEG,
+      `offset ${(h.autoOffset / DEG).toFixed(1)} deg, heading ${(h.heading / DEG).toFixed(1)} deg`);
+    check('the offset update bumps a revision for the UI',
+      h.offsetRevision === 1 && Math.abs(h.lastOffsetDelta + 0.8 * 30 * DEG) < 1 * DEG,
+      `rev ${h.offsetRevision}, delta ${(h.lastOffsetDelta / DEG).toFixed(1)} deg`);
+
+    // A modest jump (below the old 10 deg gate) is caught by the lower threshold.
+    const t6 = new HeadingTracker({ tau: 0.3, gyroFuseGain: 0.8 });
+    for (let k = 0; k < 40; k++) t6.pushCompass(0, k * 20);
+    for (let k = 0; k < 4; k++) t6.pushGyro(0, 900 + k * 20);
+    t6.pushCompass(6 * DEG, 1000);
+    check('a modest compass drift is absorbed (lower threshold)',
+      Math.abs(wrapAngle(t6.autoOffset + 0.8 * 6 * DEG)) < 1 * DEG,
+      `${(t6.autoOffset / DEG).toFixed(1)} deg`);
+
+    // A slow, sustained drift (below any per-sample gate) is caught by the
+    // window: over ~5 s at 1 deg/s the accumulated mismatch reaches the gate.
+    const slow = new HeadingTracker({ tau: 0.3 });
+    let ts = 0;
+    for (let k = 0; k < 180; k++) {                    // ~9 s of travel
+      for (let g = 0; g < 3; g++) { ts += 1000 / 60; slow.pushGyro(0, ts); }
+      const drift = (1 * DEG) * (ts / 1000);           // compass drifts +1 deg/s
+      slow.pushCompass(drift, ts);
+    }
+    check('slow sustained compass drift is absorbed by the window',
+      slow.autoOffset < -3 * DEG && slow.offsetRevision > 0,
+      `offset ${(slow.autoOffset / DEG).toFixed(1)} deg, rev ${slow.offsetRevision}`);
+
+    // A real 90 deg turn with a lagging compass must not corrupt the offset:
+    // the window spans the turn, so the lag cancels out.
+    {
+      const tu = new HeadingTracker({ tau: 0.3 });
+      let tt = 0, trueH = 0;
+      const turnRate = (90 * DEG) / 1.2;                 // 90 deg over 1.2 s
+      for (let k = 0; k < 50; k++) { tt += 20; tu.pushGyro(0, tt); if (k % 2 === 0) tu.pushCompass(0, tt); }
+      for (let k = 0; k < 60; k++) {
+        tt += 20; trueH = wrapAngle(trueH + turnRate * 0.02);
+        tu.pushGyro(-turnRate, tt);
+        if (k % 2 === 0) tu.pushCompass(trueH - turnRate * 0.2, tt);   // 200 ms lag
+      }
+      for (let k = 0; k < 50; k++) { tt += 20; tu.pushGyro(0, tt); if (k % 2 === 0) tu.pushCompass(trueH, tt); }
+      check('a lagging compass through a real turn does not move the offset',
+        Math.abs(wrapAngle(tu.autoOffset)) < 5 * DEG, `${(tu.autoOffset / DEG).toFixed(1)} deg`);
+    }
+
+    // A real turn that the gyro DOES see must not touch the offset.
+    const t2 = new HeadingTracker({ tau: 0.3 });
+    for (let k = 0; k < 40; k++) t2.pushCompass(0, k * 20);
+    for (let k = 0; k < 8; k++) t2.pushGyro(-Math.PI, 1000 + k * 20);   // ~29 deg right turn
+    t2.pushCompass(30 * DEG, 1170);                              // compass agrees
+    check('a real turn (gyro matches) does not shift the offset',
+      Math.abs(wrapAngle(t2.autoOffset)) < 1 * DEG, `${(t2.autoOffset / DEG).toFixed(1)} deg`);
+
+    // No gyro samples at all -> never fuse, fall back to plain smoothing.
+    const t3 = new HeadingTracker({ tau: 0.3 });
+    for (let k = 0; k < 40; k++) t3.pushCompass(0, k * 20);
+    t3.pushCompass(30 * DEG, 900);
+    check('without gyro events the offset is left untouched', t3.autoOffset === 0);
+
+    // A small nudge below the jump threshold is not a disturbance.
+    const t4 = new HeadingTracker({ tau: 0.3 });
+    for (let k = 0; k < 40; k++) t4.pushCompass(0, k * 20);
+    t4.pushGyro(0, 900);
+    t4.pushCompass(3 * DEG, 920);
+    check('a small compass nudge is not treated as a disturbance', t4.autoOffset === 0);
+
+    // A transient glitch (jump then straight back) self-cancels in the offset.
+    const t5 = new HeadingTracker({ tau: 0.3, gyroFuseGain: 0.8 });
+    for (let k = 0; k < 40; k++) t5.pushCompass(0, k * 20);
+    for (let k = 0; k < 4; k++) t5.pushGyro(0, 900 + k * 20);
+    t5.pushCompass(20 * DEG, 1000);      // glitch up
+    for (let k = 0; k < 4; k++) t5.pushGyro(0, 1020 + k * 20);
+    t5.pushCompass(0, 1120);             // ...and straight back
+    check('a transient glitch self-cancels in the offset',
+      Math.abs(wrapAngle(t5.autoOffset)) < 1 * DEG, `${(t5.autoOffset / DEG).toFixed(1)} deg`);
+  }
 }
 
 {

@@ -778,7 +778,7 @@
     </div>
   </header>
 
-  <div id="corridor-badge" hidden>Heading locked to hallway</div>
+  <div id="corridor-badge" role="status" aria-live="polite" hidden>Heading locked to hallway</div>
 
   <div id="route-card" hidden>
     <button id="route-toggle" class="route-head" aria-expanded="false">
@@ -1893,11 +1893,49 @@
       setTimeout(() => openCalModal(), 600);
     }
 
-    // --- hallway compass-drift correction -----------------------------------
+    // --- transient notice (the #corridor-badge pill) ------------------------
+    // The badge doubles as the app's transient notice: it shows the corridor
+    // lock while active, or a short message (e.g. a gyro-fusion offset change)
+    // that takes precedence until it expires.
+    const CORRIDOR_BADGE_TEXT = 'Heading locked to hallway';
+    let corridorLocked = false;
+    let noticeText = null;
+    let noticeTimer = null;
+    function renderCorridorBadge() {
+      if (!corridorBadgeEl) return;
+      const text = noticeText ?? (corridorLocked ? CORRIDOR_BADGE_TEXT : null);
+      corridorBadgeEl.hidden = text == null;
+      if (text != null && corridorBadgeEl.textContent !== text) corridorBadgeEl.textContent = text;
+    }
     function setCorridorBadge(on) {
-      if (corridorBadgeEl) corridorBadgeEl.hidden = !on;
+      corridorLocked = !!on;
+      renderCorridorBadge();
+    }
+    function showNotice(msg, ms = 2600) {
+      noticeText = msg;
+      renderCorridorBadge();
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { noticeText = null; renderCorridorBadge(); }, ms);
+    }
+    // Gyro-compass fusion reports offset changes through `offsetRevision`;
+    // announce them so the user sees why the heading did not jump on a
+    // magnetic disturbance. Throttled so a sustained disturbance is one notice.
+    let lastOffsetRevision = 0;
+    let lastOffsetNoticeAt = -Infinity;
+    function announceCompassOffsetChange() {
+      if (!motion) return;
+      const h = motion.heading;
+      if (h.offsetRevision === lastOffsetRevision) return;
+      lastOffsetRevision = h.offsetRevision;
+      const deg = h.lastOffsetDelta * 180 / Math.PI;
+      const now = performance.now();
+      if (Math.abs(deg) >= 3 && now - lastOffsetNoticeAt > 1200) {
+        lastOffsetNoticeAt = now;
+        showNotice(`Compass offset ${deg >= 0 ? '+' : ''}${deg.toFixed(0)}\u00b0 (magnetic disturbance)`);
+      }
     }
 
+    // --- hallway compass-drift correction -----------------------------------
     /**
      * One step's worth of hallway heading correction. Only indoors on PDR: the
      * floor plan provides the corridor axis, the walker provides the direction.
@@ -3400,6 +3438,7 @@
         onHeading: ({ heading }) => {
           if (locator) locator.arbiter.setHeading(heading);
           updateHeadingDisplay(heading);
+          announceCompassOffsetChange();
         },
         onStatus: ({ type }) => {
           if (type === 'permission-denied') {

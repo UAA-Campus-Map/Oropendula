@@ -238,16 +238,37 @@ export class StepDetector {
  * integration is applied directly. This lets a transient magnetic disturbance
  * be ridden out on the gyro until the next trustworthy compass sample.
  *
+ * Gyro-compass fusion: because the gyro is the short-term rotation reference, a
+ * compass heading that moves while the gyro reports (almost) no rotation is a
+ * magnetic disturbance - the compass OFFSET changed. `pushCompass` then folds
+ * that movement into `autoOffset` so the heading does not jump.
+ *
  * `gyroSign` maps device-frame z rotation rate to our bearing convention:
  * with the phone screen-up, turning right (bearing increasing) is negative
  * rotation about device +z, so the default is -1.
  */
 export class HeadingTracker {
-  constructor({ bias = 0, tau = 0.3, gyroSign = -1, gyroBridgeAfterMs = 250 } = {}) {
+  constructor({ bias = 0, tau = 0.3, gyroSign = -1, gyroBridgeAfterMs = 250,
+    gyroFuse = true, gyroFuseGain = 0.8, compassJumpDeg = 5,
+    compassWindowMs = 6000, gyroSilenceMs = 500, gyroFuseMaxCorrDeg = 45 } = {}) {
     this.bias = bias;
     this.tau = tau;                       // smoothing time constant, seconds
     this.gyroSign = gyroSign;
     this.gyroBridgeAfterMs = gyroBridgeAfterMs;
+    // Windowed gyro-compass fusion. The gyro is the short-term rotation
+    // reference; over a bounded baseline we compare how far the COMPASS moved
+    // against how far the GYRO says the device rotated. A sustained difference
+    // is a compass-offset change (magnetic drift), not a real turn, so it is
+    // folded into a learned offset instead of moving the heading. A window of a
+    // few seconds catches slower drift than a per-sample gate: the accumulated
+    // drift grows with the window while the two-sample magnetometer noise does
+    // not.
+    this.gyroFuse = gyroFuse;
+    this.gyroFuseGain = gyroFuseGain;
+    this.compassJump = compassJumpDeg * DEG;   // accumulated mismatch to absorb
+    this.compassWindowMs = compassWindowMs;    // longest baseline (caps gyro bias)
+    this.gyroSilenceMs = gyroSilenceMs;        // no gyro this long -> re-anchor
+    this.gyroFuseMaxCorr = gyroFuseMaxCorrDeg * DEG;
     this.reset();
   }
 
@@ -259,6 +280,24 @@ export class HeadingTracker {
     this.absolute = false;
     this.lastCompassT = -Infinity;
     this.lastGyroT = null;
+    this.refCompass = null;    // raw compass at the fusion window's reference
+    this.refGyro = 0;          // gyro rotation accumulated since that reference
+    this.refT = -Infinity;     // reference time
+    this.autoOffset = 0;       // compass offset learned from the windowed fusion
+    this.offsetRevision = 0;   // bumps whenever the fused offset changes
+    this.lastOffsetDelta = 0;  // the offset change applied (radians)
+  }
+
+  /** (Re-)anchor the fusion window at a fresh compass sample. */
+  _anchorWindow(rawWrapped, t) {
+    this.refCompass = rawWrapped;
+    this.refGyro = 0;
+    this.refT = t;
+  }
+
+  /** Forget the gyro-learned compass offset (e.g. after a fresh calibration). */
+  resetAutoOffset() {
+    this.autoOffset = 0;
   }
 
   /**
@@ -271,7 +310,30 @@ export class HeadingTracker {
    * readout and heading arrow flicker.
    */
   pushCompass(raw, t, absolute = false) {
-    const corrected = wrapAngle(raw + this.bias);
+    const rawWrapped = wrapAngle(raw);
+    // Windowed gyro-compass fusion (see constructor).
+    if (this.gyroFuse) {
+      const gyroFresh = this.lastGyroT != null && (t - this.lastGyroT) <= this.gyroSilenceMs;
+      if (this.refCompass == null || !gyroFresh) {
+        this._anchorWindow(rawWrapped, t);              // first sample / gyro gap
+      } else {
+        const resid = wrapAngle(shortestDelta(this.refCompass, rawWrapped) - this.refGyro);
+        const windowMs = t - this.refT;
+        if (Math.abs(resid) >= this.compassJump && windowMs <= this.compassWindowMs) {
+          const corr = clamp(this.gyroFuseGain * resid,
+            -this.gyroFuseMaxCorr, this.gyroFuseMaxCorr);
+          this.autoOffset = wrapAngle(this.autoOffset - corr);
+          this.offsetRevision++;
+          this.lastOffsetDelta = -corr;
+          this._anchorWindow(rawWrapped, t);
+        } else if (windowMs > this.compassWindowMs) {
+          this._anchorWindow(rawWrapped, t);            // baseline expired
+        }
+        // else keep accumulating toward the threshold
+      }
+    }
+
+    const corrected = wrapAngle(rawWrapped + this.bias + this.autoOffset);
     const s = Math.sin(corrected), c = Math.cos(corrected);
     if (!this.hasHeading) {
       this.sin = s; this.cos = c;
@@ -297,13 +359,19 @@ export class HeadingTracker {
    * compass sample is older than `gyroBridgeAfterMs`.
    */
   pushGyro(gz, t) {
-    if (this.lastGyroT != null && this.hasHeading &&
-        (t - this.lastCompassT) > this.gyroBridgeAfterMs) {
+    if (this.lastGyroT != null) {
       const dt = (t - this.lastGyroT) / 1000;
       if (dt > 0 && dt < 0.5) {
-        this.heading = wrapAngle(this.heading + this.gyroSign * gz * dt);
-        this.sin = Math.sin(this.heading);
-        this.cos = Math.cos(this.heading);
+        const d = this.gyroSign * gz * dt;
+        // Accumulate the device's rotation since the fusion window's reference.
+        this.refGyro = wrapAngle(this.refGyro + d);
+        // Bridge a compass gap on the gyro (unchanged): only while the compass
+        // is stale, so a fresh compass is not perturbed by gyro jitter.
+        if (this.hasHeading && (t - this.lastCompassT) > this.gyroBridgeAfterMs) {
+          this.heading = wrapAngle(this.heading + d);
+          this.sin = Math.sin(this.heading);
+          this.cos = Math.cos(this.heading);
+        }
       }
     }
     this.lastGyroT = t;

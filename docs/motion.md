@@ -48,6 +48,32 @@ integration is applied directly but only when the compass is stale
 transient magnetic disturbance on the gyro until the next trustworthy compass
 sample. `gyroSign` maps device-frame rotation to our bearing convention.
 
+**Gyro-compass fusion (windowed).** The gyro is the short-term rotation
+reference, so a sustained mismatch between how far the *compass* moved and how
+far the *gyro* says the device rotated is a magnetic disturbance — the compass
+*offset* changed, not the device. `HeadingTracker` anchors a window at a compass
+sample and compares the accumulated compass movement against the accumulated
+gyro rotation. When the mismatch reaches `compassJumpDeg` (default **5°** —
+indoors a compass drifts just from the metal in a building, so the gate is
+deliberately low) it is folded into a learned `autoOffset` (gain
+`gyroFuseGain`, clamped per step) and the window re-anchors. The window
+(`compassWindowMs`, 6 s) is what catches *slow* drift: the accumulated drift
+grows with the window while the two-sample magnetometer noise does not, so it
+works down to roughly `compassJumpDeg / compassWindowMs` ≈ 1°/s. A real turn the
+gyro corroborates, a small nudge, or a gyro gap longer than `gyroSilenceMs`
+(which re-anchors without absorbing) all leave the offset untouched; a transient
+glitch self-cancels. **Real turns are not broken:** the window spans the turn, so
+a lagging compass (measured up to 300 ms) cancels out — validated by walking
+routes taken from real floor plans. The one sensitivity is a *systematic gyro
+scale error*: a turn genuinely under/over-reported by the gyro leaves a residual
+≈ scale_error × turn_angle, which leaks into the offset when turns repeat in one
+direction (≈2% error → a few degrees; ≈10% → ~18° over two 90° turns). Phone gyro
+scale error after OS calibration is typically well under that.
+Because the gain is <1 a disturbed step leaves a small residual, and the window
+never integrates gyro bias for longer than `compassWindowMs` (0.1°/s × 6 s ≈
+0.6°). The `autoOffset` is session-only; turning does not discard it (only the
+hallway lock's arming state resets).
+
 ### Step length (`StepLengthModel`)
 
 One unknown per person: the base step length at a reference cadence. The model

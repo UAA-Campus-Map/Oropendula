@@ -66,7 +66,8 @@ build step, no npm dependencies in the app itself.
   at event time — the marker outlives refreshes.
 - `motion.mjs` — PDR signal processing + sensor wiring. Pure, testable classes:
   `StepDetector` (scalar `|a|` high-pass + dynamic-envelope peak detection — see
-  below), `HeadingTracker` (circular compass smoothing + gyro bridging + bias),
+  below), `HeadingTracker` (circular compass smoothing + gyro bridging + bias +
+  gyro-compass offset fusion),
   `StepLengthModel` (cadence-scaled, clamped), `WalkCalibrator`.
   `createMotion(opts)` normalises DeviceMotion/DeviceOrientation (iOS needs a
   user-gesture permission and reports `webkitCompassHeading`). Headings are
