@@ -74,7 +74,15 @@ build step, no npm dependencies in the app itself.
 - `locate.mjs` — map-matching particle filter. `ParticleFilter` advances each
   particle one step per detected step and weights by `isWalkable`. `corridorAxis
   (isWalkable, ll)` ray-casts the free space to find a corridor bearing (null in
-  open rooms).
+  open rooms). `HeadingDriftCalibrator` is the older corridor-only drift trimmer
+  (kept for reference; the app now uses `CompassSnapper`).
+- `headingfield.mjs` — the floor's **allowed compass directions**. `buildPassages
+  (nodes, adj, doorsM, segments)` turns every navgraph edge and every interior
+  doorway into a bearing-bearing segment (built inside the navgraph worker);
+  `makeHeadingField(passages, {toM})` is the spatial index + bearing histogram
+  (`query(ll)` -> candidate bearings + a `confidence`); `CompassSnapper` snaps the
+  live heading to the nearest candidate and holds it until a deliberate turn.
+  See `docs/headingfield.md`.
 - `arbiter.mjs` — `PositionArbiter` runs GPS and PDR **at the same time** and
   picks the smaller uncertainty (GPS `coords.accuracy` vs a PDR error that grows
   with distance walked). Hysteresis stops flapping; a validity gate rejects

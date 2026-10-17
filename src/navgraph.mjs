@@ -18,6 +18,8 @@
  * nothing while still reporting success.
  */
 
+import { buildPassages, makeHeadingField } from './headingfield.mjs';
+
 /** Body clearance from walls, metres. */
 const CLEARANCE = 0.30;
 /** Bitmask cell size, metres. Smaller = safer, slower to build. */
@@ -100,7 +102,7 @@ function makeClearLine(blocked, W, H, OX, OY) {
   };
 }
 
-export function buildGraphState(walls) {
+export function buildGraphState(walls, doors = []) {
   const t0 = performance.now();
 
   // Normalise the three shapes callers have in circulation. Guessing wrong
@@ -277,7 +279,14 @@ export function buildGraphState(walls) {
   };
   if (missed) console.warn('navgraph: raster has holes', stats.rasterHoles);
 
-  return {origin, scale, OX, OY, W, H, nodes, adj, blocked, stats};
+  // --- allowed compass directions (the "heading field") -------------------
+  // Every graph edge and every interior doorway becomes a bearing-bearing
+  // segment. Built here so it rides the same worker pass as the graph; see
+  // headingfield.mjs for how it is queried and snapped.
+  const doorsM = (doors || []).map(toM);
+  const passages = buildPassages(nodes, adj, doorsM, segments);
+
+  return {origin, scale, OX, OY, W, H, nodes, adj, blocked, stats, passages};
 }
 
 /**
@@ -285,7 +294,7 @@ export function buildGraphState(walls) {
  * serializable state returned by buildGraphState. Output is exactly what
  * buildGraph() returns for the same walls.
  */
-export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked, stats}) {
+export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked, stats, passages}) {
   const mLon = scale.lon, mLat = scale.lat;
   const toM = ([lon, lat]) => [(lon - origin.lon) * mLon, (lat - origin.lat) * mLat];
   const toLL = ([x, y]) => [origin.lon + x / mLon, origin.lat + y / mLat];
@@ -524,13 +533,19 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
     return null;
   }
 
+  // Allowed compass directions (see headingfield.mjs). Rehydrated here as a
+  // spatial index over the serialised passages so queries stay cheap.
+  const headingField = passages && passages.length
+    ? makeHeadingField(passages, { toM })
+    : null;
+
   return {findPath, nodes, stats, isWalkable, nearestWalkable, inBounds,
-          attach, dijkstraFromAttach, distToAttach, pathToAttach};
+          attach, dijkstraFromAttach, distToAttach, pathToAttach, headingField};
 }
 
 /** Build the navigation graph for a set of wall centrelines (see buildGraphState). */
-export function buildGraph(walls) {
-  return graphFromState(buildGraphState(walls));
+export function buildGraph(walls, doors = []) {
+  return graphFromState(buildGraphState(walls, doors));
 }
 
 class MinHeap {

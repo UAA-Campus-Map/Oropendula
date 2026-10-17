@@ -553,6 +553,19 @@
       font-size: 15px;
     }
     .cal-input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+    /* Portal-preference dropdown in the Advanced panel. */
+    #portal-ignore-select {
+      min-height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-solid);
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #portal-ignore-select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
     .cal-seg { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
     .cal-seg button {
       padding: 0 14px;
@@ -986,12 +999,28 @@
               <span id="compass" class="info-value">0°</span>
             </div>
             <div class="cal-row">
+              <span>Snap</span>
+              <span id="heading-snap-val" class="cal-val">&mdash;</span>
+            </div>
+            <div class="cal-row">
+              <span>Route preference</span>
+              <select id="portal-ignore-select" aria-label="Route preference">
+                <option value="both" selected>both</option>
+                <option value="stairs">Stairs only</option>
+                <option value="elevator">elevators only</option>
+              </select>
+            </div>
+            <div class="cal-row">
               <span>Compass trim</span>
               <span id="heading-trim-val" class="cal-val">0°</span>
             </div>
             <input type="range" id="heading-trim" min="-45" max="45" step="1" value="0"
                    style="width:100%"
                    title="Drag to correct the compass heading (adds this offset to every reading)" />
+            <label class="switch-row">
+              <span>Snap heading to corridors</span>
+              <input type="checkbox" id="heading-snap-toggle" class="switch" checked />
+            </label>
           </div>
           <div class="info-section">
             <div class="info-label">Walking model</div>
@@ -1094,7 +1123,8 @@
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
     import { AnchorStepCalibrator } from './anchorcal.mjs';
-    import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
+    import { ParticleFilter } from './locate.mjs';
+    import { CompassSnapper } from './headingfield.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
@@ -1120,6 +1150,8 @@
     // State
     let campusRouter = null;
     let buildings = [];
+    let osmShapes = null;           // outdoor path shapes, reused to rebuild the router
+    let ignorePortals = 'both';     // advanced-panel portal preference
     let destinationMarker = null;
     let destinationFloor = null;   // floor the destination lands on (null = outdoors)
     let isDefiningPath = false;
@@ -1178,6 +1210,8 @@
 
     const compassDisplay = document.getElementById('compass');
     const compassRawDisplay = document.getElementById('compass-raw');
+    const headingSnapVal = document.getElementById('heading-snap-val');
+    const headingSnapToggle = document.getElementById('heading-snap-toggle');
     const statusText = document.getElementById('status-text');
     const graphStats = document.getElementById('graph-stats');
     const calStateIcon = document.getElementById('cal-state-icon');
@@ -1296,7 +1330,7 @@
         t: performance.now(), ll,
         buildingId: locator.building.id, floorId: locator.floor.floorId,
       }, segmentWalkable);
-      headingDriftCal.reset();
+      headingSnapper.reset();
       setCorridorBadge(false);
       renderEstimate(locator.arbiter.estimate(performance.now()));
       statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
@@ -1351,6 +1385,22 @@
     });
     headingTrimEl.addEventListener('change', () => {
       try { localStorage.setItem('pdr-heading-trim', String(headingTrimDeg)); } catch (e) { /* ignore */ }
+    });
+    // Compass snapping toggle (advanced panel).
+    headingSnapToggle.addEventListener('change', () => {
+      headingSnapEnabled = headingSnapToggle.checked;
+      if (!headingSnapEnabled) { headingSnapper.reset(); setCorridorBadge(false); updateSnapReadout(null); }
+    });
+    document.getElementById('portal-ignore-select').addEventListener('change', () => {
+      // The dropdown names the ONLY type to use; the router takes the type to
+      // IGNORE, so invert it ("Stairs only" -> ignore elevators).
+      const v = document.getElementById('portal-ignore-select').value;
+      ignorePortals = v === 'stairs' ? 'elevator' : v === 'elevator' ? 'stairs' : null;
+      if (!buildings.length) return;             // still loading; build uses it
+      campusRouter = buildCampusRouter(buildings, osmShapes, ignorePortals);
+      window.campusRouter = campusRouter;
+      lastReroute = null;                        // re-plan the live route now
+      rerouteFromEstimate();
     });
 
     // Progress shown in the bar at the bottom of the modal, per screen.
@@ -1926,28 +1976,39 @@
       noticeTimer = setTimeout(() => { noticeText = null; renderCorridorBadge(); }, ms);
     }
 
-    // --- hallway compass-drift correction -----------------------------------
+    // --- compass snapping ---------------------------------------------------
     /**
-     * One step's worth of hallway heading correction. Only indoors on PDR: the
-     * floor plan provides the corridor axis, the walker provides the direction.
-     * `wantsAxis` gates the ray-cast so it is only paid while arming/active.
+     * One step's worth of heading snapping. Only indoors on PDR: the floor's
+     * heading field (corridor axes + junction branches + doorways) provides the
+     * allowed directions; the walker's heading is pulled toward the nearest one
+     * and HELD until an obvious turn releases it.
      */
-    function applyCorridorHeading(est, headingRad) {
-      if (!locator || !est || est.source !== 'pdr' || locator.filter.freeRoam
-          || calWizard.armed || !positionSeeded) {
-        headingDriftCal.reset();
+    function applyHeadingSnap(est, headingRad) {
+      if (!headingSnapEnabled || !locator || !est || est.source !== 'pdr'
+          || locator.filter.freeRoam || calWizard.armed || !positionSeeded
+          || !locator.headingField) {
+        headingSnapper.reset();
         setCorridorBadge(false);
+        updateSnapReadout(null);
         return;
       }
-      const axis = headingDriftCal.wantsAxis
-        ? corridorAxis(locator.isWalkable, [est.lon, est.lat], CORRIDOR_OPTS)
-        : null;
-      const r = headingDriftCal.update(headingRad, axis);
+      const field = locator.headingField([est.lon, est.lat]);
+      const r = headingSnapper.update(headingRad, field);
       if (r.correctionRad) {
         baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
         applyHeadingTrim();
       }
-      setCorridorBadge(r.active);
+      setCorridorBadge(r.locked);
+      updateSnapReadout(r);
+    }
+
+    /** Advanced-panel readout: the direction currently snapped to, if any. */
+    function updateSnapReadout(r) {
+      if (!headingSnapVal) return;
+      const txt = (r && r.locked && r.dir != null)
+        ? `${(((r.dir * 180 / Math.PI) + 360) % 360).toFixed(0)}° · ${(r.confidence * 100).toFixed(0)}%`
+        : (r ? 'searching' : '\u2014');
+      if (headingSnapVal.textContent !== txt) headingSnapVal.textContent = txt;
     }
 
     // --- GPS auto-calibration state, indicator and panel --------------------
@@ -2888,17 +2949,14 @@
     // trim) so the slider never has to know about the relative-frame offset.
     let headingTrimDeg = 0;
     let baseHeadingBias = 0;
-    // Hallway compass-drift correction: while the walker goes straight down an
-    // elongated (>6:1) corridor, nudge the heading bias toward the corridor
-    // axis; stop on an intentional turn. The gate was 9:1, which fired on only
-    // ~8% of real walkable samples; 6:1 roughly doubles that (measured ~14%)
-    // while still rejecting squarish rooms. maxM = 17 m caps each ray, so the
-    // measurable chord is up to 34 m - a 15 m cap could not reach 9:1 on a
-    // hallway wider than 3.3 m no matter how long it was (e.g. AASC 2nd floor).
+    // Compass snapping: the floor's allowed directions (corridor axes, junction
+    // branches, doorways) come from the per-floor heading field built with the
+    // navgraph. The heading snaps to the nearest allowed direction and is held
+    // until a deliberate turn (detected from the heading stream) releases it.
     // The correction is SESSION-ONLY - it deliberately does NOT touch
     // localStorage, so a reload returns to the walk-calibrated bias.
-    const headingDriftCal = new HeadingDriftCalibrator();
-    const CORRIDOR_OPTS = { aspectRatio: 6, maxM: 17 };
+    const headingSnapper = new CompassSnapper();
+    let headingSnapEnabled = true;    // advanced-panel toggle
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -2990,6 +3048,16 @@
         .filter((x) => x.f);
       const levelGraphs = sameLevel.map((x) => x.f.navGraph);
       const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
+      // Allowed compass directions at a point: the heading fields of every
+      // plan at this level, best-confidence wins (the walker is in one plan).
+      const headingField = (ll) => {
+        let best = null;
+        for (const gr of levelGraphs) {
+          const q = gr.headingField ? gr.headingField.query(ll) : null;
+          if (q && (!best || q.confidence > best.confidence)) best = q;
+        }
+        return best;
+      };
       // Each raster stops at its own wall bbox (padded by one clearance);
       // `isWalkable` is false everywhere beyond it. That edge is NOT a wall, it
       // is just the end of the mapped plan. Walls must still block INSIDE a
@@ -3059,6 +3127,7 @@
       });
       locator = {
         building: pick.building, floor: pick.floor, filter, isWalkable,
+        headingField,
         arbiter: new PositionArbiter({
           filter,
           isWalkable,
@@ -3081,7 +3150,7 @@
       // cannot shrink the fresh cloud below it on the first step; it grows with
       // walked distance from there.
       locator.arbiter.setAccuracyFloor(REBIND_SEED_SPREAD_M * 2);
-      headingDriftCal.reset();
+      headingSnapper.reset();
       setCorridorBadge(false);
     }
 
@@ -3428,7 +3497,7 @@
           const stepLengthM = stepModel.lengthFor(cadenceHz);
           locator.arbiter.step({ stepLengthM, headingRad: heading });
           const est = locator.arbiter.estimate(t);
-          applyCorridorHeading(est, heading);
+          applyHeadingSnap(est, heading);
           renderEstimate(est);
         },
         onHeading: ({ heading, raw }) => {
@@ -3918,8 +3987,8 @@
       };
     }
     /** Build one floor's navGraph, off-thread when possible. */
-    function buildGraphAsync(walls) {
-      if (!navWorker) return Promise.resolve(buildGraph(walls));
+    function buildGraphAsync(walls, doors) {
+      if (!navWorker) return Promise.resolve(buildGraph(walls, doors));
       const id = ++navSeq;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -3929,9 +3998,9 @@
           resolve: (state) => { clearTimeout(timer); resolve(state); },
           reject: (err) => { clearTimeout(timer); reject(err); },
         });
-        try { navWorker.postMessage({ id, walls }); }
+        try { navWorker.postMessage({ id, walls, doors }); }
         catch (err) { navPending.delete(id); clearTimeout(timer); reject(err); }
-      }).then((state) => graphFromState(state), () => buildGraph(walls));
+      }).then((state) => graphFromState(state), () => buildGraph(walls, doors));
     }
 
     async function loadFloor(buildingConfig, floor, preloadedData) {
@@ -3984,7 +4053,7 @@
         })
         .filter(Boolean);
 
-      const navGraph = await buildGraphAsync(wallFeatureCollection);
+      const navGraph = await buildGraphAsync(wallFeatureCollection, doorPoints);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
       // clustering + flood fill). buildings-config.json caches them as DXF
       // points, so prefer that; fall back to extracting when absent.
@@ -4040,30 +4109,71 @@
       };
     }
 
-    // Stair (orange) and elevator (purple) markers, one shared source/layer.
-    // The source stays EMPTY at boot: an unrelated stairwell dot is noise.
-    // renderRoute fills it with one dot per vertical leg of the current route,
-    // so markers appear only for the connectors the path actually uses (in 2D,
-    // on either floor the leg joins).
+    // Draw a stair / elevator marker icon on a canvas: a white disc with a
+    // tier-coloured ring and glyph, so a connector reads as stairs vs elevator
+    // rather than a colour-coded dot. 2x for crispness (pixelRatio 2 below).
+    function makePortalIcon(kind) {
+      const size = 44;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const g = canvas.getContext('2d');
+      const cx = size / 2, cy = size / 2;
+      const color = TIER_COLORS[kind] ?? '#333333';
+      // White disc + coloured ring.
+      g.beginPath();
+      g.arc(cx, cy, 18, 0, Math.PI * 2);
+      g.fillStyle = '#ffffff';
+      g.fill();
+      g.lineWidth = 3;
+      g.strokeStyle = color;
+      g.stroke();
+      g.strokeStyle = color;
+      g.fillStyle = color;
+      g.lineWidth = 3;
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      if (kind === 'elevator') {
+        // Up + down arrows.
+        g.beginPath();
+        g.moveTo(17, 21); g.lineTo(27, 21); g.lineTo(22, 12); g.closePath(); g.fill();
+        g.beginPath();
+        g.moveTo(17, 23); g.lineTo(27, 23); g.lineTo(22, 32); g.closePath(); g.fill();
+      } else {
+        // A three-step staircase.
+        g.beginPath();
+        g.moveTo(13, 31); g.lineTo(19, 31); g.lineTo(19, 25);
+        g.lineTo(25, 25); g.lineTo(25, 19); g.lineTo(31, 19);
+        g.stroke();
+      }
+      return g.getImageData(0, 0, size, size);
+    }
+
+    // Stair and elevator markers, one shared source/layer. The source stays
+    // EMPTY at boot: an unrelated stairwell dot is noise. renderRoute fills it
+    // with one marker per vertical leg of the current route, so markers appear
+    // only for the connectors the path actually uses (in 2D, on either floor the
+    // leg joins).
     function createPortalLayer() {
       map.addSource('portals', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      for (const kind of ['elevator', 'stairs']) {
+        const id = `portal-${kind}`;
+        if (!map.hasImage(id)) map.addImage(id, makePortalIcon(kind), { pixelRatio: 2 });
+      }
       map.addLayer({
         id: 'portals',
-        type: 'circle',
+        type: 'symbol',
         source: 'portals',
-        paint: {
-          'circle-radius': 5,
-          'circle-color': [
-            'match', ['get', 'kind'],
-            'elevator', TIER_COLORS.elevator,
-            'stairs', TIER_COLORS.stairs,
-            '#333333',
-          ],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.5,
+        layout: {
+          'icon-image': ['match', ['get', 'kind'],
+            'elevator', 'portal-elevator',
+            'stairs', 'portal-stairs',
+            'portal-elevator'],
+          'icon-size': 1,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       });
       map.on('click', 'portals', (e) => {
@@ -4255,9 +4365,9 @@
         await new Promise((r) => setTimeout(r));
 
         // 3. OSM shapes (started in parallel above; likely already resolved).
-        const osmShapes = await osmPromise;
+        osmShapes = await osmPromise;
 
-        campusRouter = buildCampusRouter(buildings, osmShapes);
+        campusRouter = buildCampusRouter(buildings, osmShapes, ignorePortals);
         window.campusRouter = campusRouter;   // handy for console debugging
         createPortalLayer();
         populateFloorPicker(buildings);

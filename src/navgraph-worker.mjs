@@ -7,16 +7,18 @@
  * the main thread responsive during boot; `graphFromState()` rehydrates the
  * cheap query closures back on the main thread.
  *
- * Protocol: {id, walls} in, {id, state} out (the blocked raster is
+ * Protocol: {id, walls, doors} in, {id, state} out (the blocked raster is
  * TRANSFERRED, not copied), or {id, error} on failure.
  */
 import { buildGraphState } from './navgraph.mjs';
 
 self.onmessage = (e) => {
-  const { id, walls } = e.data;
+  const { id, walls, doors } = e.data;
   try {
-    const state = buildGraphState(walls);
-    self.postMessage({ id, state }, [state.blocked.buffer]);
+    const state = buildGraphState(walls, doors);
+    const transfer = [state.blocked.buffer];
+    if (state.passages && state.passages.buffer) transfer.push(state.passages.buffer);
+    self.postMessage({ id, state }, transfer);
   } catch (err) {
     self.postMessage({ id, error: String((err && err.message) || err) });
   }

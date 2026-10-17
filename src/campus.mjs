@@ -925,9 +925,11 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
  *   navGraph is the result of navgraph.mjs buildGraph() for that floor's walls.
  * @param {object[]} [outdoorShapes] - shapes on the PATHS layer (osm.mjs),
  *   polylines of [[lon,lat],...]; the walkable outdoor network.
+ * @param {string} [ignorePortals] - 'stairs' to ignore stair connectors,
+ *   'elevator' to ignore elevator connectors, or null/undefined to use both.
  * @returns {{route: Function, stats: object}}
  */
-export function buildCampusRouter(buildings, outdoorShapes = null) {
+export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals = null) {
   const t0 = performance.now();
 
   // --- link vertical connectors across floors ------------------------------
@@ -945,22 +947,22 @@ export function buildCampusRouter(buildings, outdoorShapes = null) {
     // floors) seeds from the first floor that has it, and later floors link to
     // that anchor by proximity. Looking up the ground-floor stop directly
     // crashed (`distLL(undefined, ...)`) when no such stop existed.
-    for (const p of ground.elevators ?? []) {
-      byKind.elevator.set(p.id, {
-        kind: 'elevator', building: b.id, anchor: p.ll,
-        stops: new Map([[ground.floorId, p.ll]]),
-      });
-    }
-    for (const p of ground.stairs ?? []) {
-      byKind.stairs.set(p.id, {
-        kind: 'stairs', building: b.id, anchor: p.ll,
-        stops: new Map([[ground.floorId, p.ll]]),
-      });
+    const activeKinds = ignorePortals === 'stairs' ? ['elevator'] :
+                        ignorePortals === 'elevator' ? ['stairs'] :
+                        ['elevator', 'stairs'];
+    for (const kind of activeKinds) {
+      const list = kind === 'elevator' ? ground.elevators : ground.stairs;
+      for (const p of list ?? []) {
+        byKind[kind].set(p.id, {
+          kind, building: b.id, anchor: p.ll,
+          stops: new Map([[ground.floorId, p.ll]]),
+        });
+      }
     }
     // attach stops from other floors to the nearest anchor of the same kind
     for (const f of b.floors) {
       if (f.floorId === b.groundFloor) continue;
-      for (const kind of ['elevator', 'stairs']) {
+      for (const kind of activeKinds) {
         const list = f[kind === 'elevator' ? 'elevators' : 'stairs'] ?? [];
         for (const p of list) {
           let best = null, bestD = Infinity;

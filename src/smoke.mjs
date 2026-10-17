@@ -25,6 +25,7 @@ import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngl
 import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
 import { AnchorStepCalibrator } from './anchorcal.mjs';
 import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
+import { buildPassages, makeHeadingField, CompassSnapper, distPi } from './headingfield.mjs';
 import { PositionArbiter } from './arbiter.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
@@ -86,6 +87,7 @@ const ALL_CATEGORIES = [
   'motion',      // StepDetector / HeadingTracker / StepLengthModel
   'autocal',     // GPS step-length auto-calibration
   'anchorcal',   // step-length refinement from manual anchors
+  'headingfield', // allowed compass directions + compass snapping
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 if (process.argv.includes('--list') || process.argv.includes('-h') || process.argv.includes('--help')) {
@@ -385,6 +387,43 @@ console.log('\nHallway lock on real floors (corridorAxis trigger rate):');
   check('the lower aspect gate fires the hallway lock more often on real floors',
     rateNew > rateOld * 1.3 && rateNew < 0.6,
     `ratio ${OLD_RATIO}: ${(rateOld * 100).toFixed(1)}% -> ${NEW_RATIO}: ${(rateNew * 100).toFixed(1)}% (${total} samples)`);
+
+  // The precomputed heading field (corridors + junctions + doorways) must exist
+  // on every real floor and offer allowed directions along real walkable space.
+  {
+    let floors = 0, withField = 0, tested = 0, snaps = 0;
+    for (const fbs of floorBasis) for (const fb of fbs) {
+      floors++;
+      if (fb.navGraph && fb.navGraph.headingField) withField++;
+    }
+    check('every real floor builds a heading field',
+      floors > 0 && withField === floors, `${withField}/${floors}`);
+    for (const fbs of floorBasis) for (const fb of fbs) {
+      const g = fb.navGraph;
+      if (!g || !g.headingField) continue;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [[ax, ay], [bx, by]] of fb.lines) {
+        x0 = Math.min(x0, ax, bx); x1 = Math.max(x1, ax, bx);
+        y0 = Math.min(y0, ay, by); y1 = Math.max(y1, ay, by);
+      }
+      if (!isFinite(x0)) continue;
+      const mpd = metresPerDegree((y0 + y1) / 2);
+      const dLon = STRIDE_M / mpd.lon, dLat = STRIDE_M / mpd.lat;
+      let n = 0;
+      for (let lon = x0; lon <= x1 && n < CAP; lon += dLon) {
+        for (let lat = y0; lat <= y1 && n < CAP; lat += dLat) {
+          const p = [lon, lat];
+          if (!g.isWalkable(p)) continue;
+          n++; tested++;
+          const q = g.headingField.query(p);
+          if (q && q.confidence >= 0.4) snaps++;
+        }
+      }
+    }
+    check('real walkable space offers allowed directions to snap to',
+      tested > 0 && snaps / Math.max(1, tested) > 0.15,
+      `${(100 * snaps / Math.max(1, tested)).toFixed(1)}% of ${tested}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1615,6 +1654,57 @@ console.log('\nConnector anchors without a ground-floor stop (synthetic):');
     !r.segments.some(s => s.tier === 'outdoor'));
 }
 
+if (want('multifloor')) {
+console.log('\nPortal preference (force stairs / elevators):');
+  const lat0 = 61.16, lon0 = -149.87;
+  const mpd = metresPerDegree(lat0);
+  const half = 6;
+  const dx = half / mpd.lon, dy = half / mpd.lat;
+  const square = (cx, cy) => {
+    const c = [[cx - dx, cy - dy], [cx + dx, cy - dy], [cx + dx, cy + dy], [cx - dx, cy + dy]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const mkCF = (floorId) => ({
+    floorId, ...square(lon0, lat0),
+    elevators: [{ id: 'e', ll: [lon0, lat0] }],
+    stairs: [{ id: 's', ll: [lon0, lat0] }],
+    exits: [],
+  });
+  const mkTall = (n) => ({
+    id: 'X', groundFloor: '01',
+    floors: Array.from({ length: n }, (_, i) => mkCF(String(i + 1).padStart(2, '0'))),
+  });
+  const rung = (n, ignore) => buildCampusRouter([mkTall(n)], null, ignore)
+    .route([lon0, lat0], [lon0, lat0], { startFloor: '01', endFloor: String(n).padStart(2, '0') });
+
+  // 2 floors: stairs (6 s) beat the elevator (15 + 4 s wait). Forcing the
+  // elevator must still deliver an elevator leg.
+  const rBoth = rung(2, null);
+  showRoute('X f01 -> X f02 (both available)', rBoth);
+  check('with both available the cheaper connector wins (stairs)',
+    !!rBoth && rBoth.segments.some(s => s.tier === 'stairs') &&
+    !rBoth.segments.some(s => s.tier === 'elevator'));
+  const rElev = rung(2, 'stairs');
+  showRoute('X f01 -> X f02 (elevator forced)', rElev);
+  check('ignoring stairs forces the elevator',
+    !!rElev && rElev.segments.some(s => s.tier === 'elevator') &&
+    !rElev.segments.some(s => s.tier === 'stairs'));
+
+  // 12 floors: the elevator (15 + 4/f) beats stairs (6/f) from 8 floors up.
+  // Forcing stairs must override that preference.
+  const rE = rung(12, null);
+  showRoute('X f01 -> X f12 (both available)', rE);
+  check('with both available the elevator wins on a tall building',
+    !!rE && rE.segments.some(s => s.tier === 'elevator') &&
+    !rE.segments.some(s => s.tier === 'stairs'));
+  const rS = rung(12, 'elevator');
+  showRoute('X f01 -> X f12 (stairs forced)', rS);
+  check('ignoring elevators forces stairs',
+    !!rS && rS.segments.some(s => s.tier === 'stairs') &&
+    !rS.segments.some(s => s.tier === 'elevator'));
+}
+
 // ---------------------------------------------------------------------------
 // PDR signal processing (motion.mjs) - synthetic gait, no sensors required.
 // ---------------------------------------------------------------------------
@@ -2501,6 +2591,95 @@ console.log('\nAnchor step-length calibration (anchorcal.mjs):');
     check('a non-straight stretch is skipped, the next straight one calibrates',
       r1 === null && r2 != null && Math.abs(r2.baseM - BASE) < 0.01,
       r2 != null ? `${r2.baseM.toFixed(3)} m` : 'none');
+  }
+}
+
+if (want('headingfield')) {
+  // The allowed-compass-directions map and the snapper. Synthetic geometry so
+  // it needs no floor load: metres ARE the coordinates (toM = identity).
+  const DEG = Math.PI / 180;
+  const ident = (ll) => ll;
+  /** Fully-connect points closer than `linkM` (mimics the visibility graph). */
+  const link = (points, linkM = 6) => {
+    const nodes = points.map((p) => [p[0], p[1]]);
+    const adj = nodes.map(() => []);
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const d = Math.hypot(nodes[j][0] - nodes[i][0], nodes[j][1] - nodes[i][1]);
+        if (d <= linkM) { adj[i].push([j, d]); adj[j].push([i, d]); }
+      }
+    }
+    return { nodes, adj };
+  };
+  const fieldOf = (g) => makeHeadingField(buildPassages(g.nodes, g.adj), { toM: ident });
+
+  // --- a straight, east-west hallway -> one dominant (undirected) axis ------
+  {
+    const corridor = fieldOf(link([[0, 0], [3, 0], [6, 0], [9, 0]]));
+    const q = corridor.query([4.5, 0]);
+    check('a corridor has one dominant east-west axis',
+      q && distPi(q.axis, Math.PI / 2) < 5 * DEG && q.confidence > 0.6,
+      q ? `${(q.axis / DEG).toFixed(0)} deg, conf ${q.confidence.toFixed(2)}` : 'null');
+  }
+
+  // --- a T junction -> two axes (the through corridor + the branch) ---------
+  {
+    const t = fieldOf(link([[0, 0], [3, 0], [6, 0], [9, 0], [6, 3], [6, 6]]));
+    const q = t.query([6, 0]);
+    const hasNorth = q && q.candidates.some((c) => distPi(c, 0) < 8 * DEG);
+    const hasEast = q && q.candidates.some((c) => distPi(c, Math.PI / 2) < 8 * DEG);
+    check('a T junction exposes both the through axis and the branch',
+      !!(hasNorth && hasEast),
+      q ? q.candidates.map((c) => (c / DEG).toFixed(0)).join(',') : 'null');
+  }
+
+  // --- an open room -> bearings fan out, no dominant direction --------------
+  {
+    const room = fieldOf(link([[0, 0], [4, 0], [0, 4], [4, 4], [2, 2]]));
+    const q = room.query([2, 2]);
+    check('an open room has no dominant direction to snap to',
+      !q || q.confidence < 0.4, q ? `conf ${q.confidence.toFixed(2)}` : 'null');
+  }
+
+  // --- a doorway points across the wall it sits in --------------------------
+  {
+    const passages = buildPassages([], [], [[5, 0]], [[[0, 0], [10, 0]]]);
+    const q = makeHeadingField(passages, { toM: ident }).query([5, 0.6]);
+    check('a doorway points across its wall (north, not along it)',
+      q && distPi(q.axis, 0) < 8 * DEG,
+      q ? `${(q.axis / DEG).toFixed(0)} deg` : 'null');
+  }
+
+  // --- the snapper: locks, pulls, releases on a turn, re-locks --------------
+  {
+    const corridorQ = fieldOf(link([[0, 0], [3, 0], [6, 0], [9, 0]])).query([4.5, 0]);
+    const s = new CompassSnapper();
+    const r1 = s.update(Math.PI / 2 + 6 * DEG, corridorQ);
+    check('the snapper locks to the nearest corridor direction',
+      r1.locked && r1.dir != null && distPi(r1.dir, Math.PI / 2) < 3 * DEG,
+      `${r1.reason}`);
+    check('the snapper pulls toward the locked axis (no hard quantise)',
+      r1.correctionRad < 0 && r1.correctionRad >= -3 * DEG,
+      `${(r1.correctionRad / DEG).toFixed(1)} deg`);
+
+    const tq = fieldOf(link([[0, 0], [3, 0], [6, 0], [9, 0], [6, 3], [6, 6]])).query([6, 0]);
+    const s2 = new CompassSnapper();
+    s2.update(Math.PI / 2, tq);                        // lock east
+    let last;
+    for (const h of [Math.PI / 2, Math.PI / 2 - 20 * DEG, Math.PI / 2 - 45 * DEG, 0]) {
+      last = s2.update(h, tq);                          // an obvious 90 deg turn
+    }
+    check('an obvious turn releases the lock', s2.locked === false, `${last.reason}`);
+    const after = s2.update(0, tq);
+    check('after the turn it re-locks to the new direction',
+      after.locked && distPi(after.dir, 0) < 3 * DEG, `${after.reason}`);
+  }
+
+  // --- no field (outdoors / wide lobby) -> never corrects -------------------
+  {
+    const s = new CompassSnapper();
+    const r = s.update(1.0, null);
+    check('with no field the snapper does nothing', !r.locked && r.correctionRad === 0);
   }
 }
 
