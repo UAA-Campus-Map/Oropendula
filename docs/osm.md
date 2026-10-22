@@ -30,6 +30,8 @@ own. The decode/slice logic is pure and unit-testable.
 
 **Filter for walking.** Only `path`, `minor_road`, `major_road` kinds are kept,
 and `access=private|no` ways are dropped — a "walkable" network, not every road.
+Each emitted shape also keeps its OSM `kind` and `name`; `campus.mjs` uses them
+to charge a heavy routing penalty for crossing named roads.
 
 ## Implementation notes
 

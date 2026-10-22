@@ -306,6 +306,10 @@ export function tilesToShapes(tiles, opts = {}) {
           bbox: [lon0, lat0, lon1, lat1],
           stroke: null, fill: null, width: null, closed: false,
           layer: 'PATHS',
+          // Kept so the router can identify roads to CROSS (Providence Dr,
+          // Piper St, Seawolf Dr, ...) and charge a heavy penalty for doing so.
+          kind: f.kind ?? null,
+          name: f.name ?? null,
           items: [{op: 'line', points}],
         });
         ways++;

@@ -697,8 +697,9 @@ export function buildObstacleIndex(llSegments, scale) {
    * through a building. Only a crossing exactly at an obstacle vertex is
    * ignored (where two fragments meet).
    */
-  const crosses = (ax, ay, bx, by, margin) => {
+  const crossings = (ax, ay, bx, by, margin) => {
     const query = ++stamp;
+    let count = 0;
     for (let cx = Math.floor(Math.min(ax, bx) / CELL); cx <= Math.floor(Math.max(ax, bx) / CELL); cx++) {
       for (let cy = Math.floor(Math.min(ay, by) / CELL); cy <= Math.floor(Math.max(ay, by) / CELL); cy++) {
         const list = grid.get(cx + ':' + cy);
@@ -720,14 +721,15 @@ export function buildObstacleIndex(llSegments, scale) {
           // Ignore only a crossing on an obstacle vertex, never inside a
           // short wall fragment.
           if (mCD < 0.02 || mCD > lenCD - 0.02) continue;
-          return true;
+          count++;
         }
       }
     }
-    return false;
+    return count;
   };
+  const crosses = (ax, ay, bx, by, margin) => crossings(ax, ay, bx, by, margin) > 0;
 
-  return {crosses, segCount: segs.length};
+  return {crosses, crossings, segCount: segs.length};
 }
 
 /**
@@ -773,12 +775,42 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
   };
   const addEdge = (a, b, metres) => {
     if (a === b || metres < 0.05) return;   // duplicated vertices at joins
-    adj[a].push([b, metres]);
-    adj[b].push([a, metres]);
+    const w = metres + roadPenaltyLL(nodes[a], nodes[b]);
+    adj[a].push([b, w]);
+    adj[b].push([a, w]);
   };
 
   let edgeCount = 0;
   const obstacles = obstacleSegs?.length ? buildObstacleIndex(obstacleSegs, scale) : null;
+
+  // Roads are walkable too, but CROSSING a named road (Providence Dr, Piper
+  // St, Seawolf Dr, ...) is penalised heavily in route selection so an indoor
+  // or skybridge route wins wherever one exists. Following a road (parallel /
+  // collinear) is not a crossing and stays free. Reported time/distance still
+  // come from the real geometry, so ETAs stay honest.
+  const ROAD_CROSS_PENALTY_M = 600;
+  // Internal campus ways that OSM draws as roads but that function as
+  // walkways. Crossing these should not force a long skybridge detour.
+  // Case-insensitive; add names here if another internal way needs the same.
+  const ROAD_PENALTY_EXEMPT = new Set(['spirit way', 'seawolf drive']);
+  const isPenalisedRoad = (s) => {
+    const isRoad = s.kind === 'major_road' ||
+      (s.kind === 'minor_road' && !!s.name);
+    if (!isRoad) return false;
+    return !ROAD_PENALTY_EXEMPT.has(String(s.name ?? '').trim().toLowerCase());
+  };
+  const roadSegs = [];
+  for (const s of shapes) {
+    if (!isPenalisedRoad(s)) continue;
+    for (const [a, b] of shapeSegments(s)) roadSegs.push([a, b]);
+  }
+  const roads = roadSegs.length ? buildObstacleIndex(roadSegs, scale) : null;
+  /** Metres-equivalent penalty for a segment crossing one or more roads. */
+  const roadPenaltyLL = (a, b) => roads
+    ? roads.crossings(a[0] * scale.lon, a[1] * scale.lat,
+                      b[0] * scale.lon, b[1] * scale.lat, 1.0) * ROAD_CROSS_PENALTY_M
+    : 0;
+
   /** True when the straight run node a -> node b passes through a building. */
   const edgeBlocked = (a, b) => {
     if (!obstacles) return false;
@@ -796,8 +828,7 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
         const metres = distLL(nodes[a], nodes[b], scale);
         if (metres < 0.05) continue;
         if (edgeBlocked(a, b)) continue;
-        adj[a].push([b, metres]);
-        adj[b].push([a, metres]);
+        addEdge(a, b, metres);
         edgeCount++;
       }
     }
@@ -897,8 +928,8 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
       edgeCount--;
       const mi = distLL(nodes[eBest.i], nodes[p], scale);
       const mj = distLL(nodes[p], nodes[eBest.j], scale);
-      if (mi >= 0.05) { adj[eBest.i].push([p, mi]); adj[p].push([eBest.i, mi]); edgeCount++; }
-      if (mj >= 0.05) { adj[p].push([eBest.j, mj]); adj[eBest.j].push([p, mj]); edgeCount++; }
+      if (mi >= 0.05) { addEdge(eBest.i, p, mi); edgeCount++; }
+      if (mj >= 0.05) { addEdge(p, eBest.j, mj); edgeCount++; }
     }
     return {node: p, metres: eBest.d, ll: qll};
   };
@@ -939,6 +970,7 @@ export function buildOutdoorGraph(shapes, lat = 61.19, obstacleSegs = null,
   return {
     nodes, nodeCount: nodes.length, edgeCount, scale,
     snap, snapClear, segmentClear, dijkstraFrom, pathOf,
+    roadPenaltyLL,
   };
 }
 
@@ -1101,10 +1133,17 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   const outdoor = outdoorShapes?.length
     ? buildOutdoorGraph(outdoorShapes, nodes[0]?.ll[1] ?? 61.19, obstacleSegs)
     : null;
+  /** Extra cost (metres-equivalent) for a polyline crossing named roads. */
+  const roadPenaltyFor = (poly) => {
+    if (!outdoor?.roadPenaltyLL || poly.length < 2) return 0;
+    let p = 0;
+    for (let i = 1; i < poly.length; i++) p += outdoor.roadPenaltyLL(poly[i - 1], poly[i]);
+    return p;
+  };
   const outdoorRuns = nodes.map(n => {
     if (!outdoor || n.kind !== 'door' || !atGround(n)) return null;
     const s = outdoor.snapClear(n.ll);
-    return s ? {snap: s, run: null} : null;
+    return s ? {snap: s, stubPenalty: roadPenaltyFor([n.ll, s.ll]), run: null} : null;
   });
   for (const r of outdoorRuns) if (r) r.run = outdoor.dijkstraFrom(r.snap.node);
 
@@ -1201,11 +1240,13 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       let sec = null;
       const a = outdoorRuns[i], b = outdoorRuns[j];
       if (a && b) {
-        const metres = a.run.dist[b.snap.node] + a.snap.metres + b.snap.metres;
+        const metres = a.run.dist[b.snap.node] + a.snap.metres + b.snap.metres +
+          (a.stubPenalty ?? 0) + (b.stubPenalty ?? 0);
         if (isFinite(metres)) { sec = (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT; outdoorNetworkEdges++; }
       }
       if (sec === null && (!outdoor || outdoor.segmentClear(A.ll, B.ll, 2))) {
-        sec = (distLL(A.ll, B.ll, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT;
+        const metres = distLL(A.ll, B.ll, scale) + roadPenaltyFor([A.ll, B.ll]);
+        sec = (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT;
       }
       if (sec !== null) { link(i, j, sec, {kind: 'outdoor'}); outdoorEdges++; }
     }
@@ -1282,13 +1323,15 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
         const p = outdoor.pathOf(from, r.snap.node);
         if (p) {
           const poly = [ll, ...p, n.ll];
-          res.set(i, {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
+          const metres = polyLength(poly, scale) + roadPenaltyFor(poly);
+          res.set(i, {sec: (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
           continue;
         }
       }
       if (outdoor && !outdoor.segmentClear(ll, n.ll, 2)) continue;
       const poly = [ll, n.ll];
-      res.set(i, {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
+      const metres = polyLength(poly, scale) + roadPenaltyFor(poly);
+      res.set(i, {sec: (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly});
     }
     return res;
   }
@@ -1412,7 +1455,8 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       const p = outdoor.pathOf(startRun, endSnap.node);
       if (p) {
         const poly = [startLL, ...p, endLL];
-        direct = {sec: (polyLength(poly, scale) / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly};
+        const metres = polyLength(poly, scale) + roadPenaltyFor(poly);
+        direct = {sec: (metres / OUTDOOR_SPEED) * OUTDOOR_COST_MULT, polyline: poly};
       }
     }
 

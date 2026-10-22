@@ -42,6 +42,16 @@ supplied, outdoor legs walk an actual path network (`osm.mjs`). Edges that would
 cut through a building (stale ways, tile-buffer stitching) are dropped against
 the buildings' wall segments, and very short stitches re-join split ways.
 
+**Crossing a road is heavily penalised.** OSM shapes carry their `kind`/`name`,
+so the outdoor graph can tell a footpath from a road. An edge that properly
+crosses a named `major_road`/`minor_road` (Providence Dr, Piper St, Seawolf Dr,
+...) gets `ROAD_CROSS_PENALTY_M` added to its routing weight; walking **along** a
+road (parallel/collinear) is free, and unnamed minor roads (parking aisles) are
+ignored. Internal campus ways that OSM still tags as roads are exempt by name
+(`ROAD_PENALTY_EXEMPT`, currently **Spirit Way** and **Seawolf Drive**). The
+penalty only affects route selection — reported metres/seconds are recomputed
+from the real geometry — so a skybridge/indoor route wins wherever one exists.
+
 **Why the portal cache.** Extraction (clustering + flood fill) costs seconds per
 building. `cachePortals` stores only DXF positions, so the cache is independent
 of a floor's placement and never goes stale when a plan is re-aligned.

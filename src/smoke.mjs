@@ -1362,6 +1362,42 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
 }
 if (want('osm')) {
 console.log('\nOSM paths cache:');
+  // Named-road crossings add a heavy cost; following a road or crossing an
+  // unnamed minor road (parking aisle) does not.
+  {
+    const lat = 61.19, m = metresPerDegree(lat);
+    const A = [-149.84, lat], B = [-149.839, lat];
+    const roadPts = [[-149.8395, lat - 0.001], [-149.8395, lat + 0.001]];
+    const cross = { layer: 'PATHS', kind: 'path', name: null,
+      items: [{ op: 'line', points: [A, B] }] };
+    const roadShape = (kind, name) => ({ layer: 'PATHS', kind, name,
+      items: [{ op: 'line', points: roadPts }] });
+    const cost = shape => {
+      const g = buildOutdoorGraph([cross, shape], lat, null);
+      return { w: g.dijkstraFrom(g.snap(A).node).dist[g.snap(B).node],
+               along: g.roadPenaltyLL(roadPts[0], roadPts[1]) };
+    };
+    const named = cost(roadShape('major_road', 'Providence Drive'));
+    const unnamedMinor = cost(roadShape('minor_road', null));
+    const piper = cost(roadShape('minor_road', 'Piper Street'));
+    const seawolf = cost(roadShape('minor_road', 'Seawolf Drive'));
+    const spirit = cost(roadShape('minor_road', 'Spirit Way'));
+    const plain = cost({ layer: 'PATHS', kind: 'path', name: null,
+      items: [{ op: 'line', points: roadPts }] });
+    check('crossing a named road adds a heavy outdoor cost',
+      named.w - plain.w >= 600, `${plain.w.toFixed(0)} -> ${named.w.toFixed(0)}`);
+    check('a named minor road (Piper Street) is penalised',
+      piper.w - plain.w >= 600, `${plain.w.toFixed(0)} -> ${piper.w.toFixed(0)}`);
+    check('Spirit Way is exempt from the crossing penalty',
+      spirit.w - plain.w < 1, `${plain.w.toFixed(0)} -> ${spirit.w.toFixed(0)}`);
+    check('Seawolf Drive is exempt from the crossing penalty',
+      seawolf.w - plain.w < 1, `${plain.w.toFixed(0)} -> ${seawolf.w.toFixed(0)}`);
+    check('walking along a named road is not penalised', named.along === 0);
+    check('an unnamed minor road is not penalised',
+      unnamedMinor.w - plain.w < 1,
+      `${plain.w.toFixed(0)} -> ${unnamedMinor.w.toFixed(0)}`);
+  }
+
   // CAD walls are split into sub-metre fragments. The obstacle index must see
   // them, or a straight outdoor leg can cut through a building whose exterior
   // wall is drawn in small pieces (the AS162 bug).
