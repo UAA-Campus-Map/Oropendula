@@ -33,6 +33,11 @@ Internal math is metric. The **UI shows Imperial**: `distanceText` (feet, miles
 past ¼ mile), `stepLenText` (inches), `speedText` (ft/s), and the height
 estimator defaults to **ft·in** with a cm toggle.
 
+Route ETAs use the user's calibrated step length for walking legs:
+`seconds × (0.72 m / stepModel.base)`. The router still chooses the route with
+its nominal speeds, so a calibration changes the reported time, not the path.
+Elevator/stairs time remains fixed.
+
 ### Floor ids
 
 Floor ids are strings. `floors.mjs` is the shared source of truth: `B1`/`B2`
@@ -72,6 +77,14 @@ The Deploy section also generates per-building navGraph bundles
 `buildings-config.json`; the bundle is gzipped and contains every floor in the
 building. Use the current-building button for one bundle or "Download all
 navgraph bundles" for a full regeneration.
+
+**Deploy diff:** "Check changes vs deployed" compares the draft config with the
+server's `buildings-config.json` (canonical JSON, by building id) and reports
+added/changed/removed buildings. "Download changed buildings (.zip)" builds a
+single ZIP with the full `buildings-config.json`, full `osm-paths.json` (or a
+freshly generated one if the cache is stale), and `.nvg.gz` files only for added
+or changed buildings. Unchanged bundles are not included. Floor JSONs are not
+put in this ZIP; upload those separately when a building's floor data is new.
 
 ## `import-progress.html` — import dashboard
 

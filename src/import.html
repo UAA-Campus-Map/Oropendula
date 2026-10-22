@@ -188,6 +188,13 @@
       <button id="downloadAllGraphsBtn">Download all navgraph bundles</button>
     </div>
     <div id="graph-status" class="hint"></div>
+    <div class="row">
+      <button id="diffBtn">Check changes vs deployed</button>
+    </div>
+    <div class="row">
+      <button id="downloadChangedBtn">Download changed buildings (.zip)</button>
+    </div>
+    <div id="diff-status" class="hint"></div>
     <div id="osm-status" class="hint"></div>
     <div class="row">
       <button id="reloadBtn" title="Discard local edits and reload buildings-config.json from the server">reload config from server</button>
@@ -206,6 +213,7 @@
     import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
     import { gzipBytes } from './navgraph-codec-io.mjs';
     import { navGraphInputs } from './navgraph-source.mjs';
+    import { makeZip } from './zip.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { hullSamples, bestFitTranslation } from './align.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
@@ -246,6 +254,9 @@
     let editMode = null;            // 'place-door' | 'remove-door' | 'place-bridge' | 'remove-bridge'
     let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
     let graphBusy = false;          // a bundle generation run is in progress
+    let diffBusy = false;           // deploy-diff calculation/generation
+    let generatedOsmJson = null;    // osm-paths.json produced this session
+    let diffState = null;           // last computed added/changed/removed
 
     const status = msg => { $('status').textContent = msg; };
 
@@ -1136,6 +1147,10 @@
           el.disabled = graphBusy;
           continue;
         }
+        if (el.id === 'diffBtn' || el.id === 'downloadChangedBtn') {
+          el.disabled = graphBusy || diffBusy;
+          continue;
+        }
         el.disabled = !enabled;
       }
       // "+ building" must work even with an empty config; "+ floor" needs only
@@ -1219,7 +1234,10 @@
       editMode = null;
       didInitialFit = false;
       portalsDirty = false;
+      generatedOsmJson = null;
+      diffState = null;
       refresh();
+      refreshDeployDiff();
       status(`reloaded ${config.length} building${config.length === 1 ? '' : 's'} from server`);
     }
 
@@ -1445,6 +1463,14 @@
       graphBusy = busy;
       $('downloadGraphBtn').disabled = busy;
       $('downloadAllGraphsBtn').disabled = busy;
+      $('diffBtn').disabled = busy;
+      $('downloadChangedBtn').disabled = busy;
+    }
+
+    function setDiffBusy(busy) {
+      diffBusy = busy;
+      $('diffBtn').disabled = busy || graphBusy;
+      $('downloadChangedBtn').disabled = busy || graphBusy;
     }
 
     function makeGraphWorker() {
@@ -1536,6 +1562,164 @@
         `${(out.gz.length / 1048576).toFixed(2)}MB gzip - upload it to the server`);
     }
 
+    // --- deploy diff + single ZIP artifact --------------------------------
+    function canonical(value) {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (value && typeof value === 'object') {
+        const out = {};
+        for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
+        return out;
+      }
+      return value;
+    }
+
+    const buildingKey = (b) => JSON.stringify(canonical(b));
+
+    async function computeDeployDiff() {
+      // Portal caches are part of a building's config entry. Fill any missing
+      // caches first so a cache-only difference is not reported as a changed
+      // building (and so the full config in the ZIP is complete).
+      await ensureAllPortals();
+      const deployed = await fetchDeployedConfig();
+      if (!deployed) {
+        diffState = null;
+        $('diff-status').textContent = 'Could not fetch the deployed buildings-config.json';
+        return null;
+      }
+      const oldById = new Map(deployed.map((b) => [b.id, b]));
+      const localIds = new Set(config.map((b) => b.id));
+      const added = [], changed = [], removed = [];
+      for (const b of config) {
+        if (!oldById.has(b.id)) added.push(b.id);
+        else if (buildingKey(b) !== buildingKey(oldById.get(b.id))) changed.push(b.id);
+      }
+      for (const b of deployed) if (!localIds.has(b.id)) removed.push(b.id);
+      diffState = {added, changed, removed, deployed};
+      return diffState;
+    }
+
+    function renderDeployDiff(diff) {
+      if (!diff) return;
+      const fmt = (list) => list.length ? list.join(', ') : 'none';
+      $('diff-status').textContent =
+        `+${diff.added.length} added · ~${diff.changed.length} changed · -${diff.removed.length} removed` +
+        ` — added: ${fmt(diff.added)}; changed: ${fmt(diff.changed)}; removed: ${fmt(diff.removed)}`;
+    }
+
+    async function refreshDeployDiff() {
+      if (diffBusy) return;
+      setDiffBusy(true);
+      try {
+        renderDeployDiff(await computeDeployDiff());
+      } catch (err) {
+        $('diff-status').textContent = `diff failed: ${err.message || err}`;
+      } finally {
+        setDiffBusy(false);
+      }
+    }
+
+    async function ensureAllPortals() {
+      for (const b of config) {
+        for (const f of b.floors ?? []) {
+          if (f.portals || !f.url) continue;
+          const data = await loadFloorData(b, f);
+          if (data) ensurePortals(b, f, data);
+        }
+      }
+    }
+
+    async function generateOsmPaths() {
+      const bbox = await buildOsmBBox();
+      if (!bbox) throw new Error('add a building before generating OSM paths');
+      const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox, zoom: OSM_ZOOM });
+      const out = { bbox, zoom: OSM_ZOOM, stats: osm.stats, shapes: osm.shapes };
+      generatedOsmJson = new TextEncoder().encode(JSON.stringify(out));
+      return {json: generatedOsmJson, bbox, stats: osm.stats, shapes: osm.shapes};
+    }
+
+    async function getOsmPathsForDeploy() {
+      const required = await buildOsmBBox();
+      if (!required) throw new Error('add a building before deploying OSM paths');
+      if (generatedOsmJson) {
+        try {
+          const cache = JSON.parse(new TextDecoder().decode(generatedOsmJson));
+          if (bboxCovers(cache.bbox, required)) return generatedOsmJson;
+        } catch { /* regenerate below */ }
+        generatedOsmJson = null;
+      }
+      try {
+        const res = await fetch(`/osm-paths.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const cache = await res.json();
+          if (bboxCovers(cache.bbox, required)) {
+            generatedOsmJson = new TextEncoder().encode(JSON.stringify(cache));
+            return generatedOsmJson;
+          }
+        }
+      } catch { /* generate below */ }
+      status('osm-paths cache is stale; generating a fresh one...');
+      const out = await generateOsmPaths();
+      return out.json;
+    }
+
+    function deployStamp() {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+    }
+
+    async function downloadChangedZip() {
+      const diff = await computeDeployDiff();
+      renderDeployDiff(diff);
+      if (!diff) return;
+      if (!diff.added.length && !diff.changed.length && !diff.removed.length) {
+        status('No building changes since the deployed config');
+        return;
+      }
+
+      setDiffBusy(true);
+      try {
+        await ensureAllPortals();
+        const affected = [...diff.added, ...diff.changed];
+        const nvgFiles = [];
+        for (const id of affected) {
+          const b = config.find((x) => x.id === id);
+          if (!b) continue;
+          status(`building ${id} navgraph for deploy...`);
+          const out = await generateBuildingBundle(b);
+          b.graphUrl = '/' + out.filename;
+          nvgFiles.push({name: out.filename, data: out.gz, compress: false});
+        }
+        persist();
+
+        const osmJson = await getOsmPathsForDeploy();
+        const configJson = new TextEncoder().encode(JSON.stringify(config, null, 2) + '\n');
+        const zip = await makeZip([
+          {name: 'buildings-config.json', data: configJson, compress: true},
+          {name: 'osm-paths.json', data: osmJson, compress: true},
+          ...nvgFiles,
+        ]);
+        downloadBytes(zip, `oropendula-deploy-${deployStamp()}.zip`, 'application/zip');
+        status(`downloaded deploy zip: +${diff.added.length}, ~${diff.changed.length}, ` +
+          `-${diff.removed.length}; ${nvgFiles.length} navgraph bundle(s)`);
+      } finally {
+        setDiffBusy(false);
+      }
+    }
+
+    function wireDiffButtons() {
+      wire('diffBtn', 'click', refreshDeployDiff);
+      wire('downloadChangedBtn', 'click', async () => {
+        if (diffBusy || graphBusy) return;
+        try {
+          await downloadChangedZip();
+          await refreshDeployDiff();
+        } catch (err) {
+          status(`deploy zip failed: ${err.message || err}`);
+        }
+      });
+    }
+
     function wireGraphButtons() {
       wire('downloadGraphBtn', 'click', async () => {
         if (graphBusy) return;
@@ -1582,13 +1766,7 @@
       // Make sure every configured floor carries its portal cache before we
       // serialize, so the app never has to extract them at load time.
       status('collecting portals...');
-      for (const b of config) {
-        for (const f of b.floors) {
-          if (f.portals || !f.url) continue;
-          const data = await loadFloorData(b, f);
-          if (data) ensurePortals(b, f, data);
-        }
-      }
+      await ensureAllPortals();
       persist();
       const blob = new Blob([JSON.stringify(config, null, 2) + '\n'], { type: 'application/json' });
       const a = document.createElement('a');
@@ -1602,24 +1780,14 @@
       // Manual generation: decode the z15 PMTiles tiles covering the campus
       // and download osm-paths.json, the exact schema gen-osm.mjs writes.
       status('preparing campus extents...');
-      const bbox = await buildOsmBBox();
-      if (!bbox) { status('add a building before generating OSM paths'); return; }
-      status('decoding OSM tiles...');
       try {
-        const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox, zoom: OSM_ZOOM });
-        const blob = new Blob(
-          [JSON.stringify({ bbox, zoom: OSM_ZOOM, stats: osm.stats, shapes: osm.shapes })],
-          { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'osm-paths.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
+        const out = await generateOsmPaths();
+        downloadBytes(out.json, 'osm-paths.json', 'application/json');
         // Treat it as the campus cache from here on; upload it to the server.
-        osmCacheBBox = bbox;
+        osmCacheBBox = out.bbox;
         refreshOsmStatus();
-        status(`downloaded osm-paths.json: ${osm.shapes.length} shapes, ` +
-          `${osm.stats.tiles} tiles - upload it to the server`);
+        status(`downloaded osm-paths.json: ${out.shapes.length} shapes, ` +
+          `${out.stats.tiles} tiles - upload it to the server`);
       } catch (e) {
         status(`OSM fetch failed: ${e.message || e}`);
       }
@@ -1637,7 +1805,8 @@
     drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], { mode: 'auto' }));
 
     wireGraphButtons();
-    loadInitial().then(() => refresh());
+    wireDiffButtons();
+    loadInitial().then(() => { refresh(); refreshDeployDiff(); });
 
     // Console debugging, same spirit as index.html's window.campusRouter.
     window.importTool = {

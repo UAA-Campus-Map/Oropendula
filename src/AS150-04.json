@@ -1,0 +1,7104 @@
+{
+  "building_code": "AS150",
+  "ID": "CPG",
+  "building_name": "Central Parking Garage",
+  "level": "04",
+  "page_size": [47657.2, 62289.08],
+  "origin": [-2294.04, -66.08],
+  "rotation": 0,
+  "likely_scanned": false,
+  "likely_vector_text": false,
+  "text_line_count": 78,
+  "shape_count": 381,
+  "shapes_filtered": 26,
+  "unsupported_entity_types": [],
+  "text_lines": [
+    {
+      "text": "RD",
+      "x": -969.27,
+      "y": 2518.82,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "0D",
+      "x": -1026.59,
+      "y": 2499.45,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": -755.09,
+      "y": 2519.62,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": -686.81,
+      "y": 2500.41,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 198.11,
+      "y": 2182.37,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 114.35,
+      "y": 2181.84,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 655.92,
+      "y": 2201.03,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 719.79,
+      "y": 2201.75,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 1610.55,
+      "y": 2201.03,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 1674.42,
+      "y": 2201.75,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 2220.11,
+      "y": 2182.37,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 2136.35,
+      "y": 2181.84,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 3185.12,
+      "y": 2090.7,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 3248.99,
+      "y": 2091.42,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "OD",
+      "x": 2595.98,
+      "y": 2202.05,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "RD",
+      "x": 2659.85,
+      "y": 2202.77,
+      "size": 12.0,
+      "font": "ARIALNAR",
+      "layer": "ROOF-DRAINS"
+    },
+    {
+      "text": "400S3",
+      "x": 2143.17,
+      "y": 2082.96,
+      "size": 24.0,
+      "font": "ARIALNAR",
+      "layer": "ROOM_NO"
+    },
+    {
+      "text": "400S1",
+      "x": 119.42,
+      "y": 2086.09,
+      "size": 24.0,
+      "font": "ARIALNAR",
+      "layer": "ROOM_NO"
+    },
+    {
+      "text": "401",
+      "x": 1129.5,
+      "y": 1737.2,
+      "size": 36.0,
+      "font": "ARIALNAR",
+      "layer": "ROOM_NO"
+    },
+    {
+      "text": "269",
+      "x": 1025.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "270",
+      "x": 1133.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "271",
+      "x": 1244.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "272",
+      "x": 1355.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "273",
+      "x": 1466.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "275",
+      "x": 1688.5,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "276",
+      "x": 1799.5,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "277",
+      "x": 1910.5,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "274",
+      "x": 1586.04,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "262",
+      "x": 90.54,
+      "y": 1835.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "261",
+      "x": 90.54,
+      "y": 1723.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "282",
+      "x": 1622.04,
+      "y": 1503.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "280",
+      "x": 2178.54,
+      "y": 1615.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "279",
+      "x": 2178.54,
+      "y": 1723.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "286",
+      "x": 1622.04,
+      "y": 1391.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "288",
+      "x": 1622.04,
+      "y": 1279.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "290",
+      "x": 1605.87,
+      "y": 1167.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "292",
+      "x": 1605.87,
+      "y": 1055.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "294",
+      "x": 1605.87,
+      "y": 943.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "296",
+      "x": 1605.87,
+      "y": 831.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "298",
+      "x": 1605.87,
+      "y": 719.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "300",
+      "x": 1605.87,
+      "y": 607.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "265",
+      "x": 574.36,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "267",
+      "x": 799.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "268",
+      "x": 910.15,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "259",
+      "x": 618.54,
+      "y": 1503.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "257",
+      "x": 618.54,
+      "y": 1391.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "255",
+      "x": 618.54,
+      "y": 1279.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "251",
+      "x": 618.54,
+      "y": 1055.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "249",
+      "x": 618.54,
+      "y": 943.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "247",
+      "x": 618.54,
+      "y": 831.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "245",
+      "x": 618.54,
+      "y": 719.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "243",
+      "x": 618.54,
+      "y": 607.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "242",
+      "x": 77.17,
+      "y": 607.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "244",
+      "x": 77.17,
+      "y": 719.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "246",
+      "x": 77.17,
+      "y": 831.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "248",
+      "x": 77.17,
+      "y": 943.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "250",
+      "x": 77.17,
+      "y": 1055.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "254",
+      "x": 77.17,
+      "y": 1279.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "260",
+      "x": 77.17,
+      "y": 1615.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "256",
+      "x": 77.17,
+      "y": 1391.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "258",
+      "x": 77.17,
+      "y": 1503.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "253",
+      "x": 618.54,
+      "y": 1167.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "252",
+      "x": 77.17,
+      "y": 1167.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "278",
+      "x": 2178.54,
+      "y": 1835.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "263",
+      "x": 352.36,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "264",
+      "x": 460.36,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "299",
+      "x": 2158.93,
+      "y": 607.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "297",
+      "x": 2158.93,
+      "y": 719.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "295",
+      "x": 2158.93,
+      "y": 831.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "293",
+      "x": 2158.93,
+      "y": 943.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "287",
+      "x": 2175.1,
+      "y": 1279.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "291",
+      "x": 2175.1,
+      "y": 1055.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "289",
+      "x": 2175.1,
+      "y": 1167.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "283",
+      "x": 2175.1,
+      "y": 1391.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "266",
+      "x": 685.9,
+      "y": 2038.52,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "281",
+      "x": 2178.54,
+      "y": 1503.44,
+      "size": 38.03,
+      "font": "ROMANS",
+      "layer": "A-ParkSlotNumbers"
+    },
+    {
+      "text": "AS122",
+      "x": -1370.64,
+      "y": 2411.3,
+      "size": 36.0,
+      "font": "ARIALNAR",
+      "layer": "ROOM_NO"
+    },
+    {
+      "text": "AS123",
+      "x": 3259.93,
+      "y": 1771.08,
+      "size": 36.0,
+      "font": "ARIALNAR",
+      "layer": "ROOM_NO"
+    }
+  ],
+  "shapes": [
+    {
+      "bbox": [228.0, 2148.0, 2124.0, 2148.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2148.0],
+            [2124.0, 2148.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1246.0, 252.0, 1246.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1246.0],
+            [20.0, 1246.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1246.0, 780.0, 1246.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1246.0],
+            [780.0, 1246.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1358.0, 252.0, 1358.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1358.0],
+            [20.0, 1358.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1470.0, 252.0, 1470.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1470.0],
+            [20.0, 1470.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1582.0, 780.0, 1582.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1582.0],
+            [780.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1470.0, 780.0, 1470.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1470.0],
+            [780.0, 1470.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1358.0, 780.0, 1358.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1358.0],
+            [780.0, 1358.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1470.0, 1812.0, 1470.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1470.0],
+            [1572.0, 1470.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1358.0, 1812.0, 1358.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1358.0],
+            [1572.0, 1358.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1246.0, 1812.0, 1246.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1246.0],
+            [1572.0, 1246.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1358.0, 2332.0, 1358.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1358.0],
+            [2332.0, 1358.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1470.0, 2332.0, 1470.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1470.0],
+            [2332.0, 1470.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1582.0, 2332.0, 1582.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1582.0],
+            [2332.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1246.0, 2332.0, 1246.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1246.0],
+            [2332.0, 1246.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1582.0, 1812.0, 1582.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1582.0],
+            [1572.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2981.48, 1918.92, 3713.48, 1918.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 1918.92],
+            [2981.48, 1918.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2981.48, 814.92, 2981.48, 1918.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2981.48, 1918.92],
+            [2981.48, 814.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2981.48, 814.92, 3173.48, 814.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2981.48, 814.92],
+            [3173.48, 814.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3173.48, 658.92, 3173.48, 814.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3173.48, 814.92],
+            [3173.48, 658.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3173.48, 658.92, 3461.48, 658.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3173.48, 658.92],
+            [3461.48, 658.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3461.48, 658.92, 3461.48, 814.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3461.48, 658.92],
+            [3461.48, 814.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3461.48, 814.92, 3713.48, 814.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3461.48, 814.92],
+            [3713.48, 814.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3713.48, 814.92, 3713.48, 2938.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 814.92],
+            [3713.48, 2938.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3713.48, 2938.92, 4289.48, 2938.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 2938.92],
+            [4289.48, 2938.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [4289.48, 2423.0, 4289.48, 2938.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [4289.48, 2938.92],
+            [4289.48, 2423.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [4289.48, 2423.0, 4625.48, 2423.0],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [4289.48, 2423.0],
+            [4625.48, 2423.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3713.48, 1798.92, 4289.48, 1798.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 1798.92],
+            [4289.48, 1798.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [4289.48, 454.92, 4289.48, 1918.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [4289.48, 1918.92],
+            [4289.48, 454.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [4289.48, 454.92, 4541.48, 454.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [4289.48, 454.92],
+            [4541.48, 454.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [4289.48, 1918.92, 4655.48, 1918.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [4289.48, 1918.92],
+            [4655.48, 1918.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3713.48, 1054.92, 4289.48, 1054.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 1054.92],
+            [4289.48, 1054.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1213.19, 953.05, -629.48, 2693.8],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1213.19, 2693.8],
+            [-629.48, 953.05]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1130.09, 785.19, -629.48, 953.05],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-629.48, 953.05],
+            [-1130.09, 785.19]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1152.98, 785.19, -1130.09, 853.46],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1130.09, 785.19],
+            [-1152.98, 853.46]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1346.4, 788.6, -1152.98, 853.46],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1152.98, 853.46],
+            [-1346.4, 788.6]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1346.4, 720.34, -1323.51, 788.6],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1346.4, 788.6],
+            [-1323.51, 720.34]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1710.34, 590.62, -1323.51, 720.34],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1323.51, 720.34],
+            [-1710.34, 590.62]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-2294.04, 590.62, -1710.34, 2331.37],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1710.34, 590.62],
+            [-2294.04, 2331.37]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-2294.04, 2331.37, -1747.93, 2514.49],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-2294.04, 2331.37],
+            [-1747.93, 2514.49]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1747.93, 2400.72, -1709.77, 2514.49],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1747.93, 2514.49],
+            [-1709.77, 2400.72]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1709.77, 2400.72, -1573.25, 2446.5],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1709.77, 2400.72],
+            [-1573.25, 2446.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1611.4, 2446.5, -1573.25, 2560.27],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1573.25, 2446.5],
+            [-1611.4, 2560.27]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1611.4, 2560.27, -1213.19, 2693.8],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1611.4, 2560.27],
+            [-1213.19, 2693.8]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [792.0, 1576.0, 1560.0, 1576.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [792.0, 1576.0],
+            [1560.0, 1576.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1806.0, 2332.0, 1806.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2332.0, 1806.0],
+            [2100.0, 1806.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1694.0, 2332.0, 1694.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2332.0, 1694.0],
+            [2100.0, 1694.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [780.0, 1588.0, 1572.0, 1588.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [780.0, 1588.0],
+            [1572.0, 1588.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1802.0, 252.0, 1802.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1802.0],
+            [20.0, 1802.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1694.0, 252.0, 1694.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1694.0],
+            [20.0, 1694.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [8.0, 236.0, 8.0, 1920.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [8.0, 236.0],
+            [8.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 565.0, 1572.0, 1588.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1572.0, 565.0],
+            [1572.0, 1588.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1560.0, 565.0, 1560.0, 1576.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1560.0, 565.0],
+            [1560.0, 1576.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [792.0, 565.0, 792.0, 1576.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [792.0, 565.0],
+            [792.0, 1576.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [780.0, 565.0, 780.0, 1588.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [780.0, 565.0],
+            [780.0, 1588.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2156.0, 2124.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2156.0],
+            [2124.0, 2156.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [456.0, 1904.0, 456.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [456.0, 2136.0],
+            [456.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [564.0, 1904.0, 564.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [564.0, 2136.0],
+            [564.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [897.0, 1904.0, 897.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [897.0, 2136.0],
+            [897.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [786.0, 1904.0, 786.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [786.0, 2136.0],
+            [786.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [675.0, 1904.0, 675.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [675.0, 2136.0],
+            [675.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1008.0, 1904.0, 1008.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1008.0, 2136.0],
+            [1008.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1566.0, 1904.0, 1566.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1566.0, 2136.0],
+            [1566.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1455.0, 1904.0, 1455.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1455.0, 2136.0],
+            [1455.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1344.0, 1904.0, 1344.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1344.0, 2136.0],
+            [1344.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1788.0, 1904.0, 1788.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1788.0, 2136.0],
+            [1788.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1896.0, 1904.0, 1896.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1896.0, 2136.0],
+            [1896.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1677.0, 1904.0, 1677.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1677.0, 2136.0],
+            [1677.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2344.0, 228.0, 2344.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2344.0, 228.0],
+            [2344.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1120.0, 1904.0, 1120.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1120.0, 2136.0],
+            [1120.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1232.0, 1904.0, 1232.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1232.0, 2136.0],
+            [1232.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1163.66, 2424.55, -1110.25, 2583.83],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1163.66, 2583.83],
+            [-1110.25, 2424.55]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2164.0, 228.0, 2370.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2164.0],
+            [228.0, 2370.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [102.0, 2164.0, 102.0, 2370.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.0, 2164.0],
+            [102.0, 2370.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2162.0, 2124.0, 2162.0],
+      "stroke": [1.0, 0.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HIDDEN",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2162.0],
+            [2124.0, 2162.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1218.0, 177.92, 1344.0, 177.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1218.0, 177.92],
+            [1344.0, 177.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [8.0, 236.0, 236.0, 236.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [8.0, 236.0],
+            [236.0, 236.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [236.0, 8.0, 236.0, 236.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [236.0, 236.0],
+            [236.0, 8.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [236.0, 8.0, 1218.0, 8.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [236.0, 8.0],
+            [1218.0, 8.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1344.0, 8.0, 2116.0, 8.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1344.0, 8.0],
+            [2116.0, 8.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2116.0, 8.0, 2116.0, 236.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2116.0, 8.0],
+            [2116.0, 236.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1560.0, 565.0, 1572.0, 565.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1560.0, 565.0],
+            [1572.0, 565.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [780.0, 565.0, 792.0, 565.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [780.0, 565.0],
+            [792.0, 565.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2116.0, 236.0, 2344.0, 236.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2116.0, 236.0],
+            [2344.0, 236.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2004.0, 1904.0, 2004.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2004.0, 2136.0],
+            [2004.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [348.0, 1904.0, 348.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [348.0, 2136.0],
+            [348.0, 1904.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2242.0, 1928.0, 2242.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2156.0],
+            [2242.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 1920.0, 2250.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 2164.0],
+            [2250.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 1920.0, 2344.0, 1920.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2344.0, 1920.0],
+            [2124.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1928.0, 2242.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 1928.0],
+            [2132.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2064.0, 2018.0, 2064.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2064.0, 2136.0],
+            [2064.0, 2018.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2064.0, 2090.0, 2124.0, 2090.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2090.0],
+            [2064.0, 2090.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2064.0, 2018.0, 2124.0, 2018.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2064.0, 2018.0],
+            [2124.0, 2018.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2156.0, 2242.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2156.0],
+            [2242.0, 2156.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2164.0, 2250.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2164.0],
+            [2250.0, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1928.0, 110.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2156.0],
+            [110.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [102.0, 1920.0, 102.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.0, 2164.0],
+            [102.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1928.0, 220.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 1928.0],
+            [220.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [8.0, 1920.0, 228.0, 1920.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 1920.0],
+            [8.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [288.0, 2018.0, 288.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [288.0, 2018.0],
+            [288.0, 2136.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [102.0, 2164.0, 228.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2164.0],
+            [102.0, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2156.0, 220.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2156.0],
+            [110.0, 2156.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [220.0, 1928.0, 220.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 1928.0],
+            [220.0, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2145.0, 228.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2164.0],
+            [228.0, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2145.0, 2124.0, 2164.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2164.0],
+            [2124.0, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1928.0, 2132.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 1928.0],
+            [2132.0, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2018.0, 288.0, 2018.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [288.0, 2018.0],
+            [228.0, 2018.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2090.0, 288.0, 2090.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2090.0],
+            [288.0, 2090.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [220.0, 2105.0, 228.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2105.0],
+            [228.0, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [220.0, 2145.0, 228.0, 2145.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2145.0],
+            [228.0, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [220.0, 2145.0, 220.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2145.0],
+            [220.0, 2156.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 1920.0, 228.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2105.0],
+            [228.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2105.0, 2132.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2105.0],
+            [2124.0, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2145.0, 2132.0, 2145.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2145.0],
+            [2124.0, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2145.0, 2132.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2145.0],
+            [2132.0, 2156.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 1920.0, 2124.0, 2105.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2105.0],
+            [2124.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1928.0, 110.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2156.0],
+            [110.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2242.0, 1928.0, 2242.0, 2156.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2156.0],
+            [2242.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1582.0, 252.0, 1582.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1582.0],
+            [20.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [252.0, 1582.0, 540.0, 1582.0],
+      "stroke": [1.0, 0.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HIDDEN",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1582.0],
+            [540.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1812.0, 1582.0, 2100.0, 1582.0],
+      "stroke": [1.0, 0.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HIDDEN",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1582.0],
+            [2100.0, 1582.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1224.0, -60.08, 1224.0, 171.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1224.0, -60.08],
+            [1224.0, 171.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1224.0, 171.92, 1338.0, 171.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1224.0, 171.92],
+            [1338.0, 171.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1338.0, -60.08, 1338.0, 171.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1338.0, 171.92],
+            [1338.0, -60.08]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1224.0, -60.08, 1338.0, -60.08],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1224.0, -60.08],
+            [1338.0, -60.08]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [108.0, 2378.0, 222.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [108.0, 2378.0],
+            [222.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2360.01, 3027.48, 2360.01],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [2250.0, 2360.01],
+            [3027.48, 2360.01]
+          ],
+          "closed": false
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2156.0, 3027.48, 2156.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [2250.0, 2156.0],
+            [3027.48, 2156.0]
+          ],
+          "closed": false
+        }
+      ]
+    },
+    {
+      "bbox": [2130.0, 2164.0, 2130.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.0, 2164.0],
+            [2130.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2244.0, 2164.0, 2244.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2244.0, 2164.0],
+            [2244.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.0, 2378.0, 2244.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2244.0, 2378.0],
+            [2130.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [222.0, 2164.0, 222.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [222.0, 2164.0],
+            [222.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [108.0, 2164.0, 108.0, 2378.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [108.0, 2164.0],
+            [108.0, 2378.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-842.57, 2345.35, 102.02, 2691.18],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.02, 2345.35],
+            [-842.57, 2691.18]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1163.66, 2583.83, -842.57, 2691.18],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-842.57, 2691.18],
+            [-1163.66, 2583.83]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1110.25, 2424.55, -840.43, 2515.03],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1110.25, 2424.55],
+            [-840.43, 2515.03]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-840.43, 2170.7, 102.0, 2515.03],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-840.43, 2515.03],
+            [102.0, 2170.7]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-852.62, 2143.18, 102.0, 2491.96],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.0, 2143.18],
+            [-852.62, 2491.96]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1111.7, 2405.08, -852.62, 2491.96],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-852.62, 2491.96],
+            [-1111.7, 2405.08]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1174.71, 2410.75, -1113.67, 2592.79],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1113.67, 2410.75],
+            [-1174.71, 2592.79]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1180.48, 2610.01, -848.91, 2720.87],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1180.48, 2610.01],
+            [-848.91, 2720.87]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-848.91, 2372.73, 102.0, 2720.87],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-848.91, 2720.87],
+            [102.0, 2372.73]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 2164.0, 228.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 2384.0],
+            [228.0, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1677.01, -3174.9, 4029.01, 2531.12],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "arc",
+          "center": [1176.0, -321.89],
+          "radius": 2853.01,
+          "start_angle": 70.59,
+          "end_angle": 109.41
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2164.0, 2124.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2164.0],
+            [2124.0, 2384.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 2384.0, 2250.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 2384.0],
+            [2250.0, 2384.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2372.01, 3027.48, 2372.01],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 2372.01],
+            [3027.48, 2372.01]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3025.48, 2393.0, 3025.48, 2724.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3025.48, 2393.0],
+            [3025.48, 2724.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3025.48, 2724.92, 3317.48, 2725.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3025.48, 2724.92],
+            [3317.48, 2725.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3315.48, 2494.92, 3713.48, 2494.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3315.48, 2494.92],
+            [3713.48, 2494.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3315.48, 2086.92, 3713.48, 2086.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3713.48, 2086.92],
+            [3315.48, 2086.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3025.48, 2061.0, 3025.48, 2392.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3025.48, 2061.0],
+            [3025.48, 2392.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2144.0, 3027.48, 2144.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3027.48, 2144.0],
+            [2250.0, 2144.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 1928.0, 2250.0, 2170.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 2170.0],
+            [2250.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 1928.0, 2352.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 1928.0],
+            [2352.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2352.0, 228.0, 2352.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2352.0, 1928.0],
+            [2352.0, 228.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 228.0, 2352.0, 228.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2352.0, 228.0],
+            [2124.0, 228.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2124.0, 0.0, 2124.0, 228.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 228.0],
+            [2124.0, 0.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1344.0, 0.0, 2124.0, 0.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2124.0, 0.0],
+            [1344.0, 0.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1344.0, -66.08, 1344.0, 177.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1344.0, 177.92],
+            [1344.0, -66.08]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1218.0, -66.08, 1344.0, -66.08],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1344.0, -66.08],
+            [1218.0, -66.08]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1218.0, -66.08, 1218.0, 177.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1218.0, -66.08],
+            [1218.0, 177.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 0.0, 1218.0, 0.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1218.0, 0.0],
+            [228.0, 0.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [228.0, 0.0, 228.0, 228.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 0.0],
+            [228.0, 228.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [0.0, 228.0, 228.0, 228.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [228.0, 228.0],
+            [0.0, 228.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [0.0, 228.0, 0.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [0.0, 228.0],
+            [0.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [0.0, 1928.0, 102.0, 1928.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [0.0, 1928.0],
+            [102.0, 1928.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [102.0, 1928.0, 102.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.0, 1928.0],
+            [102.0, 2384.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2164.0, 2250.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 2164.0],
+            [2250.0, 2384.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1744.43, -3326.38, 4096.43, 2514.48],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "arc",
+          "center": [1176.0, -405.95],
+          "radius": 2920.43,
+          "start_angle": 71.06,
+          "end_angle": 108.94
+        }
+      ]
+    },
+    {
+      "bbox": [-842.57, 2515.03, -840.43, 2691.18],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-842.57, 2691.18],
+            [-840.43, 2515.03]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [230.26, 2164.0, 698.68, 2362.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [230.26, 2362.39],
+            [698.68, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [698.68, 2164.0, 1176.0, 2341.74],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [698.68, 2164.0],
+            [1176.0, 2341.74]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1176.0, 2164.0, 1653.32, 2341.74],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1653.32, 2164.0],
+            [1176.0, 2341.74]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1653.32, 2164.0, 2121.74, 2362.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2121.74, 2362.39],
+            [1653.32, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1176.0, 2164.0, 1176.0, 2341.74],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1176.0, 2341.74],
+            [1176.0, 2164.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2250.0, 2165.02, 2638.74, 2262.73],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2250.0, 2262.73],
+            [2638.74, 2165.02]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2638.74, 2165.02, 3027.48, 2261.01],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2638.74, 2165.02],
+            [3027.48, 2261.01]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3033.48, 2069.0, 3309.48, 2228.09],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3309.48, 2069.0],
+            [3033.48, 2228.09]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3315.48, 2398.92, 3665.48, 2398.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3315.48, 2398.92],
+            [3665.48, 2398.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3665.48, 2086.92, 3665.48, 2398.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3665.48, 2398.92],
+            [3665.48, 2086.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3315.48, 2086.92, 3665.48, 2086.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3665.48, 2086.92],
+            [3315.48, 2086.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3315.48, 2063.0, 3315.48, 2086.92],
+      "stroke": [0.0, 0.247, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "FUT-CONT-6",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3315.48, 2086.92],
+            [3315.48, 2063.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3025.48, 2060.92, 3317.48, 2061.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3317.48, 2060.92],
+            [3025.48, 2061.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3025.48, 2061.0, 3025.48, 2724.92],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3025.48, 2061.0],
+            [3025.48, 2724.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3031.48, 2719.0, 3311.48, 2719.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3031.48, 2719.0],
+            [3311.48, 2719.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3309.48, 2392.92, 3659.48, 2392.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3309.48, 2392.92],
+            [3659.48, 2392.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3659.48, 2092.92, 3659.48, 2392.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3659.48, 2392.92],
+            [3659.48, 2092.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3309.48, 2092.92, 3659.48, 2092.92],
+      "stroke": [1.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "OTHER_BUILDING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3659.48, 2092.92],
+            [3309.48, 2092.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3311.48, 2067.0, 3311.48, 2719.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3311.48, 2067.0],
+            [3311.48, 2719.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3031.48, 2067.0, 3311.48, 2067.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3311.48, 2067.0],
+            [3031.48, 2067.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3031.48, 2067.0, 3031.48, 2719.0],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3031.48, 2067.0],
+            [3031.48, 2719.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [102.0, 2384.0, 228.0, 2384.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [102.0, 2384.0],
+            [228.0, 2384.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3317.48, 2060.92, 3317.48, 2725.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [3317.48, 2725.0],
+            [3317.48, 2060.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [3139.89, 2258.6, 3213.95, 2315.48],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": true,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [3139.89, 2315.48],
+            [3213.95, 2315.48],
+            [3213.95, 2258.6],
+            [3139.89, 2258.6]
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "bbox": [3139.89, 2383.74, 3213.95, 2440.62],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": true,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [3139.89, 2440.62],
+            [3213.95, 2440.62],
+            [3213.95, 2383.74],
+            [3139.89, 2383.74]
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "bbox": [3135.89, 2379.74, 3217.95, 2444.62],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": true,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [3135.89, 2444.62],
+            [3217.95, 2444.62],
+            [3217.95, 2379.74],
+            [3135.89, 2379.74]
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "bbox": [3135.89, 2254.6, 3217.95, 2319.48],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": true,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [3135.89, 2319.48],
+            [3217.95, 2319.48],
+            [3217.95, 2254.6],
+            [3135.89, 2254.6]
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "bbox": [1336.0, 104.92, 1346.0, 128.92],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": true,
+      "layer": "SCUPPER",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [1336.0, 104.92],
+            [1346.0, 104.92],
+            [1346.0, 128.92],
+            [1336.0, 128.92]
+          ],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "bbox": [2332.0, 236.0, 2332.0, 1920.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2332.0, 236.0],
+            [2332.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 236.0, 20.0, 1920.0],
+      "stroke": [0.0, 0.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "WALL",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [20.0, 236.0],
+            [20.0, 1920.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [288.0, 2136.0, 2064.0, 2136.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "CONCRETE",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [288.0, 2136.0],
+            [2064.0, 2136.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2128.93, 2164.0, 2187.0, 2240.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2187.0, 2164.0],
+            [2128.93, 2240.39]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2187.0, 2164.0, 2245.07, 2240.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2187.0, 2164.0],
+            [2245.07, 2240.39]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [106.93, 2164.0, 165.0, 2240.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [165.0, 2164.0],
+            [106.93, 2240.39]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [165.0, 2164.0, 223.07, 2240.39],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [165.0, 2164.0],
+            [223.07, 2240.39]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-973.8, 2497.96, -961.8, 2509.96],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-967.8, 2503.96],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [-1007.12, 2486.46, -995.12, 2498.46],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-1001.12, 2492.46],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [-1006.12, 2487.46, -996.12, 2497.46],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-1001.12, 2492.46],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [-738.73, 2503.15, -728.73, 2513.15],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-733.73, 2508.15],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [-739.73, 2502.15, -727.73, 2514.15],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-733.73, 2508.15],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [-707.53, 2490.22, -695.53, 2502.22],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [-701.53, 2496.22],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [185.48, 2168.75, 197.48, 2180.75],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [191.48, 2174.75],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [133.16, 2166.74, 143.16, 2176.74],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [138.16, 2171.74],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [132.16, 2165.74, 144.16, 2177.74],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [138.16, 2171.74],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [708.57, 2183.56, 720.57, 2195.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [714.57, 2189.56],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [672.28, 2184.56, 682.28, 2194.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [677.28, 2189.56],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [671.28, 2183.56, 683.28, 2195.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [677.28, 2189.56],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [1626.91, 2184.56, 1636.91, 2194.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [1631.91, 2189.56],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [1625.91, 2183.56, 1637.91, 2195.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [1631.91, 2189.56],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [1663.2, 2183.56, 1675.2, 2195.56],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [1669.2, 2189.56],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [2207.48, 2168.75, 2219.48, 2180.75],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2213.48, 2174.75],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [2154.16, 2165.74, 2166.16, 2177.74],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2160.16, 2171.74],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [2155.16, 2166.74, 2165.16, 2176.74],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2160.16, 2171.74],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [3200.48, 2073.23, 3212.48, 2085.23],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [3206.48, 2079.23],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [3201.48, 2074.23, 3211.48, 2084.23],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [3206.48, 2079.23],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [3237.77, 2073.23, 3249.77, 2085.23],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [3243.77, 2079.23],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [2611.34, 2184.58, 2623.34, 2196.58],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2617.34, 2190.58],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [2612.34, 2185.58, 2622.34, 2195.58],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2617.34, 2190.58],
+          "radius": 5.0
+        }
+      ]
+    },
+    {
+      "bbox": [2648.63, 2184.58, 2660.63, 2196.58],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "ROOF-DRAINS",
+      "items": [
+        {
+          "op": "circle",
+          "center": [2654.63, 2190.58],
+          "radius": 6.0
+        }
+      ]
+    },
+    {
+      "bbox": [1224.0, 31.52, 1336.0, 116.92],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1224.0, 31.52],
+            [1336.0, 116.92]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1117.88, 2259.14, -70.11, 2540.46],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [-70.11, 2259.14],
+            [-840.09, 2540.46],
+            [-1117.88, 2447.31]
+          ],
+          "closed": false
+        }
+      ]
+    },
+    {
+      "bbox": [-78.36, 2236.6, -21.93, 2390.73],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-78.36, 2236.6],
+            [-21.93, 2390.73]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-70.11, 2228.36, -55.81, 2259.14],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-55.81, 2228.36],
+            [-70.11, 2259.14]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-1028.34, 2492.67, -982.6, 2629.08],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-1028.34, 2629.08],
+            [-982.6, 2492.67]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-719.7, 2496.47, -671.37, 2628.5],
+      "stroke": [0.502, 0.502, 0.502],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "B-CONT-8",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [-719.7, 2496.47],
+            [-671.37, 2628.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 910.0, 252.0, 910.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 910.0],
+            [20.0, 910.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1022.0, 252.0, 1022.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1022.0],
+            [20.0, 1022.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 1134.0, 252.0, 1134.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 1134.0],
+            [20.0, 1134.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1022.0, 780.0, 1022.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1022.0],
+            [780.0, 1022.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 910.0, 780.0, 910.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 910.0],
+            [780.0, 910.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 1134.0, 780.0, 1134.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 1134.0],
+            [780.0, 1134.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 910.0, 1812.0, 910.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 910.0],
+            [1572.0, 910.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1022.0, 1812.0, 1022.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1022.0],
+            [1572.0, 1022.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 1134.0, 1812.0, 1134.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 1134.0],
+            [1572.0, 1134.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 910.0, 2332.0, 910.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 910.0],
+            [2332.0, 910.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1022.0, 2332.0, 1022.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1022.0],
+            [2332.0, 1022.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 1134.0, 2332.0, 1134.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 1134.0],
+            [2332.0, 1134.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 574.0, 1812.0, 574.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 574.0],
+            [1572.0, 574.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 574.0, 2332.0, 574.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 574.0],
+            [2332.0, 574.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 798.0, 1812.0, 798.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 798.0],
+            [1572.0, 798.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [1572.0, 686.0, 1812.0, 686.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [1812.0, 686.0],
+            [1572.0, 686.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 798.0, 2332.0, 798.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 798.0],
+            [2332.0, 798.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2100.0, 686.0, 2332.0, 686.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2100.0, 686.0],
+            [2332.0, 686.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 574.0, 252.0, 574.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 574.0],
+            [20.0, 574.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 686.0, 252.0, 686.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 686.0],
+            [20.0, 686.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [20.0, 798.0, 252.0, 798.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [252.0, 798.0],
+            [20.0, 798.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 574.0, 780.0, 574.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 574.0],
+            [780.0, 574.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 798.0, 780.0, 798.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 798.0],
+            [780.0, 798.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [540.0, 686.0, 780.0, 686.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STRIPING",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [540.0, 686.0],
+            [780.0, 686.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2184.0, 1976.0, 2184.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2184.0, 2064.0],
+            [2184.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2182.5, 1976.0, 2182.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2182.5, 1976.0],
+            [2182.5, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2181.0, 1976.0, 2181.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2181.0, 2064.0],
+            [2181.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2184.0, 2065.5, 2242.0, 2065.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2065.5],
+            [2184.0, 2065.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2184.0, 2067.0, 2242.0, 2067.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2067.0],
+            [2184.0, 2067.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2064.0, 2242.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2064.0],
+            [2242.0, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2031.0, 2184.0, 2031.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2031.0],
+            [2184.0, 2031.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2042.0, 2184.0, 2042.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2042.0],
+            [2184.0, 2042.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2053.0, 2184.0, 2053.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2053.0],
+            [2184.0, 2053.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2020.0, 2184.0, 2020.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2020.0],
+            [2184.0, 2020.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2181.0, 2061.0, 2187.0, 2067.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2184.0, 2064.0],
+          "radius": 3.0,
+          "start_angle": 90.0,
+          "end_angle": 180.0
+        }
+      ]
+    },
+    {
+      "bbox": [2182.5, 2062.5, 2185.5, 2065.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2184.0, 2064.0],
+          "radius": 1.5,
+          "start_angle": 90.0,
+          "end_angle": 180.0
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2009.0, 2184.0, 2009.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 2009.0],
+            [2184.0, 2009.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1987.0, 2184.0, 1987.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 1987.0],
+            [2184.0, 1987.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1976.0, 2242.0, 1976.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 1976.0],
+            [2242.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1998.0, 2184.0, 1998.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.0, 1998.0],
+            [2184.0, 1998.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 2031.0, 2242.0, 2031.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2031.0],
+            [2190.0, 2031.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 2042.0, 2242.0, 2042.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2042.0],
+            [2190.0, 2042.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 2053.0, 2242.0, 2053.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2053.0],
+            [2190.0, 2053.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 2020.0, 2242.0, 2020.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2020.0],
+            [2190.0, 2020.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 2009.0, 2242.0, 2009.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 2009.0],
+            [2190.0, 2009.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 1987.0, 2242.0, 1987.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 1987.0],
+            [2190.0, 1987.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 1998.0, 2242.0, 1998.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2242.0, 1998.0],
+            [2190.0, 1998.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2190.0, 1976.0, 2190.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2190.0, 2064.0],
+            [2190.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2184.0, 1974.5, 2190.0, 1974.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2190.0, 1974.5],
+            [2184.0, 1974.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2184.0, 1973.0, 2190.0, 1973.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2190.0, 1973.0],
+            [2184.0, 1973.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2181.0, 1973.0, 2187.0, 1979.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2184.0, 1976.0],
+          "radius": 3.0,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [2182.5, 1974.5, 2185.5, 1977.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2184.0, 1976.0],
+          "radius": 1.5,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [2191.5, 1976.0, 2191.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2191.5, 2064.0],
+            [2191.5, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2193.0, 1976.0, 2193.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2193.0, 1976.0],
+            [2193.0, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2187.0, 1973.0, 2193.0, 1979.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2190.0, 1976.0],
+          "radius": 3.0,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [2188.5, 1974.5, 2191.5, 1977.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2190.0, 1976.0],
+          "radius": 1.5,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 1976.0, 168.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [168.0, 2064.0],
+            [168.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2065.5, 168.0, 2065.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2065.5],
+            [168.0, 2065.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2067.0, 168.0, 2067.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2067.0],
+            [168.0, 2067.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2064.0, 220.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2064.0],
+            [110.0, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 2031.0, 220.0, 2031.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2031.0],
+            [168.0, 2031.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 2042.0, 220.0, 2042.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2042.0],
+            [168.0, 2042.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 2053.0, 220.0, 2053.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2053.0],
+            [168.0, 2053.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 2020.0, 220.0, 2020.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2020.0],
+            [168.0, 2020.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [165.0, 2061.0, 171.0, 2067.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [168.0, 2064.0],
+          "radius": 3.0,
+          "start_angle": 0.0,
+          "end_angle": 90.0
+        }
+      ]
+    },
+    {
+      "bbox": [166.5, 2062.5, 169.5, 2065.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [168.0, 2064.0],
+          "radius": 1.5,
+          "start_angle": 0.0,
+          "end_angle": 90.0
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 2009.0, 220.0, 2009.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 2009.0],
+            [168.0, 2009.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 1987.0, 220.0, 1987.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 1987.0],
+            [168.0, 1987.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1976.0, 220.0, 1976.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 1976.0],
+            [110.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [168.0, 1998.0, 220.0, 1998.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [220.0, 1998.0],
+            [168.0, 1998.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2031.0, 162.0, 2031.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2031.0],
+            [162.0, 2031.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2042.0, 162.0, 2042.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2042.0],
+            [162.0, 2042.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2053.0, 162.0, 2053.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2053.0],
+            [162.0, 2053.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2020.0, 162.0, 2020.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2020.0],
+            [162.0, 2020.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 2009.0, 162.0, 2009.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 2009.0],
+            [162.0, 2009.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1987.0, 162.0, 1987.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 1987.0],
+            [162.0, 1987.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1998.0, 162.0, 1998.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.0, 1998.0],
+            [162.0, 1998.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [162.0, 1976.0, 162.0, 2064.0],
+      "stroke": [1.0, 0.498, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "STAIR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [162.0, 2064.0],
+            [162.0, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [169.5, 1976.0, 169.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [169.5, 2064.0],
+            [169.5, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [171.0, 1976.0, 171.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [171.0, 1976.0],
+            [171.0, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [162.0, 1974.5, 168.0, 1974.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [162.0, 1974.5],
+            [168.0, 1974.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [162.0, 1973.0, 168.0, 1973.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [162.0, 1973.0],
+            [168.0, 1973.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [165.0, 1973.0, 171.0, 1979.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [168.0, 1976.0],
+          "radius": 3.0,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [166.5, 1974.5, 169.5, 1977.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [168.0, 1976.0],
+          "radius": 1.5,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [160.5, 1976.0, 160.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [160.5, 2064.0],
+            [160.5, 1976.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [159.0, 1976.0, 159.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [159.0, 1976.0],
+            [159.0, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [159.0, 1973.0, 165.0, 1979.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [162.0, 1976.0],
+          "radius": 3.0,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [160.5, 1974.5, 163.5, 1977.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [162.0, 1976.0],
+          "radius": 1.5,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [217.0, 2071.5, 221.5, 2076.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [219.25, 2073.75],
+          "radius": 2.25,
+          "start_angle": 90.0,
+          "end_angle": 180.0
+        }
+      ]
+    },
+    {
+      "bbox": [219.75, 2074.5, 219.75, 2076.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [219.75, 2076.0],
+            [219.75, 2074.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [218.5, 2073.0, 220.0, 2074.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [219.25, 2073.75],
+          "radius": 0.75,
+          "start_angle": 90.0,
+          "end_angle": 180.0
+        }
+      ]
+    },
+    {
+      "bbox": [218.5, 2006.12, 218.5, 2073.75],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [218.5, 2073.75],
+            [218.5, 2006.12]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [223.0, 2143.0, 226.75, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [223.0, 2143.0],
+            [226.75, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2107.0, 223.0, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [223.0, 2107.0],
+            [221.25, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [223.0, 2107.0, 226.75, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [223.0, 2107.0],
+            [226.75, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [185.25, 2107.0, 257.25, 2179.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "arc",
+          "center": [221.25, 2143.0],
+          "radius": 36.0,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [226.75, 2143.0, 226.75, 2145.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [226.75, 2145.0],
+            [226.75, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2143.0, 226.75, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [226.75, 2143.0],
+            [221.25, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2145.0, 226.75, 2145.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [221.25, 2145.0],
+            [226.75, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [226.75, 2105.0, 226.75, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [226.75, 2107.0],
+            [226.75, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2105.0, 226.75, 2105.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [226.75, 2105.0],
+            [221.25, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2105.0, 221.25, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [221.25, 2105.0],
+            [221.25, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2107.0, 226.75, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [221.25, 2107.0],
+            [226.75, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [185.25, 2141.25, 221.25, 2141.25],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [221.25, 2141.25],
+            [185.25, 2141.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [185.25, 2141.25, 185.25, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [185.25, 2141.25],
+            [185.25, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [185.25, 2143.0, 223.0, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [185.25, 2143.0],
+            [223.0, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [221.25, 2141.25, 221.25, 2145.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [221.25, 2145.0],
+            [221.25, 2141.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2143.0, 2125.25, 2145.0],
+      "stroke": null,
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "0",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2125.25, 2145.0],
+            [2125.25, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2143.0, 2130.75, 2143.0],
+      "stroke": null,
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "0",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2125.25, 2143.0],
+            [2130.75, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.75, 2143.0, 2130.75, 2145.0],
+      "stroke": null,
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "0",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2143.0],
+            [2130.75, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2145.0, 2130.75, 2145.0],
+      "stroke": null,
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "0",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2145.0],
+            [2125.25, 2145.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2143.0, 2166.75, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2166.75, 2143.0],
+            [2125.25, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2094.75, 2107.0, 2166.75, 2179.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2130.75, 2143.0],
+          "radius": 36.0,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [2130.75, 2141.25, 2166.75, 2141.25],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2141.25],
+            [2166.75, 2141.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2166.75, 2141.25, 2166.75, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2166.75, 2141.25],
+            [2166.75, 2143.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.75, 2141.25, 2130.75, 2143.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2143.0],
+            [2130.75, 2141.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2105.0, 2125.25, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2125.25, 2107.0],
+            [2125.25, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2105.0, 2130.75, 2105.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2125.25, 2105.0],
+            [2130.75, 2105.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.75, 2105.0, 2130.75, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2105.0],
+            [2130.75, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2125.25, 2107.0, 2130.75, 2107.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "DOOR",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2130.75, 2107.0],
+            [2125.25, 2107.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.5, 2071.5, 2135.0, 2076.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2132.75, 2073.75],
+          "radius": 2.25,
+          "start_angle": 0.0,
+          "end_angle": 90.0
+        }
+      ]
+    },
+    {
+      "bbox": [2132.25, 2074.5, 2132.25, 2076.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.25, 2076.0],
+            [2132.25, 2074.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 2073.0, 2133.5, 2074.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2132.75, 2073.75],
+          "radius": 0.75,
+          "start_angle": 0.0,
+          "end_angle": 90.0
+        }
+      ]
+    },
+    {
+      "bbox": [2135.0, 1955.25, 2135.0, 2073.75],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2135.0, 2073.75],
+            [2135.0, 1955.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2130.5, 1953.0, 2135.0, 1957.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2132.75, 1955.25],
+          "radius": 2.25,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [2132.25, 1953.0, 2132.25, 1954.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2132.25, 1953.0],
+            [2132.25, 1954.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2132.0, 1954.5, 2133.5, 1956.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2132.75, 1955.25],
+          "radius": 0.75,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [2133.5, 1955.25, 2133.5, 2073.75],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2133.5, 1955.25],
+            [2133.5, 2073.75]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2239.0, 1966.25, 2239.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2239.0, 2064.0],
+            [2239.0, 1966.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2239.0, 1964.0, 2243.5, 1968.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2241.25, 1966.25],
+          "radius": 2.25,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [2241.75, 1964.0, 2241.75, 1965.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2241.75, 1964.0],
+            [2241.75, 1965.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [2240.5, 1965.5, 2242.0, 1967.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [2241.25, 1966.25],
+          "radius": 0.75,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [2240.5, 1966.25, 2240.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [2240.5, 1966.25],
+            [2240.5, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [217.0, 1955.25, 217.0, 2073.75],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [217.0, 2073.75],
+            [217.0, 1955.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [217.0, 1953.0, 221.5, 1957.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [219.25, 1955.25],
+          "radius": 2.25,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [219.75, 1953.0, 219.75, 1954.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [219.75, 1953.0],
+            [219.75, 1954.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [218.5, 1954.5, 220.0, 1956.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [219.25, 1955.25],
+          "radius": 0.75,
+          "start_angle": 180.0,
+          "end_angle": 270.0
+        }
+      ]
+    },
+    {
+      "bbox": [218.5, 1955.25, 218.5, 2006.54],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [218.5, 1955.25],
+            [218.5, 2006.54]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [113.0, 1966.25, 113.0, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [113.0, 2064.0],
+            [113.0, 1966.25]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [108.5, 1964.0, 113.0, 1968.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [110.75, 1966.25],
+          "radius": 2.25,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [110.25, 1964.0, 110.25, 1965.5],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [110.25, 1964.0],
+            [110.25, 1965.5]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [110.0, 1965.5, 111.5, 1967.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "arc",
+          "center": [110.75, 1966.25],
+          "radius": 0.75,
+          "start_angle": 270.0,
+          "end_angle": 0.0
+        }
+      ]
+    },
+    {
+      "bbox": [111.5, 1966.25, 111.5, 2064.0],
+      "stroke": [1.0, 1.0, 0.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "HANDRAILS",
+      "items": [
+        {
+          "op": "line",
+          "points": [
+            [111.5, 1966.25],
+            [111.5, 2064.0]
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [-9.08, 1113.65, 785.2, 1182.9],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "BREAK",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [-9.08, 1132.96],
+            [352.03, 1150.48],
+            [362.0, 1113.65],
+            [394.07, 1182.9],
+            [404.04, 1146.07],
+            [785.2, 1161.63]
+          ],
+          "closed": false
+        }
+      ]
+    },
+    {
+      "bbox": [1550.92, 1113.65, 2348.2, 1182.9],
+      "stroke": [0.0, 1.0, 1.0],
+      "fill": null,
+      "width": null,
+      "closed": false,
+      "layer": "BREAK",
+      "items": [
+        {
+          "op": "polyline",
+          "points": [
+            [1550.92, 1132.96],
+            [1912.03, 1150.48],
+            [1922.0, 1113.65],
+            [1954.07, 1182.9],
+            [1964.04, 1146.07],
+            [2348.2, 1161.63]
+          ],
+          "closed": false
+        }
+      ]
+    }
+  ],
+  "source": "AS150-04.dxf",
+  "page": 1,
+  "format": "dxf"
+}

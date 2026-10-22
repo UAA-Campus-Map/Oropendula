@@ -48,6 +48,12 @@ The import tool's Deploy section can also generate the selected building or all
 buildings. Regenerate after changing floor JSON, placement, or any graph input;
 the import tool removes the `graphUrl` when it detects such an edit.
 
+### `zip.mjs`
+Tiny dependency-free ZIP writer used by the import tool's deploy diff. JSON
+entries are deflated with `CompressionStream` when available; already-compressed
+`.nvg.gz` entries are stored unchanged. Falls back to ZIP STORE if deflate is
+unavailable.
+
 ### `navgraph-codec.test.mjs`
 Codec and round-trip tests:
 

@@ -25,7 +25,7 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 | 8 | [arbiter.md](arbiter.md) | `arbiter.mjs` | fuses GPS and PDR continuously, picks the more certain one |
 | 9 | [autocal.md](autocal.md) | `autocal.mjs` | online step-length calibration from GPS |
 | 10 | [align.md](align.md) | `align.mjs` | rigid floor alignment for the import tool |
-| 11 | [tooling.md](tooling.md) | workers + scripts | `gen-osm`, `gen-navgraphs`, `gen-portals`, `navgraph-worker`, `navgraph-bundle-worker`, `basis-worker`, `smoke.mjs` |
+| 11 | [tooling.md](tooling.md) | workers + scripts | `gen-osm`, `gen-navgraphs`, `gen-portals`, `navgraph-worker`, `navgraph-bundle-worker`, `zip`, `basis-worker`, `smoke.mjs` |
 | 12 | [apps.md](apps.md) | HTML entry points | `app.html`, `index.html`, `import.html`, `locate-test.html` |
 
 ## How to keep these true

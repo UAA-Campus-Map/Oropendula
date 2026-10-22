@@ -13,7 +13,7 @@ omits everything that can be recreated cheaply:
 - the clearance raster is run-length encoded;
 - passages and heading fields are **omitted** and rebuilt lazily.
 
-The current campus (23 buildings, 71 floors) is about **32.4 MB raw** and
+The current campus (24 buildings, 75 floors) is about **32.7 MB raw** and
 **3.2 MB gzip**; the `.nvg.gz` files that cross the wire are comfortably below
 the 30 MB target.
 
@@ -485,8 +485,8 @@ For a full artifact check:
 node gen-navgraphs.mjs --check
 ```
 
-Current output is 71 floors, 187,284 nodes, 6,711,272 undirected edges, about
-**32.4 MB raw** and **3.2 MB gzip** across the 23 per-building files.
+Current output is 75 floors, 188,857 nodes, 6,748,323 undirected edges, about
+**32.7 MB raw** and **3.2 MB gzip** across the 24 per-building files.
 
 ## Versioning
 

@@ -2739,7 +2739,29 @@
       }
     }
 
+    /**
+     * Route times use the calibrated step length when the user has one. The
+     * router itself keeps fixed nominal speeds (so route CHOICE stays stable);
+     * this only adjusts the reported walking time. Elevator/stair time is
+     * fixed and is not scaled.
+     */
+    const DEFAULT_STEP_LENGTH_M = 0.72;
+    function applyPersonalWalkTime(route) {
+      if (!route || !(stepModel.base > 0)) return route;
+      const scale = DEFAULT_STEP_LENGTH_M / stepModel.base;
+      if (Math.abs(scale - 1) < 1e-6) return route;
+      let total = 0;
+      const segments = (route.segments ?? []).map((s) => {
+        const walking = s.tier === 'indoor' || s.tier === 'outdoor' || s.tier === 'skybridge';
+        const seconds = (s.seconds || 0) * (walking ? scale : 1);
+        total += seconds;
+        return {...s, seconds};
+      });
+      return {...route, segments, totalSeconds: total};
+    }
+
     function showRoute(route) {
+      route = applyPersonalWalkTime(route);
       lastRoute = route;
       lastReroute = null;   // a freshly set route re-anchors the live re-route
       const routeCard = document.getElementById('route-card');
