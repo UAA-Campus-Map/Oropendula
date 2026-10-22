@@ -36,6 +36,11 @@ estimator defaults to **ft·in** with a cm toggle.
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
+- **Cached graphs:** boot fetches each building's `graphUrl` bundle in parallel,
+  gunzips/decodes it, and rehydrates a `graphFromState` graph. A missing,
+  corrupt, or floor-mismatched bundle falls back to the worker/synchronous
+  on-device build for that floor. Passages/heading fields are built lazily when
+  the locator first needs compass directions near a plan.
 - `positionSeeded` suppresses the live marker and re-routing until an absolute
   source (GPS, "I'm Here", or a finished calibration) has seeded the cloud — the
   boot seed at the map centre is a guess and must not move the map.
@@ -54,6 +59,12 @@ Loads a DXF floor, places it with `geo.mjs`, aligns stacked floors with
 `align.mjs`, tags portals, and writes the floor JSON + the `buildings-config.json`
 registration (including the cached portal set). **Buildings are added through this
 tool, never by hand-editing `index.html`.**
+
+The Deploy section also generates per-building navGraph bundles
+(`<buildingId>.nvg.gz`). Generating a bundle sets that building's `graphUrl` in
+`buildings-config.json`; the bundle is gzipped and contains every floor in the
+building. Use the current-building button for one bundle or "Download all
+navgraph bundles" for a full regeneration.
 
 ## `import-progress.html` — import dashboard
 

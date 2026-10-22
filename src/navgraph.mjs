@@ -69,6 +69,10 @@ function metresPerDeg(lat) {
  *        [[lon,lat],[lon,lat]] arrays. Pass the raw wall *lines* - this
  *        module does its own clearance buffering, so do not pre-buffer.
  *        The DXF-to-lon/lat conversion stays in the caller.
+ * @param {number[][]} [doors] - doorway midpoints in lon/lat.
+ * @param {{passages?: boolean}} [opts] - set `passages: false` when the
+ *        serialised bundle does not need the heading-field passages. Defaults
+ *        to true, preserving the existing app/worker behaviour.
  * @returns {{findPath: Function, nodes: number[][][], stats: object,
  *            isWalkable: Function, nearestWalkable: Function}}
  *          - findPath: Function to compute path between two (lon,lat) points
@@ -102,7 +106,7 @@ function makeClearLine(blocked, W, H, OX, OY) {
   };
 }
 
-export function buildGraphState(walls, doors = []) {
+export function buildGraphState(walls, doors = [], { passages: buildPassagesEnabled = true } = {}) {
   const t0 = performance.now();
 
   // Normalise the three shapes callers have in circulation. Guessing wrong
@@ -284,7 +288,7 @@ export function buildGraphState(walls, doors = []) {
   // segment. Built here so it rides the same worker pass as the graph; see
   // headingfield.mjs for how it is queried and snapped.
   const doorsM = (doors || []).map(toM);
-  const passages = buildPassages(nodes, adj, doorsM, segments);
+  const passages = buildPassagesEnabled ? buildPassages(nodes, adj, doorsM, segments) : null;
 
   return {origin, scale, OX, OY, W, H, nodes, adj, blocked, stats, passages};
 }

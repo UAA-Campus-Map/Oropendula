@@ -1117,8 +1117,11 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { buildGraph, graphFromState } from './navgraph.mjs';
-    import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments,
-             isWallLayer, isDoorLayer } from './campus.mjs';
+    import { decodeBundle } from './navgraph-codec.mjs';
+    import { gunzipBytes } from './navgraph-codec-io.mjs';
+    import { makeBundleGraph } from './navgraph-bundle-runtime.mjs';
+    import { extractPortals, portalsFromCache, buildCampusRouter } from './campus.mjs';
+    import { navGraphInputs } from './navgraph-source.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
@@ -1158,6 +1161,9 @@
     let isDefiningPath = false;
     let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
     let is3D = false;            // starts in 2D; toggled by the view button
+    // Building labels appear at/above this zoom; collision handling hides any
+    // label that would squish into another. Adjust this single constant.
+    const BUILDING_LABEL_MIN_ZOOM = 15.5;
     let followMode = false;      // camera follows the live position
     let followPaused = false;    // a manual gesture paused it; tap Follow to resume
     let firstPathPoint = null;
@@ -3051,10 +3057,14 @@
       const isWalkable = (ll) => levelGraphs.some((gr) => gr.isWalkable(ll));
       // Allowed compass directions at a point: the heading fields of every
       // plan at this level, best-confidence wins (the walker is in one plan).
+      // Cached graphs build their passages on first use, and only when the
+      // point is near that plan - boot never pays the full campus passage cost.
       const headingField = (ll) => {
         let best = null;
         for (const gr of levelGraphs) {
-          const q = gr.headingField ? gr.headingField.query(ll) : null;
+          if (!gr.inBounds(ll, 20)) continue;
+          const field = gr.headingField ?? gr.ensureHeadingField?.() ?? null;
+          const q = field ? field.query(ll) : null;
           if (q && (!best || q.confidence > best.confidence)) best = q;
         }
         return best;
@@ -3876,6 +3886,22 @@
           .then((data) => ({ data }), (error) => ({ error })));
       }
     }
+    // Per-building navGraph bundles. These replace the expensive on-device
+    // visibility-graph build when present; the floor JSONs above are still
+    // needed for map layers, portals, room labels and lazy heading passages.
+    // A missing/corrupt bundle falls back to the old build path per floor.
+    const bundlePrefetch = new Map();
+    for (const config of buildingsConfig) {
+      if (!config.graphUrl) continue;
+      bundlePrefetch.set(config, fetch(config.graphUrl)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status} for ${config.graphUrl}`);
+          return res.arrayBuffer();
+        })
+        .then((buf) => gunzipBytes(new Uint8Array(buf)))
+        .then((bytes) => decodeBundle(bytes))
+        .then((bundle) => ({ bundle }), (error) => ({ error })));
+    }
     const bootOsmPromise = loadCampusOsm(outdoorBBoxFromConfig());
 
     // Geo registration for one building+floor: a floor may carry its own
@@ -4004,7 +4030,7 @@
       }).then((state) => graphFromState(state), () => buildGraph(walls, doors));
     }
 
-    async function loadFloor(buildingConfig, floor, preloadedData) {
+    async function loadFloor(buildingConfig, floor, preloadedData, bundleFloor = null) {
       // The boot prefetches every floor JSON in parallel and passes it in;
       // the fallback keeps the function usable standalone.
       const data = preloadedData ?? await (await fetch(floor.url)).json();
@@ -4013,14 +4039,10 @@
       const wallLayerId = floor.wallLayerId ?? `${base}-walls`;
       const roomLayerId = floor.roomLayerId ?? `${base}-roomnumbers`;
 
-      // Case-insensitive, singular or plural: most buildings write "Windows",
-      // AS106 writes "WINDOWS", HSB (AS156) uses WALL/window on floor 01.
-      const walls = data.shapes.filter((i) => isWallLayer(i.layer));
-      // True vertices from shapeSegments, not the bbox diagonal: a rotated
-      // wall run drawn as its bbox shows up as a diagonal slash across the
-      // corner, and the navgraph/obstacle sets inherit the same corruption.
-      const lines = walls.flatMap((wall) =>
-        shapeSegments(wall).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
+      // Walls and interior door leaves are the graph inputs. The same helper
+      // feeds the import tool's bundle generator, so the cached graph and the
+      // fallback build can never disagree about which shapes count.
+      const { lines, doors: doorPoints } = navGraphInputs(buildingConfig, floor, data, toLL);
       const wallFeatureCollection = turf.lineStrings(lines);
 
       // Room-number labels: ONE array feeds both the displayed symbol layer
@@ -4038,20 +4060,10 @@
       // Interior door leaves (the DOOR/DOORS layer): each entity is a short
       // leaf line; its midpoint is the doorway. A room search targets the
       // room's DOOR, not its number label, so the route stops at the opening.
-      const doorPoints = data.shapes
-        .filter((s) => isDoorLayer(s.layer))
-        .map((s) => {
-          const leaf = (s.items ?? []).find((it) => it.op === 'line' && it.points?.length >= 2);
-          if (leaf) {
-            const a = leaf.points[0], b = leaf.points[leaf.points.length - 1];
-            return toLL((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-          }
-          if (s.bbox) return toLL((s.bbox[0] + s.bbox[2]) / 2, (s.bbox[1] + s.bbox[3]) / 2);
-          return null;
-        })
-        .filter(Boolean);
-
-      const navGraph = await buildGraphAsync(wallFeatureCollection, doorPoints);
+      // Cached bundles already contain the graph; only the fallback builds it.
+      const navGraph = bundleFloor
+        ? makeBundleGraph(bundleFloor, { lines, doorPoints })
+        : await buildGraphAsync(wallFeatureCollection, doorPoints);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
       // clustering + flood fill). buildings-config.json caches them as DXF
       // points, so prefer that; fall back to extracting when absent.
@@ -4264,6 +4276,75 @@
       f._layersAdded = true;
     }
 
+    // --- building name/code labels (2D, zoomed in) -------------------------
+    /**
+     * One symbol-layer label per building, centred east/west above its bbox.
+     * minzoom keeps them out of the campus overview; text-allow-overlap=false
+     * lets MapLibre drop any label that would squish into another. The glyph
+     * server only has Noto Sans Medium (no Bold), so 18 px Medium is used.
+     */
+    function buildBuildingLabels() {
+      if (map.getSource('building-labels')) return;
+      const features = [];
+      for (const b of buildings) {
+        const f = b.floors.find((x) => x.floorId === b.groundFloor) ?? b.floors[0];
+        const lines = f?.obstacleLines ?? [];
+        let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+        let any = false;
+        for (const [[lon0, lat0], [lon1, lat1]] of lines) {
+          if (!Number.isFinite(lon0) || !Number.isFinite(lat0) ||
+              !Number.isFinite(lon1) || !Number.isFinite(lat1)) continue;
+          any = true;
+          if (lon0 < minLon) minLon = lon0;
+          if (lon0 > maxLon) maxLon = lon0;
+          if (lat0 < minLat) minLat = lat0;
+          if (lat0 > maxLat) maxLat = lat0;
+          if (lon1 < minLon) minLon = lon1;
+          if (lon1 > maxLon) maxLon = lon1;
+          if (lat1 < minLat) minLat = lat1;
+          if (lat1 > maxLat) maxLat = lat1;
+        }
+        if (!any) continue;
+        const name = String(b.sourceName ?? f?.sourceName ?? '').trim();
+        const code = String(b.sourceId ?? f?.sourceId ?? b.id ?? '').trim();
+        const primary = name || code;
+        if (!primary) continue;
+        features.push({
+          type: 'Feature',
+          properties: { text: name && code ? `${name}\n${code}` : primary },
+          geometry: { type: 'Point', coordinates: [(minLon + maxLon) / 2, maxLat] },
+        });
+      }
+      map.addSource('building-labels', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features },
+      });
+      const before = map.getLayer('navigation-route') ? 'navigation-route'
+        : map.getLayer('portals') ? 'portals' : undefined;
+      map.addLayer({
+        id: 'building-labels',
+        type: 'symbol',
+        source: 'building-labels',
+        minzoom: BUILDING_LABEL_MIN_ZOOM,
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-size': 12,
+          'text-font': ['Noto Sans Medium'],
+          'text-line-height': 1.1,
+          'text-anchor': 'bottom',
+          'text-offset': [0, -0.3],
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
+          'text-padding': 4,
+        },
+        paint: {
+          'text-color': '#2563eb',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 2,
+        },
+      }, before);
+    }
+
     // Last applied floor/mode. A floor change only needs to touch the layers
     // that actually change; re-setting layout/paint on every floor's layers
     // (and rebuilding the hidden 3D avatar) on every tap was the delay.
@@ -4310,6 +4391,9 @@
           ['==', ['get', 'fromFloor'], floorId],
           ['==', ['get', 'toFloor'], floorId]]);
       }
+      if (map.getLayer('building-labels')) {
+        map.setLayoutProperty('building-labels', 'visibility', is3D ? 'none' : 'visible');
+      }
       applyStructureStyle();
       refreshLive3D();   // the 3D avatar follows the selected floor
     }
@@ -4328,10 +4412,29 @@
         const osmPromise = bootOsmPromise;
 
         let built = 0;
+        let cachedFloors = 0, fallbackFloors = 0;
         for (const config of buildingsConfig) {
           try {
             const building = { id: config.id, groundFloor: config.groundFloor, floors: [],
                                sourceId: null, sourceName: null };
+            let bundleResult = null;
+            if (bundlePrefetch.has(config)) {
+              const bundlePromise = bundlePrefetch.get(config);
+              bundlePrefetch.delete(config);
+              bundleResult = await bundlePromise;
+            }
+            let bundleFloors = null;
+            if (bundleResult?.error) {
+              console.warn(`navGraph bundle failed for ${config.id}; falling back to on-device build:`,
+                bundleResult.error);
+            } else if (bundleResult?.bundle) {
+              if (bundleResult.bundle.buildingId !== config.id) {
+                console.warn(`navGraph bundle id mismatch for ${config.id}: ` +
+                  `${bundleResult.bundle.buildingId}`);
+              } else {
+                bundleFloors = new Map(bundleResult.bundle.floors.map((f) => [f.floorId, f]));
+              }
+            }
             for (const floor of config.floors) {
               const result = await prefetched.get(floor);
               if (result.error) {
@@ -4340,10 +4443,13 @@
               }
               const data = result.data;
               statusText.textContent =
-                `Building graph ${config.id} ${floor.floorId} (${++built}/${totalFloors})...`;
-              // Let the browser paint the status before the CPU-bound build.
+                `Loading ${config.id} ${floor.floorId} (${++built}/${totalFloors})...`;
+              // Let the browser paint the status before any fallback CPU work.
               await new Promise((r) => setTimeout(r));
-              const loaded = await loadFloor(config, floor, data);
+              const cachedFloor = bundleFloors?.get(floor.floorId) ?? null;
+              if (cachedFloor) bundleFloors.delete(floor.floorId);
+              const loaded = await loadFloor(config, floor, data, cachedFloor);
+              if (cachedFloor) cachedFloors++; else fallbackFloors++;
               building.sourceId ??= loaded.sourceId;
               building.sourceName ??= loaded.sourceName;
               building.floors.push(loaded);
@@ -4358,6 +4464,7 @@
           statusText.textContent = 'No walls loaded';
           return;
         }
+        console.log(`navGraph: ${cachedFloors} cached, ${fallbackFloors} built on device`);
 
         statusText.textContent = 'Building campus router...';
         await new Promise((r) => setTimeout(r));
@@ -4370,6 +4477,8 @@
         createPortalLayer();
         populateFloorPicker(buildings);
         buildStructure3D();                  // extruded walls + floor plates
+        try { buildBuildingLabels(); }       // name/code labels (minzoom 18.5)
+        catch (err) { console.warn('building labels failed:', err); }
         // Bind the locator to the floor nearest the view now that graphs exist.
         ensureLocator([map.getCenter().lng, map.getCenter().lat]);
 
@@ -4385,7 +4494,7 @@
         autoOpenCalibrationModal();
       } catch (err) {
         console.error('Failed to build navigation graph:', err);
-        statusText.textContent = 'Graph build failed';
+        statusText.textContent = `Graph build failed: ${err?.message || err}`;
       }
     });
   </script>

@@ -20,7 +20,43 @@ extract a fresh portal set. Everything in/out is structured-cloneable; the main
 thread rehydrates with `graphFromState`. Used to parallelise the suite's floor
 loading.
 
+### `navgraph-bundle-worker.mjs`
+Import-tool worker. Builds one floor with `buildGraphState(..., {passages:false})`
+and returns an encoded `navgraph-codec` floor block. The block is transferred to
+the main thread, which assembles the per-building bundle without ever cloning the
+large adjacency arrays.
+
+### `navgraph-bundle-runtime.mjs`
+App-side helper. Converts one decoded bundle floor into the `graphFromState()`
+object, recomputing adjacency weights, and installs `ensureHeadingField()` so
+passages/compass directions are built lazily on the active floor level rather
+than during boot.
+
 ## Data generators
+
+### `gen-navgraphs.mjs`
+Generates every per-building navGraph bundle and adds `graphUrl` to
+`buildings-config.json`:
+
+```sh
+node gen-navgraphs.mjs              # all buildings; writes .nvg.gz + config
+node gen-navgraphs.mjs --check      # measure only, writes nothing
+node gen-navgraphs.mjs AS127 AS154  # selected buildings only
+```
+
+The import tool's Deploy section can also generate the selected building or all
+buildings. Regenerate after changing floor JSON, placement, or any graph input;
+the import tool removes the `graphUrl` when it detects such an edit.
+
+### `navgraph-codec.test.mjs`
+Codec and round-trip tests:
+
+```sh
+node --test navgraph-codec.test.mjs
+```
+
+Covers synthetic graphs, a multi-floor bundle, gzip, AS127-01 route parity, and
+corrupt/truncated data.
 
 ### `gen-osm.mjs`
 Precomputes the walkable OSM road network for the campus into `osm-paths.json`,

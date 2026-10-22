@@ -47,6 +47,31 @@ rasters, adjacency) and `graphFromState` rehydrates the query closures. That
 split lets `navgraph-worker.mjs` do the CPU-bound half off the render thread and
 transfer the blocked raster without a copy.
 
+### Cached bundles
+
+`navgraph-codec.mjs` packs a building's floors into a compact per-building
+bundle (`<buildingId>.nvg.gz`) with:
+
+- `Float64` node positions,
+- each undirected edge once (CSR over `j > i`),
+- an RLE `blocked` raster,
+- **no edge weights** (recomputed from node positions),
+- **no passages/heading field** (rebuilt lazily).
+
+The container is `NGB1` + a JSON directory + 8-byte-aligned floor blocks; the
+whole file is gzipped. `buildings-config.json` points at it with a building-level
+`graphUrl`. `decodeBundle()` returns compact adjacency; `expandAdjacency()`
+reconstructs exactly the same adjacency order and weights as
+`buildGraphState()` for `graphFromState()`.
+
+`buildGraphState(walls, doors, { passages: false })` skips the passage build when
+generating a bundle. The default remains `true`.
+
+At boot `app.html` fetches each building's `graphUrl`, gunzips/decodes it, and
+uses `makeBundleGraph()` to produce the same query graph. Missing or invalid
+bundles fall back to the existing worker/synchronous build. Heading fields are
+created lazily from the floor's wall/door inputs on first locator use.
+
 ## Implementation notes / invariants
 
 - The clearance raster inflates every wall by ~0.3 m each side, i.e. a ~0.6 m
@@ -64,4 +89,5 @@ transfer the blocked raster without a copy.
 - [`campus.md`](campus.md) — composes per-floor graphs into a multi-building
   router.
 - [`locate.md`](locate.md) — consumes `isWalkable`/`nearestWalkable`/`inBounds`.
-- [`tooling.md`](tooling.md) — `navgraph-worker.mjs`.
+- [`tooling.md`](tooling.md) — `navgraph-worker.mjs`, `navgraph-bundle-worker.mjs`,
+  and `gen-navgraphs.mjs`.

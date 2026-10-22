@@ -69,6 +69,24 @@
     .key.elevator { background: #8e44ad; }
     .key.stairs { background: #e67e22; }
     .key.shadow { background: #2f6fb5; opacity: .65; }
+    /* Selected building's name + code, above the plan's north edge. */
+    #map .building-label {
+      pointer-events: none;
+      text-align: center;
+      white-space: nowrap;
+      color: #2563eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      line-height: 1.15;
+      text-shadow: 0 0 4px #fff, 0 0 3px #fff, 0 1px 0 #fff;
+    }
+    #map .building-label .bl-code {
+      margin-top: 1px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #2563eb;
+    }
   </style>
 </head>
 <body>
@@ -163,6 +181,13 @@
       <button id="downloadBtn">Download buildings-config.json</button>
       <button id="downloadOsmBtn" title="Decode the campus OSM tiles into osm-paths.json">Download osm-paths.json</button>
     </div>
+    <div class="row">
+      <button id="downloadGraphBtn">Download navgraph bundle (current building)</button>
+    </div>
+    <div class="row">
+      <button id="downloadAllGraphsBtn">Download all navgraph bundles</button>
+    </div>
+    <div id="graph-status" class="hint"></div>
     <div id="osm-status" class="hint"></div>
     <div class="row">
       <button id="reloadBtn" title="Discard local edits and reload buildings-config.json from the server">reload config from server</button>
@@ -177,6 +202,10 @@
     import { makeToLL, lonLatToDxf, metresPerDegree, DXF_SCALE } from './geo.mjs';
     import { shapeSegments, extractPortals, cachePortals, portalsFromCache, isWallLayer }
       from './campus.mjs';
+    import { buildGraphState } from './navgraph.mjs';
+    import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
+    import { gzipBytes } from './navgraph-codec-io.mjs';
+    import { navGraphInputs } from './navgraph-source.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { hullSamples, bestFitTranslation } from './align.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
@@ -210,11 +239,13 @@
     let mapReady = false;
     let refreshing = false, refreshQueued = false;
     let datumMarker = null, handleMarker = null;
+    let buildingLabelMarker = null;   // selected building name/code above the bbox
     let didInitialFit = false;      // first load: fit the plan clear of the panel
     let portalsDirty = false;       // a portal cache was computed since last persist
     let previewRaf = 0;             // live drag redraw scheduled
     let editMode = null;            // 'place-door' | 'remove-door' | 'place-bridge' | 'remove-bridge'
     let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
+    let graphBusy = false;          // a bundle generation run is in progress
 
     const status = msg => { $('status').textContent = msg; };
 
@@ -585,6 +616,62 @@
       }
     }
 
+    function hideBuildingLabel() {
+      if (buildingLabelMarker) buildingLabelMarker.getElement().hidden = true;
+    }
+
+    /**
+     * Selected building's name + code above the plan. Uses a DOM marker (not a
+     * symbol layer) for true bold text, and is repositioned on every render so
+     * it follows live drags/rotations.
+     */
+    function syncBuildingLabel(b, f) {
+      const data = floorData.get(floorKey(b, f));
+      const bb = data ? floorBBox(data) : null;
+      if (!bb) { hideBuildingLabel(); return; }
+      const toLL = makeToLL(b, f);
+      const corners = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]
+        .map(([x, y]) => toLL(x, y));
+      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const [lon, lat] of corners) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      const name = String(data.building_name ?? b.buildingName ?? '').trim();
+      const uaa = String(data.ID ?? '').trim();
+      const internal = String(b.id ?? '').trim();
+      // UAA code when present; fall back to the internal AS### id.
+      const code = uaa || internal;
+      const primary = name || code;
+      if (!primary) { hideBuildingLabel(); return; }
+
+      if (!buildingLabelMarker) {
+        const el = document.createElement('div');
+        el.className = 'building-label';
+        buildingLabelMarker = new maplibregl.Marker({
+          element: el, anchor: 'bottom', offset: [0, -8],
+        });
+        buildingLabelMarker.addTo(map);
+      }
+      const el = buildingLabelMarker.getElement();
+      el.hidden = false;
+      const nameEl = document.createElement('div');
+      nameEl.className = 'bl-name';
+      nameEl.textContent = primary;
+      el.replaceChildren(nameEl);
+      if (name && code) {
+        const codeEl = document.createElement('div');
+        codeEl.className = 'bl-code';
+        codeEl.textContent = code;
+        el.appendChild(codeEl);
+      }
+      // Centred east/west, anchored at the north edge (the marker's bottom
+      // anchor + pixel offset puts the text just above the bbox).
+      buildingLabelMarker.setLngLat([(minLon + maxLon) / 2, maxLat]);
+    }
+
     /**
      * Redraw everything that belongs to the selected floor at its CURRENT
      * placement. Used by the full refresh and by the live drag preview.
@@ -669,6 +756,7 @@
       setData('imp-portal-labels', { type: 'FeatureCollection', features: portalLabelFeats });
 
       renderShadow(b, f);
+      syncBuildingLabel(b, f);
     }
 
     // --- refresh everything from state -------------------------------------
@@ -716,6 +804,7 @@
           setData(id, empty);
         }
         if ($('shadow-note')) $('shadow-note').textContent = 'Shadow: none';
+        hideBuildingLabel();
         syncMarkers();
         syncPanel();
         syncPortalPanel();
@@ -964,6 +1053,7 @@
       };
       f.origin = next.origin;
       f.offset = next.offset;
+      invalidateGraph(b);
       persist();
       if (!skipSync) refresh();
     }
@@ -1018,6 +1108,7 @@
       const nm = [om[0] + best.translation[0], om[1] + best.translation[1]];
       f.origin = { lon: frame.lon + nm[0] / frame.mLon, lat: frame.lat + nm[1] / frame.mLat };
       f.offset = { ...cur.offset, rot: parentRot };
+      invalidateGraph(b);
       persist(); refresh();
       const deg = ((parentRot * 180 / Math.PI) % 360 + 360) % 360;
       status(`aligned ${f.floorId} to ${ref.floorId}: rotation locked at ${deg.toFixed(2)}°, ` +
@@ -1036,6 +1127,10 @@
             el.id === 'addBuildingBtn' || el.id === 'addFloorBtn' ||
             el.id === 'alignBtn' ||
             el.id === 'floorPrevBtn' || el.id === 'floorNextBtn') continue;
+        if (el.id === 'downloadGraphBtn' || el.id === 'downloadAllGraphsBtn') {
+          el.disabled = graphBusy;
+          continue;
+        }
         el.disabled = !enabled;
       }
       // "+ building" must work even with an empty config; "+ floor" needs only
@@ -1063,9 +1158,22 @@
       $('datumY').value = String(offset.y);
       const deg = ((offset.rot * 180 / Math.PI) % 360 + 360) % 360;
       $('rotDeg').value = deg.toFixed(2);
+      const graphStatus = $('graph-status');
+      if (graphStatus) {
+        graphStatus.textContent = b
+          ? (b.graphUrl
+              ? `navgraph: ${b.graphUrl}`
+              : 'navgraph: not generated for this building')
+          : '';
+      }
     }
 
     // --- persistence -------------------------------------------------------
+    /** A bundle is stale as soon as its geometry or placement changes. */
+    function invalidateGraph(b) {
+      if (b && b.graphUrl) delete b.graphUrl;
+    }
+
     function persist() {
       localStorage.setItem(LS_KEY, JSON.stringify(config));
     }
@@ -1164,6 +1272,7 @@
         entry.url = url;
         entry.showRoomLabels = true;
         delete entry.portals;         // fresh JSON: recompute the portal cache
+        delete b.graphUrl;            // the floor geometry changed
         b.groundFloor = b.groundFloor ?? floorId;
         if (!existing) b.floors.push(entry);
         floorData.set(floorKey(b, entry), data);
@@ -1240,7 +1349,7 @@
     wire('floorPrevBtn', 'click', () => stepFloor(-1));
     wire('floorNextBtn', 'click', () => stepFloor(1));
     wire('alignBtn', 'click', () => alignSelectedFloor());
-    wire('id', 'change', e => { building().id = e.target.value; persist(); refresh(); });
+    wire('id', 'change', e => { const b = building(); b.id = e.target.value; invalidateGraph(b); persist(); refresh(); });
     wire('groundFloor', 'change', e => { building().groundFloor = e.target.value; persist(); refresh(); });
     wire('showRoomLabels', 'change', e => { floor().showRoomLabels = e.target.checked; persist(); });
     wire('showShadow', 'change', () => refresh());
@@ -1295,6 +1404,7 @@
     });
     wire('removeFloorBtn', 'click', () => {
       const b = building();
+      invalidateGraph(b);
       b.floors.splice(selected.floor, 1);
       selected.floor = Math.max(0, b.floors.length - 1);
       persist(); refresh();
@@ -1305,6 +1415,164 @@
       persist(); refresh();
     });
     wire('reloadBtn', 'click', reloadFromServer);
+
+    // --- navGraph bundle generation (deploy artifact) ----------------------
+    // One bundle contains every floor of one building. The bundle generator
+    // intentionally omits weights/passages; the app recomputes the former and
+    // lazily rebuilds the latter.
+    let graphSeq = 0;
+
+    function graphFileName(b) {
+      const base = String(b?.id || 'building').replace(/[^A-Za-z0-9._-]/g, '_') || 'building';
+      return `${base}.nvg.gz`;
+    }
+
+    function downloadBytes(bytes, filename, type = 'application/octet-stream') {
+      const blob = new Blob([bytes], { type });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }
+
+    function setGraphBusy(busy) {
+      graphBusy = busy;
+      $('downloadGraphBtn').disabled = busy;
+      $('downloadAllGraphsBtn').disabled = busy;
+    }
+
+    function makeGraphWorker() {
+      try { return new Worker('/navgraph-bundle-worker.mjs', { type: 'module' }); }
+      catch { return null; }
+    }
+
+    /** Ask the bundle worker for one encoded floor block. */
+    function requestGraphBlock(worker, floorId, walls, doors) {
+      return new Promise((resolve, reject) => {
+        const id = ++graphSeq;
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('navgraph bundle worker timeout'));
+        }, 120000);
+        const cleanup = () => {
+          clearTimeout(timer);
+          worker.removeEventListener('message', onMessage);
+          worker.removeEventListener('error', onError);
+        };
+        const onMessage = (e) => {
+          const d = e.data;
+          if (!d || d.id !== id) return;
+          cleanup();
+          if (d.error) reject(new Error(d.error));
+          else resolve({ floorId: d.floorId, meta: d.meta, block: new Uint8Array(d.block) });
+        };
+        const onError = (e) => {
+          cleanup();
+          reject(e instanceof Error ? e : new Error(e?.message || 'navgraph bundle worker error'));
+        };
+        worker.addEventListener('message', onMessage);
+        worker.addEventListener('error', onError, { once: true });
+        worker.postMessage({ id, floorId, walls, doors });
+      });
+    }
+
+    async function generateBuildingBundle(b) {
+      if (!b?.floors?.length) throw new Error('building has no floors');
+      const blocks = [];
+      let worker = makeGraphWorker();
+      try {
+        for (let i = 0; i < b.floors.length; i++) {
+          const f = b.floors[i];
+          if (!f.url) throw new Error(`${b.id} ${f.floorId} has no floor URL`);
+          status(`building navgraph ${b.id} ${f.floorId} (${i + 1}/${b.floors.length})...`);
+          const data = await loadFloorData(b, f);
+          if (!data) throw new Error(`could not load floor JSON for ${b.id} ${f.floorId}`);
+          const toLL = makeToLL(b, f);
+          const { lines, doors } = navGraphInputs(b, f, data, toLL);
+
+          let encoded = null;
+          if (worker) {
+            try {
+              encoded = await requestGraphBlock(worker, f.floorId, lines, doors);
+            } catch (err) {
+              console.warn('bundle worker failed; building synchronously:', err);
+              worker.terminate();
+              worker = null;
+            }
+          }
+          if (!encoded) {
+            // Yield first so the status line can paint before a synchronous build.
+            await new Promise((r) => setTimeout(r));
+            const state = buildGraphState(lines, doors, { passages: false });
+            const { block, meta } = encodeFloorBlock(state);
+            encoded = { floorId: f.floorId, meta, block };
+          }
+          blocks.push(encoded);
+        }
+      } finally {
+        worker?.terminate();
+      }
+
+      const raw = encodeBundleFromBlocks({ buildingId: b.id, floors: blocks });
+      const gz = await gzipBytes(raw);
+      return { filename: graphFileName(b), raw, gz, floors: blocks.length };
+    }
+
+    async function downloadBuildingGraph(b) {
+      if (!b) return;
+      const out = await generateBuildingBundle(b);
+      downloadBytes(out.gz, out.filename);
+      b.graphUrl = '/' + out.filename;
+      persist();
+      refresh();
+      status(`downloaded ${out.filename}: ${out.floors} floors, ` +
+        `${(out.raw.length / 1048576).toFixed(1)}MB raw, ` +
+        `${(out.gz.length / 1048576).toFixed(2)}MB gzip - upload it to the server`);
+    }
+
+    function wireGraphButtons() {
+      wire('downloadGraphBtn', 'click', async () => {
+        if (graphBusy) return;
+        const b = building();
+        if (!b) { status('select a building first'); return; }
+        setGraphBusy(true);
+        try {
+          await downloadBuildingGraph(b);
+        } catch (err) {
+          status(`navgraph bundle failed: ${err.message || err}`);
+        } finally {
+          setGraphBusy(false);
+        }
+      });
+
+      wire('downloadAllGraphsBtn', 'click', async () => {
+        if (graphBusy) return;
+        if (!config.length) { status('no buildings to generate'); return; }
+        setGraphBusy(true);
+        let ok = 0, failed = 0;
+        try {
+          for (const b of config) {
+            try {
+              await downloadBuildingGraph(b);
+              ok++;
+            } catch (err) {
+              failed++;
+              console.warn(`navgraph bundle failed for ${b.id}:`, err);
+              status(`navgraph ${b.id} failed: ${err.message || err}`);
+            }
+            // Browsers may block several automatic downloads; this gives each
+            // one a separate turn and lets the user grant permission.
+            await new Promise((r) => setTimeout(r, 350));
+          }
+        } finally {
+          setGraphBusy(false);
+        }
+        status(`navgraph bundles: ${ok} downloaded, ${failed} failed` +
+          (failed ? ' - check the status for the first error' : ''));
+      });
+    }
+
     wire('downloadBtn', 'click', async () => {
       // Make sure every configured floor carries its portal cache before we
       // serialize, so the app never has to extract them at load time.
@@ -1363,6 +1631,7 @@
     for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); });
     drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], { mode: 'auto' }));
 
+    wireGraphButtons();
     loadInitial().then(() => refresh());
 
     // Console debugging, same spirit as index.html's window.campusRouter.
