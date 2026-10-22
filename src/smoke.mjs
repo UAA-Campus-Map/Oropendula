@@ -1463,9 +1463,13 @@ console.log('\nOSM paths cache:');
       minLat: minLat - 200 / m.lat, maxLat: maxLat + 200 / m.lat,
     };
     const c = cache.bbox;
+    // Generated bboxes are rounded in JSON; the app allows a sub-metre
+    // boundary tolerance so a portal exactly on the pad does not force a live
+    // PMTiles decode. Mirror it here.
+    const eps = 1e-7;
     check('osm-paths.json covers the campus bbox',
-      !!c && bb.minLon >= c.minLon && bb.maxLon <= c.maxLon &&
-      bb.minLat >= c.minLat && bb.maxLat <= c.maxLat);
+      !!c && bb.minLon >= c.minLon - eps && bb.maxLon <= c.maxLon + eps &&
+      bb.minLat >= c.minLat - eps && bb.maxLat <= c.maxLat + eps);
     // The cached shapes must build the same outdoor graph as a live decode.
     const graph = buildOutdoorGraph(cache.shapes, 61.19,
       buildings.flatMap(b => b.floors[0]?.obstacleLines ?? []));

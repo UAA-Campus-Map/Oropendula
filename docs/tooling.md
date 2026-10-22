@@ -100,4 +100,5 @@ step-length mixture tests are a good template), and keep the fast subset fast.
 ## See also
 
 - [`apps.md`](apps.md) — the HTML entry points.
+- [`navgraph-bundles.md`](navgraph-bundles.md) — binary bundle format and codec/runtime API.
 - [`navgraph.md`](navgraph.md), [`campus.md`](campus.md), [`osm.md`](osm.md).

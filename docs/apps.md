@@ -33,6 +33,13 @@ Internal math is metric. The **UI shows Imperial**: `distanceText` (feet, miles
 past ¼ mile), `stepLenText` (inches), `speedText` (ft/s), and the height
 estimator defaults to **ft·in** with a cm toggle.
 
+### Floor ids
+
+Floor ids are strings. `floors.mjs` is the shared source of truth: `B1`/`B2`
+sort **below** `01`, display as **Basement 1**/**Basement 2**, and map to 3D
+levels `0`/`-1` (ground `01` is level `1`). The floor stepper starts on the
+ground floor even when a building has a basement.
+
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
@@ -85,5 +92,6 @@ a convenient place to observe the filter without sensors.
 ## See also
 
 - [`tooling.md`](tooling.md) — the test suite that verifies the shared logic.
+- [`navgraph-bundles.md`](navgraph-bundles.md) — the cached binary graph format used by `app.html`.
 - [`locate.md`](locate.md), [`autocal.md`](autocal.md) — the algorithms the
   calibration flows drive.

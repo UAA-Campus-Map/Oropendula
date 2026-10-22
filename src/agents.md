@@ -31,7 +31,8 @@ build step, no npm dependencies in the app itself.
   half into compact per-building `<id>.nvg.gz` bundles: Float64 nodes, undirected
   CSR adjacency, RLE blocked raster, no weights, no passages.
   `buildings-config.json` points at them with `graphUrl`; `gen-navgraphs.mjs`
-  and the import tool's Deploy section generate them.
+  and the import tool's Deploy section generate them. See
+  `docs/navgraph-bundles.md` for the byte layout and codec/runtime API.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).

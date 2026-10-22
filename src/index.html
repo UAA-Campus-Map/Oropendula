@@ -549,6 +549,7 @@
              isWallLayer, isDoorLayer } from './campus.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
+    import { floorRank, floorLabelOf, floorLevelOf } from './floors.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
     import { ParticleFilter } from './locate.mjs';
@@ -1101,6 +1102,7 @@
       return m;
     }
     function floorLevelColor(level) {
+      if (level <= 0) return 'hsl(220, 62%, 52%)';   // basements: blue
       const max = maxFloorLevel();
       const t = max > 1 ? (level - 1) / (max - 1) : 0;
       return `hsl(${Math.round(120 * t)}, 72%, 50%)`;
@@ -1131,7 +1133,6 @@
     const ROUTE_WIDTH_M = 0.35;   // route ribbon width
     const STRUCTURE_OPACITY = 0.22;   // x-ray fill-extrusion opacity, all levels
     const TOP_OUTLINE_M = 0.2;        // base band height on the top level (kept subtle)
-    const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
     const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
 
     /** Closed lon/lat ring of a thin rectangle around segment a->b. */
@@ -2958,14 +2959,18 @@
       const levels = new Set();
       for (const b of buildingList) for (const f of b.floors) levels.add(f.floorId);
       floorLevels = [...levels].sort((a, c) =>
+        floorRank(a) - floorRank(c) ||
         String(a).localeCompare(String(c), undefined, { numeric: true }));
-      setFloor(1);
+      const ground = buildingGroundFloor();
+      const groundIndex = floorLevels.indexOf(ground);
+      const firstAboveBasement = floorLevels.findIndex((id) => floorRank(id) >= 1);
+      setFloor(groundIndex >= 0 ? groundIndex + 1 : firstAboveBasement >= 0 ? firstAboveBasement + 1 : 1);
     }
 
     /** Move the display to a floor level (clamped), re-filtering and redrawing. */
     function setFloor(level) {
       floorLevel = Math.max(1, Math.min(floorLevels.length, level));
-      floorLabel.textContent = `Floor ${floorLevel}`;
+      floorLabel.textContent = floorLabelOf(currentFloorId());
       floorDown.disabled = floorLevel <= 1;
       floorUp.disabled = floorLevel >= floorLevels.length;
       applyFloorFilter(currentFloorId());

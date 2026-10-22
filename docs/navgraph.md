@@ -72,6 +72,9 @@ uses `makeBundleGraph()` to produce the same query graph. Missing or invalid
 bundles fall back to the existing worker/synchronous build. Heading fields are
 created lazily from the floor's wall/door inputs on first locator use.
 
+See [`navgraph-bundles.md`](navgraph-bundles.md) for the complete byte layout,
+codec API, runtime methods, generation workflow, and validation rules.
+
 ## Implementation notes / invariants
 
 - The clearance raster inflates every wall by ~0.3 m each side, i.e. a ~0.6 m

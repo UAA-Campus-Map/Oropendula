@@ -16,6 +16,7 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 |---|------|--------|-------------|
 | 1 | [geo.md](geo.md) | `geo.mjs` | DXF↔lon/lat registration and metres-per-degree |
 | 2 | [navgraph.md](navgraph.md) | `navgraph.mjs` | per-floor clearance raster + visibility graph + Dijkstra |
+| 2a | [navgraph-bundles.md](navgraph-bundles.md) | `navgraph-codec.mjs` + runtime | cached binary navGraph format, exports and boot path |
 | 3 | [campus.md](campus.md) | `campus.mjs` | portals, doors, skybridges, the outdoor graph, and the tiered router |
 | 4 | [osm.md](osm.md) | `osm.mjs` | OpenStreetMap roads → the same shape format, for outdoor legs |
 | 5 | [pmtiles-node.md](pmtiles-node.md) | `pmtiles-node.mjs` | dependency-free PMTiles reader for the tests |

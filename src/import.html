@@ -401,9 +401,14 @@
       return unionBBox(draft, live);
     }
 
+    // Generated bboxes are rounded in JSON; allow a sub-metre tolerance at the
+    // padded boundary so an exact-boundary portal is not reported stale.
+    const BBOX_EPS_DEG = 1e-7;
     const bboxCovers = (outer, inner) => !!outer && !!inner &&
-      inner.minLon >= outer.minLon && inner.maxLon <= outer.maxLon &&
-      inner.minLat >= outer.minLat && inner.maxLat <= outer.maxLat;
+      inner.minLon >= outer.minLon - BBOX_EPS_DEG &&
+      inner.maxLon <= outer.maxLon + BBOX_EPS_DEG &&
+      inner.minLat >= outer.minLat - BBOX_EPS_DEG &&
+      inner.maxLat <= outer.maxLat + BBOX_EPS_DEG;
 
     // Informational only: does the osm-paths.json on the server cover the
     // campus this tool describes AND the deployed config? Generation stays

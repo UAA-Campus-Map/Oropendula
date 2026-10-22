@@ -1122,6 +1122,7 @@
     import { makeBundleGraph } from './navgraph-bundle-runtime.mjs';
     import { extractPortals, portalsFromCache, buildCampusRouter } from './campus.mjs';
     import { navGraphInputs } from './navgraph-source.mjs';
+    import { floorRank, floorLabelOf, floorLevelOf } from './floors.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
@@ -1817,7 +1818,7 @@
       document.getElementById('cal-target-dist').textContent = distanceText(target.meters);
       document.getElementById('guide-target').textContent = `Walk to ${target.text}`;
       document.getElementById('guide-sub').textContent =
-        `Floor ${floorLevelOf(target.floorId)} · ${distanceText(target.meters)} · ${buildingLabel(hit.building.id)}`;
+        `${floorLabelOf(target.floorId)} · ${distanceText(target.meters)} · ${buildingLabel(hit.building.id)}`;
       showCalScreen('indoor-walk');
       setWalkUI();
       minimizeCalGuide();   // hide the modal so the map/route is visible
@@ -2214,6 +2215,7 @@
       return m;
     }
     function floorLevelColor(level) {
+      if (level <= 0) return 'hsl(220, 62%, 52%)';   // basements: blue
       const max = maxFloorLevel();
       const t = max > 1 ? (level - 1) / (max - 1) : 0;
       return `hsl(${Math.round(120 * t)}, 72%, 50%)`;
@@ -2244,7 +2246,6 @@
     const ROUTE_WIDTH_M = 0.35;   // route ribbon width
     const STRUCTURE_OPACITY = 0.22;   // x-ray fill-extrusion opacity, all levels
     const TOP_OUTLINE_M = 0.2;        // base band height on the top level (kept subtle)
-    const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
     const floorBase = (floorId) => (floorLevelOf(floorId) - 1) * FLOOR_HEIGHT_M;
 
     /** Closed lon/lat ring of a thin rectangle around segment a->b. */
@@ -2690,14 +2691,14 @@
       let label = step.kind, detail = '';
       if (step.kind === 'indoor') {
         label = `Inside ${buildingLabel(step.building)}`;
-        detail = `Floor ${step.floor} · ${distanceText(step.meters)}`;
+        detail = `${floorLabelOf(step.floor)} · ${distanceText(step.meters)}`;
       } else if (step.kind === 'outdoor') {
         label = 'Walk outside';
         detail = distanceText(step.meters);
       } else if (step.kind === 'elevator') {
-        label = 'Take the elevator'; detail = `Floor ${step.from} → ${step.to}`;
+        label = 'Take the elevator'; detail = `${floorLabelOf(step.from)} → ${floorLabelOf(step.to)}`;
       } else if (step.kind === 'stairs') {
-        label = 'Take the stairs'; detail = `Floor ${step.from} → ${step.to}`;
+        label = 'Take the stairs'; detail = `${floorLabelOf(step.from)} → ${floorLabelOf(step.to)}`;
       } else if (step.kind === 'skybridge') {
         label = 'Cross the skybridge';
         detail = step.building ? `to ${buildingLabel(step.building)}` : '';
@@ -3952,9 +3953,13 @@
         if (!res.ok) return null;
         const cache = await res.json();
         const c = cache.bbox;
+        // Generated bboxes are rounded in JSON. Allow a sub-metre tolerance so
+        // a portal exactly on the padded boundary does not force a live PMTiles
+        // decode. 1e-7 deg is ~1 cm at this latitude.
+        const eps = 1e-7;
         const covers = c &&
-          bbox.minLon >= c.minLon && bbox.maxLon <= c.maxLon &&
-          bbox.minLat >= c.minLat && bbox.maxLat <= c.maxLat;
+          bbox.minLon >= c.minLon - eps && bbox.maxLon <= c.maxLon + eps &&
+          bbox.minLat >= c.minLat - eps && bbox.maxLat <= c.maxLat + eps;
         if (!covers) {
           console.warn('osm-paths.json does not cover the campus; decoding pmtiles live');
           return null;
@@ -4214,15 +4219,22 @@
     function populateFloorPicker(buildingList) {
       const levels = new Set();
       for (const b of buildingList) for (const f of b.floors) levels.add(f.floorId);
+      // Basements sort BELOW the ground floor; never let import order make B1
+      // look like an upper floor.
       floorLevels = [...levels].sort((a, c) =>
+        floorRank(a) - floorRank(c) ||
         String(a).localeCompare(String(c), undefined, { numeric: true }));
-      setFloor(1);
+      // Start on the ground floor rather than the lowest basement.
+      const ground = buildingGroundFloor();
+      const groundIndex = floorLevels.indexOf(ground);
+      const firstAboveBasement = floorLevels.findIndex((id) => floorRank(id) >= 1);
+      setFloor(groundIndex >= 0 ? groundIndex + 1 : firstAboveBasement >= 0 ? firstAboveBasement + 1 : 1);
     }
 
     /** Move the display to a floor level (clamped), re-filtering and redrawing. */
     function setFloor(level) {
       floorLevel = Math.max(1, Math.min(floorLevels.length, level));
-      floorLabel.textContent = `Floor ${floorLevel}`;
+      floorLabel.textContent = floorLabelOf(currentFloorId());
       floorDown.disabled = floorLevel <= 1;
       floorUp.disabled = floorLevel >= floorLevels.length;
       applyFloorFilter(currentFloorId());
