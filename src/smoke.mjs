@@ -1608,6 +1608,23 @@ console.log('\nMulti-floor routing (all real floors):');
       !rUp.segments.some(s => s.tier === 'outdoor'));
   }
 
+  // HSB (AS156) lands on floor 02 while EIB (AS162) lands on floor 03, via
+  // Parrish Bridge (AS164) on floor 03. The route must change floors on the
+  // bridge, not descend to the ground.
+  {
+    const sHSB = walkableRoom('AS156', '02');
+    const eEIB = walkableRoom('AS162', '03');
+    const rHB = sHSB && eEIB
+      ? routerAll.route(sHSB, eEIB, { startFloor: '02', endFloor: '03' })
+      : null;
+    showRoute('AS156 f02 -> AS162 f03 (cross-floor skybridge)', rHB);
+    check('HSB f02 -> EIB f03 uses cross-floor skybridge',
+      !!rHB && rHB.segments.some(s => s.tier === 'skybridge') &&
+      rHB.segments.some(s => s.tier === 'skybridge' &&
+        s.fromFloor === '02' && s.toFloor === '03') &&
+      !rHB.segments.some(s => s.tier === 'outdoor'));
+  }
+
   // ECB (AS121) <-> SU (AS119): the mutual explicit pair (~125 m, and it has
   // lived on different floors while being placed). Explicit marks must link it
   // regardless of floor number and the SKYBRIDGE_MAX_M cap, so find the pair
@@ -1674,6 +1691,31 @@ console.log('\nAuto-detected skybridge (synthetic):');
     !rS.segments.some(s => s.tier === 'elevator' || s.tier === 'stairs'));
   check('skybridge segment carries its floor',
     rS && rS.segments.find(s => s.tier === 'skybridge')?.floor === '02');
+
+  // Cross-floor auto pairing: X's bridge is on floor 02, Y's on floor 03.
+  // They are still the only pair within the cap, so auto-detection must link
+  // them and the route must carry the floor change across the bridge.
+  const mkCross = (cx, west, bridgeFloor) => {
+    const floors = ['01', '02', '03'].map(fid => ({
+      floorId: fid, ...square(cx, lat0), elevators: [],
+      stairs: [{ id: `s${fid}`, ll: [cx, lat0] }], exits: [], skybridges: [],
+    }));
+    floors.find(f => f.floorId === bridgeFloor).skybridges = [{
+      id: 'bridge', ll: [cx + (west ? -1 : 1) * dx * 0.9, lat0],
+    }];
+    return { id: west ? 'XC' : 'YC', groundFloor: '01', floors };
+  };
+  const XC = mkCross(lon0, false, '02');
+  const YC = mkCross(yx, true, '03');
+  const routerC = buildCampusRouter([XC, YC]);
+  const rC = routerC.route([lon0, lat0], [yx, lat0],
+    { startFloor: '02', endFloor: '03' });
+  showRoute('XC f02 -> YC f03 via auto cross-floor bridge', rC);
+  check('auto-detected bridge links across floor numbers',
+    routerC.stats.skybridgeEdges === 1 &&
+    rC?.segments.some(s => s.tier === 'skybridge' &&
+      s.fromFloor === '02' && s.toFloor === '03') &&
+    !rC.segments.some(s => s.tier === 'elevator' || s.tier === 'stairs' || s.tier === 'outdoor'));
 }
 
 if (want('multifloor')) {

@@ -23,7 +23,8 @@ nodes are *building exits*; its edges are:
 - same-building edges: indoor ground-floor path lengths between exits,
 - cross-building edges: outdoor path lengths,
 - vertical edges: elevator/stair stops linking floors,
-- skybridge edges: explicit floor-to-floor bridges.
+- skybridge edges: explicit floor-to-floor bridges (the two ends may be on
+  different floors, e.g. HSB 02 ↔ Parrish Bridge 03 ↔ EIB 03).
 
 Routing is then Dijkstra on the macro graph to choose the **chain of buildings**,
 with a per-floor `navGraph` Dijkstra filling in the indoor legs. That yields the
@@ -79,6 +80,13 @@ same-floor trips short-circuit to a single indoor leg.
 - Vertical connector stops are matched by **proximity** across floors, seeded from
   the ground floor where present, and from the first floor that has the kind
   otherwise (a stairwell that exists only above ground).
+- Skybridge pairing: explicit `to` marks win and may join different floor
+  numbers. Unmarked bridges auto-pair by proximity within `SKYBRIDGE_MAX_M`,
+  preferring the same floor but allowing a cross-floor pair when no same-floor
+  candidate exists. `bridgeUsed` gives each bridge node at most one connection,
+  so one node per bridge end/building is sufficient.
+- A `skybridge` route segment carries both `fromFloor` and `toFloor`; the app
+  draws it on both 2D floors and shows the floor change in the route step.
 - Outdoor edges never cross a wall — enforced against `buildObstacleIndex`.
 - `stats` reports nodes/edges/exits and build time; the app shows it in the
   calibration panel's debug line.

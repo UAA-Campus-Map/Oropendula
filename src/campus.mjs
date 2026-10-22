@@ -1265,11 +1265,14 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   // SKYBRIDGE_MAX_M and the floor number, because the marks say exactly which
   // bridge goes where (ECB-01 <-> SU-02 crosses a grade change; ECB-02 <->
   // SU-02 was ~125 m, over the old cap). Unmarked bridges then fall back to
-  // greedy min-distance matching: same floor *number* ("2" vs "02" still
-  // link) and within the cap. A bridge with an explicit destination never
-  // auto-pairs elsewhere, so a wrong auto-link cannot happen to it. Only
-  // explicit bridges participate - an ordinary (rooftop) exit never connects a
-  // building - and ground-level bridges are allowed (a shared first floor).
+  // greedy min-distance matching within the cap. A bridge with an explicit
+  // destination never auto-pairs elsewhere, so a wrong auto-link cannot happen
+  // to it. Only explicit bridges participate - an ordinary (rooftop) exit never
+  // connects a building - and ground-level bridges are allowed (a shared first
+  // floor). Auto pairs prefer the same floor number ("2" vs "02" still match)
+  // but may fall back to a cross-floor pair when that is the only candidate; a
+  // bridge can legitimately land on floor 2 in one building and floor 3 in
+  // another.
   const bridgeIdx = [];
   for (let i = 0; i < N; i++) if (nodes[i].kind === 'bridge') bridgeIdx.push(i);
   const bridgeCandidates = [];
@@ -1280,12 +1283,15 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       if (A.building === B.building) continue;
       const aWants = A.to === B.building.id, bWants = B.to === A.building.id;
       if (!aWants && !bWants) {
-        // Auto fallback: both unmarked, same floor number, within the cap.
+        // Auto fallback: both unmarked. Prefer same-floor pairs, but allow a
+        // cross-floor pair when no same-floor candidate exists (a bridge may
+        // land on floor 2 in one building and floor 3 in the other). The
+        // one-use `bridgeUsed` set still enforces one connection per end.
         if (A.to || B.to) continue;
-        if (floorNum(B.floor.floorId) !== floorNum(A.floor.floorId)) continue;
         const d = distLL(A.ll, B.ll, scale);
         if (d > SKYBRIDGE_MAX_M) continue;
-        bridgeCandidates.push({i, j, d, rank: 2});
+        const sameFloor = floorNum(B.floor.floorId) === floorNum(A.floor.floorId);
+        bridgeCandidates.push({i, j, d, rank: sameFloor ? 2 : 3});
       } else {
         bridgeCandidates.push({i, j, d: distLL(A.ll, B.ll, scale), rank: aWants && bWants ? 0 : 1});
       }

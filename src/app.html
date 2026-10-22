@@ -2701,7 +2701,12 @@
         label = 'Take the stairs'; detail = `${floorLabelOf(step.from)} → ${floorLabelOf(step.to)}`;
       } else if (step.kind === 'skybridge') {
         label = 'Cross the skybridge';
-        detail = step.building ? `to ${buildingLabel(step.building)}` : '';
+        const floors = step.from && step.to
+          ? (step.from === step.to ? floorLabelOf(step.from)
+              : `${floorLabelOf(step.from)} → ${floorLabelOf(step.to)}`)
+          : '';
+        detail = [step.building ? `to ${buildingLabel(step.building)}` : '', floors]
+          .filter(Boolean).join(' · ');
       }
       text.textContent = label;
       sub.textContent = detail;

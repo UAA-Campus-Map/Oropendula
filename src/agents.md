@@ -134,7 +134,9 @@ Edges:
 - same building, same floor: indoor walk between any two nodes (one Dijkstra per
   node builds the whole floor);
 - same connector, different floors: vertical ride (elevator/stairs);
-- two bridges, same level, different buildings: skybridge (explicit `to` destination, else greedy min-distance matching);
+- two bridges, different buildings: skybridge (explicit `to` destination, else
+  greedy min-distance matching). A bridge may join different floors, e.g. HSB
+  floor 02 ↔ Parrish Bridge floor 03 ↔ EIB floor 03.
 - cross-building ground-floor doors: outdoor path-network length.
 
 `route()` attaches the start/end point to the nodes on its own floor (doors,
@@ -175,15 +177,21 @@ one-sided, each shortest-first, one partner per portal. Explicit links ignore
 both `SKYBRIDGE_MAX_M` and the floor number — the marks say exactly which
 bridge goes where (AS121-01 ↔ AS119-02 is ~126 m and crosses a grade change;
 the earlier same-floor rule and the 120 m cap both blocked it). Unmarked
-bridges then fall back to greedy min-distance matching: same floor *number*
-(so DXFs labelling the storey "2" vs "02" still link) and within the cap, and
-a bridge with a destination never auto-pairs elsewhere (no accidental link to
-a nearer neighbour). Strict mutual-nearest was the original bug source:
+bridges then fall back to greedy min-distance matching within the cap, preferring
+the same floor *number* (so DXFs labelling the storey "2" vs "02" still link)
+but allowing a cross-floor pair when that is the only candidate. One partner per
+portal; a bridge with a destination never auto-pairs elsewhere (no accidental
+link to a nearer neighbour). Strict mutual-nearest was the original bug source:
 AS119's ECB-side bridge had AS117 closer, so AS117 took it and ECB linked to
 nothing. Only bridges pair, so an ordinary rooftop door facing a neighbour
 cannot connect a building; ground-level bridges are allowed too (AS117-01 ↔
 AS119-01 share a first floor across two DXFs). Mark **both** sides and set
 the destination on each.
+
+The route segment for a cross-floor bridge carries both `fromFloor` and
+`toFloor`; the app draws it on both 2D floors and shows the floor change in the
+route step. HSB (AS156) is the real example: its bridge lands on floor **02**,
+while Parrish Bridge/EIB are on floor **03**.
 
 The algorithm below is what `extractPortals` still computes (cached as the
 seed/fallback for doors):
