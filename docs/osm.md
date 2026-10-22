@@ -40,6 +40,11 @@ to charge a heavy routing penalty for crossing named roads.
 - `gen-osm.mjs` precomputes this at build time into `osm-paths.json` so the app
   does not pay the fetch+decode cost per load; the app falls back to live decode
   when the cache is missing or does not cover the campus bbox.
+- `import.html`’s **Download osm-paths.json** builds the bbox from the union of
+  the draft config, the **deployed** config (localStorage can lag the server),
+  and each floor’s **wall extents** — not just portal points — so a stale draft
+  cannot produce an undersized cache. Its status check also compares against the
+  deployed config.
 - Tiles overlap at their edges (buffer), so stitching can create duplicate/short
   ways; `campus.mjs` drops the ones that cut through buildings or are trivially
   short.

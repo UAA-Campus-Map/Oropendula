@@ -68,6 +68,7 @@
     .key.bridge { background: #8e44ad; }
     .key.elevator { background: #8e44ad; }
     .key.stairs { background: #e67e22; }
+    .key.shadow { background: #2f6fb5; opacity: .65; }
   </style>
 </head>
 <body>
@@ -104,6 +105,8 @@
     <div class="row">
       <button id="alignBtn" title="Match the ground floor's rotation, then best-fit the position">align to ground</button>
     </div>
+    <label><input type="checkbox" id="showShadow" checked /> show topmost floor shadow</label>
+    <div id="shadow-note" class="hint" style="margin:2px 0 8px">Shadow: none</div>
     <div class="hint" style="margin:2px 0 8px">
       Portals: <span class="key elevator"></span> elevator &nbsp;
       <span class="key stairs"></span> stairs
@@ -209,6 +212,7 @@
     let datumMarker = null, handleMarker = null;
     let didInitialFit = false;      // first load: fit the plan clear of the panel
     let portalsDirty = false;       // a portal cache was computed since last persist
+    let previewRaf = 0;             // live drag redraw scheduled
     let editMode = null;            // 'place-door' | 'remove-door' | 'place-bridge' | 'remove-bridge'
     let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
 
@@ -219,6 +223,29 @@
     // Cache by URL: it stays put when a building id is renamed, whereas the
     // old `${id}/${floorId}` key missed and silently blanked the plan.
     const floorKey = (b, f) => f.url || `${b.id}/${f.floorId}`;
+
+    /** Numeric rank of a floor id; basements rank below 1, names rank 0. */
+    function floorRank(id) {
+      const s = String(id ?? '').trim().toUpperCase();
+      if (/^B\d+$/.test(s)) return -parseInt(s.slice(1), 10);
+      const n = parseInt(s, 10);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    /**
+     * The building's topmost floor other than the selected one. Used as the
+     * fixed shadow reference when stacking/aligning floors; when the selected
+     * floor is the current top, this is the floor directly below it.
+     */
+    function topmostOtherFloor(b, current) {
+      let best = null, bestRank = -Infinity;
+      for (const ff of b?.floors ?? []) {
+        if (ff === current) continue;
+        const rank = floorRank(ff.floorId);
+        if (rank > bestRank) { bestRank = rank; best = ff; }
+      }
+      return best;
+    }
 
     // Exterior doors are placed by hand. floor.exits is the manual list; when
     // absent the algorithm's exits (cached on floor.portals) are shown as a
@@ -241,20 +268,23 @@
     }
 
     // --- OSM path cache (deploy artifact) ----------------------------------
-    // The campus bbox the app computes: effective exits (manual doors win)
-    // plus cached stairs/elevators, padded by OSM_PAD_M. Mirrors
-    // gen-osm.mjs / index.html's outdoorBBoxFromConfig exactly, so the file
-    // this tool downloads covers the app's bbox check.
-    function campusBBox(padM = OSM_PAD_M) {
+    // The app's coverage check is portal based: effective exits (manual doors
+    // win) plus cached stairs/elevators, padded by OSM_PAD_M. The import tool
+    // must cover BOTH the draft config and the deployed config (its
+    // localStorage copy can lag the server), and wall extents are included in
+    // the generated bbox so a floor whose portal cache is missing is still
+    // covered. gen-osm.mjs mirrors the portal part.
+    function bboxFromConfig(cfg, padM = OSM_PAD_M, includeWalls = false) {
       let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-      const bump = ([lon, lat]) => {
+      const bump = (lon, lat) => {
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
         if (lon < minLon) minLon = lon;
         if (lon > maxLon) maxLon = lon;
         if (lat < minLat) minLat = lat;
         if (lat > maxLat) maxLat = lat;
       };
-      for (const b of config) {
-        for (const f of b.floors) {
+      for (const b of cfg ?? []) {
+        for (const f of b.floors ?? []) {
           const toLL = makeToLL(b, f);
           const p = f.portals ? portalsFromCache(f.portals, toLL)
                               : { elevators: [], stairs: [], exits: [] };
@@ -262,7 +292,19 @@
             ? f.exits.map(e => toLL(e.dxf[0], e.dxf[1]))
             : p.exits.map(e => e.ll);
           for (const q of [...p.elevators.map(e => e.ll), ...p.stairs.map(e => e.ll), ...exits]) {
-            bump(q);
+            bump(q[0], q[1]);
+          }
+          if (includeWalls) {
+            const data = floorData.get(floorKey(b, f));
+            if (data) {
+              const bb = floorBBox(data);
+              if (bb) {
+                for (const [x, y] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
+                  const ll = toLL(x, y);
+                  bump(ll[0], ll[1]);
+                }
+              }
+            }
           }
         }
       }
@@ -274,28 +316,82 @@
       };
     }
 
+    function campusBBox(padM = OSM_PAD_M) {
+      return bboxFromConfig(config, padM, false);
+    }
+
+    function unionBBox(a, b) {
+      if (!a) return b;
+      if (!b) return a;
+      return {
+        minLon: Math.min(a.minLon, b.minLon), maxLon: Math.max(a.maxLon, b.maxLon),
+        minLat: Math.min(a.minLat, b.minLat), maxLat: Math.max(a.maxLat, b.maxLat),
+      };
+    }
+
+    // The deployed config is what the live app computes its bbox from. Cache
+    // its bbox for status checks; reload invalidates it.
+    let deployedBBox;   // undefined = not fetched yet
+    async function fetchDeployedConfig() {
+      try {
+        const res = await fetch(`/buildings-config.json?t=${Date.now()}`, { cache: 'no-store' });
+        return res.ok ? await res.json() : null;
+      } catch { return null; }
+    }
+    async function deployedCampusBBox() {
+      if (deployedBBox !== undefined) return deployedBBox;
+      const cfg = await fetchDeployedConfig();
+      deployedBBox = cfg ? bboxFromConfig(cfg, OSM_PAD_M, false) : null;
+      return deployedBBox;
+    }
+
+    /**
+     * Build the bbox for a new osm-paths.json:
+     *  - load every draft floor (and its portal cache),
+     *  - cover the deployed config too (localStorage can lag the server),
+     *  - include wall extents, not just portals.
+     */
+    async function buildOsmBBox() {
+      for (const b of config) {
+        for (const f of b.floors ?? []) {
+          if (!f.url) continue;
+          const data = await loadFloorData(b, f);
+          if (data) ensurePortals(b, f, data);
+        }
+      }
+      const deployed = await fetchDeployedConfig();
+      for (const b of deployed ?? []) {
+        for (const f of b.floors ?? []) {
+          if (f.url) await loadFloorData(b, f);
+        }
+      }
+      const draft = bboxFromConfig(config, OSM_PAD_M, true);
+      const live = bboxFromConfig(deployed ?? [], OSM_PAD_M, true);
+      return unionBBox(draft, live);
+    }
+
     const bboxCovers = (outer, inner) => !!outer && !!inner &&
       inner.minLon >= outer.minLon && inner.maxLon <= outer.maxLon &&
       inner.minLat >= outer.minLat && inner.maxLat <= outer.maxLat;
 
     // Informational only: does the osm-paths.json on the server cover the
-    // campus this tool currently describes? Generation stays manual - the
-    // Download osm-paths.json button.
+    // campus this tool describes AND the deployed config? Generation stays
+    // manual - the Download osm-paths.json button.
     async function refreshOsmStatus() {
       const el = $('osm-status');
       if (!el) return;
       if (osmCacheBBox === null) {
         try {
-          const res = await fetch('/osm-paths.json');
+          const res = await fetch(`/osm-paths.json?t=${Date.now()}`, { cache: 'no-store' });
           osmCacheBBox = res.ok ? (await res.json()).bbox : undefined;
         } catch { osmCacheBBox = undefined; }
       }
-      const bbox = campusBBox();
-      if (!bbox) {
+      const required = unionBBox(campusBBox(), await deployedCampusBBox());
+      if (!required) {
         el.textContent = 'OSM paths: add a building first';
       } else if (osmCacheBBox === undefined) {
         el.textContent = 'OSM paths: none on the server yet - press Download osm-paths.json';
-      } else if (bboxCovers(osmCacheBBox, bbox)) {
+      } else if (bboxCovers(osmCacheBBox, required)) {
         el.textContent = 'OSM paths: the server cache covers this campus';
       } else {
         el.textContent = 'OSM paths: stale (campus changed) - press Download osm-paths.json';
@@ -322,6 +418,20 @@
 
     map.on('load', () => {
       addFillLayer('imp-walls', '#c0392b', 1.6);
+      // Topmost-floor shadow: dashed blue, drawn UNDER the selected floor so
+      // the new plan can be aligned on top of it.
+      if (!map.getSource('imp-walls-shadow')) {
+        map.addSource('imp-walls-shadow', { type: 'geojson', data: empty });
+      }
+      map.addLayer({
+        id: 'imp-walls-shadow', type: 'line', source: 'imp-walls-shadow',
+        paint: {
+          'line-color': '#2f6fb5',
+          'line-width': 1.6,
+          'line-opacity': 0.6,
+          'line-dasharray': [2, 2],
+        },
+      }, 'imp-walls');
       addFillLayer('imp-walls-ghost', '#999999', 1);
       addFillLayer('imp-footprint', '#2980b9', 1.6);
       addLabelLayer('imp-labels');
@@ -407,9 +517,17 @@
     });
 
     // --- geometry ----------------------------------------------------------
-    const wallLines = data => data.shapes
-      .filter(s => isWallLayer(s.layer))
-      .flatMap(shapeSegments);
+    // Filtering/segmenting a floor's shapes is the expensive part of a redraw;
+    // cache it per floor JSON so live drag previews stay smooth.
+    const wallLinesCache = new WeakMap();
+    const wallLines = data => {
+      let lines = wallLinesCache.get(data);
+      if (!lines) {
+        lines = data.shapes.filter(s => isWallLayer(s.layer)).flatMap(shapeSegments);
+        wallLinesCache.set(data, lines);
+      }
+      return lines;
+    };
 
     /** Wall features of one floor in lon/lat at its current placement. */
     function floorFeatures(b, f, data, toLL) {
@@ -454,65 +572,32 @@
       return f.portals;
     }
 
-    // --- refresh everything from state -------------------------------------
-    // Serialized: overlapping refreshes could race (one starting before the
-    // map layers exist, another after) and finish out of order. The panel is
-    // populated immediately; map writes are skipped until the style is ready
-    // and the map-load refresh fills them in.
-    function refresh() {
-      if (refreshing) { refreshQueued = true; return; }
-      refreshing = true;
-      refreshNow()
-        .catch((e) => console.warn('import refresh failed:', e))
-        .finally(() => {
-          refreshing = false;
-          if (refreshQueued) { refreshQueued = false; refresh(); }
-        });
+    /** Draw the topmost other floor as a dashed reference under the plan. */
+    function renderShadow(b, f) {
+      const shadow = $('showShadow')?.checked ? topmostOtherFloor(b, f) : null;
+      const data = shadow ? floorData.get(floorKey(b, shadow)) : null;
+      const features = data ? floorFeatures(b, shadow, data, makeToLL(b, shadow)) : [];
+      setData('imp-walls-shadow', { type: 'FeatureCollection', features });
+      if ($('shadow-note')) {
+        $('shadow-note').textContent = shadow
+          ? `Shadow: ${b.id} ${shadow.floorId}${data ? '' : ' (loading…)'}`
+          : 'Shadow: none';
+      }
     }
 
-    async function refreshNow() {
-      const b = building(), f = floor();
-      refreshOsmStatus();   // fire-and-forget; fetches the server cache once
-      // panel selects
-      const bSel = $('building');
-      bSel.innerHTML = config.map((bb, i) =>
-        `<option value="${i}">${bb.id || '(new)'}</option>`).join('');
-      bSel.value = String(selected.building);
-      // Floor stepper: the label is the floorId; the buttons step within the
-      // selected building (disabled states set in syncPanel).
-      $('floorLabel').textContent = f ? f.floorId : '—';
-      // Bridge destination options: auto plus every OTHER building.
-      const bTo = $('bridgeTo');
-      const curTo = bTo.value;
-      bTo.innerHTML = '<option value="">auto (nearest)</option>' +
-        config.filter((_, i) => i !== selected.building).map(bb =>
-          `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
-      if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
-
-      if (!b || !f) {
-        // Clear every plan layer: otherwise deleting the last building/floor
-        // leaves the previous plan (and its ghost walls/doors) on the map.
-        for (const id of ['imp-walls', 'imp-walls-ghost', 'imp-footprint',
-                          'imp-labels', 'imp-exits', 'imp-skybridges',
-                          'imp-skybridge-labels', 'imp-elevators', 'imp-stairs',
-                          'imp-portal-labels']) {
-          setData(id, empty);
-        }
-        syncMarkers();
-        syncPanel();
-        syncPortalPanel();
-        $('floorPrevBtn').disabled = true;
-        $('floorNextBtn').disabled = true;
-        return;
-      }
+    /**
+     * Redraw everything that belongs to the selected floor at its CURRENT
+     * placement. Used by the full refresh and by the live drag preview.
+     */
+    function renderSelectedFloor(b, f) {
       const toLL = makeToLL(b, f);
-      const data = await loadFloorData(b, f);
-      if (!data && f.url) {
-        status(`could not load ${f.url} - upload that JSON to the server (or re-import it)`);
-      }
-      if (data) ensurePortals(b, f, data);
-      const feats = data ? floorFeatures(b, f, data, toLL) : [];
-      setData('imp-walls', { type: 'FeatureCollection', features: feats });
+      const data = floorData.get(floorKey(b, f));
+
+      // walls
+      setData('imp-walls', {
+        type: 'FeatureCollection',
+        features: data ? floorFeatures(b, f, data, toLL) : [],
+      });
 
       // footprint outline: the wall bbox drawn as a rectangle at the placement
       const fp = [];
@@ -527,20 +612,6 @@
         }
       }
       setData('imp-footprint', { type: 'FeatureCollection', features: fp });
-
-      // other buildings as ghosts
-      const ghost = [];
-      for (let i = 0; i < config.length; i++) {
-        if (i === selected.building) continue;
-        for (const ff of config[i].floors) {
-          const g = await loadFloorData(config[i], ff);
-          if (!g) continue;
-          ensurePortals(config[i], ff, g);
-          const gLL = makeToLL(config[i], ff);
-          ghost.push(...floorFeatures(config[i], ff, g, gLL));
-        }
-      }
-      setData('imp-walls-ghost', { type: 'FeatureCollection', features: ghost });
 
       // room labels of the selected floor
       const labels = ($('showLabels').checked && data?.text_lines)
@@ -596,6 +667,86 @@
         geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
       }));
       setData('imp-portal-labels', { type: 'FeatureCollection', features: portalLabelFeats });
+
+      renderShadow(b, f);
+    }
+
+    // --- refresh everything from state -------------------------------------
+    // Serialized: overlapping refreshes could race (one starting before the
+    // map layers exist, another after) and finish out of order. The panel is
+    // populated immediately; map writes are skipped until the style is ready
+    // and the map-load refresh fills them in.
+    function refresh() {
+      if (refreshing) { refreshQueued = true; return; }
+      refreshing = true;
+      refreshNow()
+        .catch((e) => console.warn('import refresh failed:', e))
+        .finally(() => {
+          refreshing = false;
+          if (refreshQueued) { refreshQueued = false; refresh(); }
+        });
+    }
+
+    async function refreshNow() {
+      const b = building(), f = floor();
+      refreshOsmStatus();   // fire-and-forget; fetches the server cache once
+      // panel selects
+      const bSel = $('building');
+      bSel.innerHTML = config.map((bb, i) =>
+        `<option value="${i}">${bb.id || '(new)'}</option>`).join('');
+      bSel.value = String(selected.building);
+      // Floor stepper: the label is the floorId; the buttons step within the
+      // selected building (disabled states set in syncPanel).
+      $('floorLabel').textContent = f ? f.floorId : '—';
+      // Bridge destination options: auto plus every OTHER building.
+      const bTo = $('bridgeTo');
+      const curTo = bTo.value;
+      bTo.innerHTML = '<option value="">auto (nearest)</option>' +
+        config.filter((_, i) => i !== selected.building).map(bb =>
+          `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
+      if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
+
+      if (!b || !f) {
+        // Clear every plan layer: otherwise deleting the last building/floor
+        // leaves the previous plan (and its ghost walls/doors) on the map.
+        for (const id of ['imp-walls', 'imp-walls-shadow', 'imp-walls-ghost',
+                          'imp-footprint', 'imp-labels', 'imp-exits', 'imp-skybridges',
+                          'imp-skybridge-labels', 'imp-elevators', 'imp-stairs',
+                          'imp-portal-labels']) {
+          setData(id, empty);
+        }
+        if ($('shadow-note')) $('shadow-note').textContent = 'Shadow: none';
+        syncMarkers();
+        syncPanel();
+        syncPortalPanel();
+        $('floorPrevBtn').disabled = true;
+        $('floorNextBtn').disabled = true;
+        return;
+      }
+      const data = await loadFloorData(b, f);
+      if (!data && f.url) {
+        status(`could not load ${f.url} - upload that JSON to the server (or re-import it)`);
+      }
+      if (data) ensurePortals(b, f, data);
+
+      // Preload the shadow reference so the first render includes it.
+      const shadow = topmostOtherFloor(b, f);
+      if ($('showShadow').checked && shadow) await loadFloorData(b, shadow);
+      renderSelectedFloor(b, f);
+
+      // other buildings as ghosts
+      const ghost = [];
+      for (let i = 0; i < config.length; i++) {
+        if (i === selected.building) continue;
+        for (const ff of config[i].floors) {
+          const g = await loadFloorData(config[i], ff);
+          if (!g) continue;
+          ensurePortals(config[i], ff, g);
+          const gLL = makeToLL(config[i], ff);
+          ghost.push(...floorFeatures(config[i], ff, g, gLL));
+        }
+      }
+      setData('imp-walls-ghost', { type: 'FeatureCollection', features: ghost });
 
       syncMarkers();
       syncPanel();
@@ -721,6 +872,16 @@
           const { lng, lat } = datumMarker.getLngLat();   // LngLat is lng/lat
           setPlacement({ origin: { lon: lng, lat } });
         });
+        datumMarker.on('drag', () => {
+          const { lng, lat } = datumMarker.getLngLat();
+          previewPlacement({ origin: { lon: lng, lat } });
+          // Keep the rotation handle attached to the datum while moving.
+          const b2 = building(), f2 = floor();
+          if (b2 && f2 && handleMarker) {
+            const cur = placementOf(b2, f2);
+            handleMarker.setLngLat(makeToLL(b2, f2)(cur.offset.x + HANDLE_R, cur.offset.y));
+          }
+        });
         datumMarker.setLngLat(datumLL);   // addTo() calls _update(), which reads _lngLat
         datumMarker.addTo(map);
       }
@@ -738,6 +899,15 @@
           const east = (lng - cur.origin.lon) * mpd.lon;
           const north = (lat - cur.origin.lat) * mpd.lat;
           setPlacement({ offset: { ...cur.offset, rot: Math.atan2(north, east) } });
+        });
+        handleMarker.on('drag', () => {
+          const { lng, lat } = handleMarker.getLngLat();
+          const cur = placementOf(building(), floor());
+          if (!cur) return;
+          const mpd = metresPerDegree(cur.origin.lat);
+          const east = (lng - cur.origin.lon) * mpd.lon;
+          const north = (lat - cur.origin.lat) * mpd.lat;
+          previewPlacement({ offset: { ...cur.offset, rot: Math.atan2(north, east) } });
         });
         handleMarker.setLngLat(handleLL);  // addTo() calls _update(), which reads _lngLat
         handleMarker.addTo(map);
@@ -765,8 +935,26 @@
     }
 
     // --- placement edits ---------------------------------------------------
+    /**
+     * Live drag preview: write the placement in memory and redraw the selected
+     * floor on the next frame. Persisting and panel sync wait for dragend.
+     */
+    function previewPlacement(patch) {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const cur = placementOf(b, f);
+      f.origin = patch.origin ?? cur.origin;
+      f.offset = patch.offset ?? cur.offset;
+      if (previewRaf) return;
+      previewRaf = requestAnimationFrame(() => {
+        previewRaf = 0;
+        renderSelectedFloor(building(), floor());
+      });
+    }
+
     /** Write origin/offset onto the floor (always floor-level) and refresh. */
     function setPlacement(patch, skipSync = false) {
+      if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = 0; }
       const b = building(), f = floor();
       if (!b || !f) return;
       const cur = placementOf(b, f);
@@ -913,6 +1101,7 @@
       localStorage.removeItem(LS_KEY);
       floorData.clear();
       osmCacheBBox = null;
+      deployedBBox = undefined;
       selected = { building: 0, floor: 0 };
       editMode = null;
       didInitialFit = false;
@@ -1054,6 +1243,7 @@
     wire('id', 'change', e => { building().id = e.target.value; persist(); refresh(); });
     wire('groundFloor', 'change', e => { building().groundFloor = e.target.value; persist(); refresh(); });
     wire('showRoomLabels', 'change', e => { floor().showRoomLabels = e.target.checked; persist(); });
+    wire('showShadow', 'change', () => refresh());
     wire('wallLayerId', 'change', e => { setOpt(floor(), 'wallLayerId', e.target.value); });
     wire('roomLayerId', 'change', e => { setOpt(floor(), 'roomLayerId', e.target.value); });
     wire('doorPlaceBtn', 'click', () => setEditMode('place-door'));
@@ -1138,7 +1328,8 @@
     wire('downloadOsmBtn', 'click', async () => {
       // Manual generation: decode the z15 PMTiles tiles covering the campus
       // and download osm-paths.json, the exact schema gen-osm.mjs writes.
-      const bbox = campusBBox();
+      status('preparing campus extents...');
+      const bbox = await buildOsmBBox();
       if (!bbox) { status('add a building before generating OSM paths'); return; }
       status('decoding OSM tiles...');
       try {
