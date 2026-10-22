@@ -130,7 +130,7 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { buildGraph } from './navgraph.mjs';
-    import { shapeSegments } from './campus.mjs';
+    import { shapeSegments, isWallLayer } from './campus.mjs';
     import { makeToLL } from './geo.mjs';
     import { createMotion, sensorSupport, StepLengthModel, WalkCalibrator, wrapAngle } from './motion.mjs';
     import { ParticleFilter } from './locate.mjs';
@@ -194,10 +194,7 @@
           try {
             const data = await (await fetch(floor.url)).json();
             const toLL = makeToLL(cfg, floor);
-            const walls = data.shapes.filter((s) => {
-              const l = s.layer.toLowerCase();
-              return l === 'walls' || l === 'windows';
-            });
+            const walls = data.shapes.filter((s) => isWallLayer(s.layer));
             const lines = walls.flatMap((w) =>
               shapeSegments(w).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
             const navGraph = buildGraph(turf.lineStrings(lines));

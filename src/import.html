@@ -60,6 +60,8 @@
     .key.manual { background: #c0392b; }
     .key.auto { background: #e67e22; }
     .key.bridge { background: #8e44ad; }
+    .key.elevator { background: #8e44ad; }
+    .key.stairs { background: #e67e22; }
   </style>
 </head>
 <body>
@@ -68,11 +70,16 @@
     <h1>Building import &amp; placement</h1>
     <div id="drop">Drop a building JSON here<br>(or use the picker)</div>
     <input type="file" id="file" accept=".json,application/json" multiple />
+    <input type="file" id="floorFile" accept=".json,application/json" multiple hidden />
+    <input type="file" id="buildingFile" accept=".json,application/json" multiple hidden />
 
     <h2>Building</h2>
     <label>Building <select id="building"></select></label>
     <div class="row">
+      <button id="addBuildingBtn" title="Import a floor JSON as a NEW building">+ building</button>
       <button id="addFloorBtn" title="Attach another floor JSON to this building">+ floor</button>
+    </div>
+    <div class="row">
       <button id="removeFloorBtn" title="Detach the selected floor">− floor</button>
       <button id="removeBuildingBtn" title="Drop this whole building">− building</button>
     </div>
@@ -86,7 +93,11 @@
       <button id="floorNextBtn" title="Floor above">+</button>
     </div>
     <div class="row">
-      <button id="alignBtn" title="Best-fit this floor's exterior perimeter onto the building's ground floor">align to ground</button>
+      <button id="alignBtn" title="Match the ground floor's rotation, then best-fit the position">align to ground</button>
+    </div>
+    <div class="hint" style="margin:2px 0 8px">
+      Portals: <span class="key elevator"></span> elevator &nbsp;
+      <span class="key stairs"></span> stairs
     </div>
     <label><input type="checkbox" id="showRoomLabels" /> show room labels</label>
     <label>wallLayerId override <input type="text" id="wallLayerId" placeholder="auto" /></label>
@@ -142,8 +153,9 @@
     </div>
     <div id="osm-status" class="hint"></div>
     <div class="row">
-      <button id="resetBtn" title="Discard edits and reload the server config">reset</button>
+      <button id="reloadBtn" title="Discard local edits and reload buildings-config.json from the server">reload config from server</button>
     </div>
+    <p class="hint">Edits are cached in this browser until you press reload.</p>
     <div id="status"></div>
     <p class="hint">Drag the <b>dot</b> to move the plan; drag the <b>ring</b> to rotate about the dot. Arrow keys nudge 0.1&nbsp;m; <b>[</b>/<b>]</b> rotate 0.05&deg;.</p>
   </div>
@@ -151,9 +163,10 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { makeToLL, lonLatToDxf, metresPerDegree, DXF_SCALE } from './geo.mjs';
-    import { shapeSegments, extractPortals, cachePortals, portalsFromCache } from './campus.mjs';
+    import { shapeSegments, extractPortals, cachePortals, portalsFromCache, isWallLayer }
+      from './campus.mjs';
     import { loadOsmShapes } from './osm.mjs';
-    import { hullSamples, bestFitRigid, meanPoint } from './align.mjs';
+    import { hullSamples, bestFitTranslation } from './align.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
 
     const protocol = new pmtiles.Protocol({ metadata: true });
@@ -194,7 +207,9 @@
 
     const building = () => config[selected.building];
     const floor = () => building()?.floors[selected.floor];
-    const floorKey = (b, f) => `${b.id}/${f.floorId}`;
+    // Cache by URL: it stays put when a building id is renamed, whereas the
+    // old `${id}/${floorId}` key missed and silently blanked the plan.
+    const floorKey = (b, f) => f.url || `${b.id}/${f.floorId}`;
 
     // Exterior doors are placed by hand. floor.exits is the manual list; when
     // absent the algorithm's exits (cached on floor.portals) are shown as a
@@ -335,6 +350,34 @@
         },
         paint: { 'text-color': '#8e44ad', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
       });
+      // Elevator / stair portals from the floor's portal cache. Circles use
+      // the app's tier colours plus an E/S label, so they are visible at a
+      // glance and read differently from the purple skybridge dots.
+      const portalLayer = (id, color) => {
+        if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty });
+        map.addLayer({
+          id, type: 'circle', source: id,
+          paint: {
+            'circle-radius': 6,
+            'circle-color': color,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 2,
+          },
+        });
+      };
+      portalLayer('imp-elevators', '#8e44ad');
+      portalLayer('imp-stairs', '#e67e22');
+      if (!map.getSource('imp-portal-labels')) map.addSource('imp-portal-labels', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-portal-labels', type: 'symbol', source: 'imp-portal-labels',
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-size': 9,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#ffffff' },
+      });
       $('showLabels').addEventListener('change', refresh);
       map.on('keydown', onKey);
       map.getContainer().setAttribute('tabindex', '0');
@@ -356,7 +399,7 @@
 
     // --- geometry ----------------------------------------------------------
     const wallLines = data => data.shapes
-      .filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()))
+      .filter(s => isWallLayer(s.layer))
       .flatMap(shapeSegments);
 
     /** Wall features of one floor in lon/lat at its current placement. */
@@ -438,13 +481,26 @@
       if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
 
       if (!b || !f) {
-        setData('imp-walls', empty);
+        // Clear every plan layer: otherwise deleting the last building/floor
+        // leaves the previous plan (and its ghost walls/doors) on the map.
+        for (const id of ['imp-walls', 'imp-walls-ghost', 'imp-footprint',
+                          'imp-labels', 'imp-exits', 'imp-skybridges',
+                          'imp-skybridge-labels', 'imp-elevators', 'imp-stairs',
+                          'imp-portal-labels']) {
+          setData(id, empty);
+        }
+        syncMarkers();
+        syncPanel();
+        syncPortalPanel();
         $('floorPrevBtn').disabled = true;
         $('floorNextBtn').disabled = true;
         return;
       }
       const toLL = makeToLL(b, f);
       const data = await loadFloorData(b, f);
+      if (!data && f.url) {
+        status(`could not load ${f.url} - upload that JSON to the server (or re-import it)`);
+      }
       if (data) ensurePortals(b, f, data);
       const feats = data ? floorFeatures(b, f, data, toLL) : [];
       setData('imp-walls', { type: 'FeatureCollection', features: feats });
@@ -508,6 +564,29 @@
         geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
       }));
       setData('imp-skybridge-labels', { type: 'FeatureCollection', features: bridgeLabels });
+
+      // Elevators / stairs from the floor's portal cache. Unlike the doors,
+      // this does not need the floor JSON: the cache lives in the config, so
+      // connectors stay visible even before their plan uploads.
+      const elevators = f.portals?.elevators ?? [];
+      const stairs = f.portals?.stairs ?? [];
+      const portalFC = (list) => ({
+        type: 'FeatureCollection',
+        features: list.map((d) => ({
+          type: 'Feature', properties: {},
+          geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+        })),
+      });
+      setData('imp-elevators', portalFC(elevators));
+      setData('imp-stairs', portalFC(stairs));
+      const portalLabelFeats = [
+        ...elevators.map((d) => ['E', d]),
+        ...stairs.map((d) => ['S', d]),
+      ].map(([text, d]) => ({
+        type: 'Feature', properties: { text },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-portal-labels', { type: 'FeatureCollection', features: portalLabelFeats });
 
       syncMarkers();
       syncPanel();
@@ -693,12 +772,10 @@
     }
 
     // --- auto-align the selected floor to the ground floor ------------------
-    // Best-fit rigid transform of the selected floor's exterior perimeter
+    // Position-only alignment of the selected floor's exterior perimeter
     // (convex hull of its wall endpoints, sampled every ALIGN_STEP_M) onto the
-    // building's ground floor. Two elevators on both floors seed the rotation
-    // (shaft positions stack vertically); a coarse scan is always tried too.
-    // The transform is applied as `offset.rot += Δ` and `origin = T(origin)`;
-    // the DXF datum stays put. See align.mjs.
+    // building's ground floor. The floor's rotation is FORCED to the parent's
+    // rotation first, then only the translation is solved. See align.mjs.
     const ALIGN_STEP_M = 1.5;
 
     function placedWallPoints(b, f, data, frame) {
@@ -724,45 +801,30 @@
       const origin = placementOf(b, ref).origin;
       const mpd = metresPerDegree(origin.lat);
       const frame = { lon: origin.lon, lat: origin.lat, mLon: mpd.lon, mLat: mpd.lat };
-      const current = hullSamples(placedWallPoints(b, f, data, frame), ALIGN_STEP_M);
+      const parentRot = placementOf(b, ref).offset.rot;
+
+      // Evaluate the floor as if it already had the parent's rotation; the
+      // fit below may then move it but must not rotate it.
+      const cur = placementOf(b, f);
+      const probe = { ...f, origin: cur.origin, offset: { ...cur.offset, rot: parentRot } };
+      const current = hullSamples(placedWallPoints(b, probe, data, frame), ALIGN_STEP_M);
       const reference = hullSamples(placedWallPoints(b, ref, refData, frame), ALIGN_STEP_M);
       if (current.length < 12 || reference.length < 12) {
         status('not enough wall geometry to align'); return;
       }
 
-      const seeds = [null];   // the coarse scan is always a candidate
-      if ((f.portals?.elevators?.length ?? 0) >= 2 && (ref.portals?.elevators?.length ?? 0) >= 2) {
-        const toM = (e, toLL) => {
-          const ll = toLL(e.dxf[0], e.dxf[1]);
-          return [(ll[0] - frame.lon) * frame.mLon, (ll[1] - frame.lat) * frame.mLat];
-        };
-        const curLL = makeToLL(b, f), refLL = makeToLL(b, ref);
-        const A = f.portals.elevators.slice(0, 2).map((e) => toM(e, curLL));
-        const B = ref.portals.elevators.slice(0, 2).map((e) => toM(e, refLL));
-        const ang = (p, q) => Math.atan2(q[1] - p[1], q[0] - p[0]);
-        const rot = ang(B[0], B[1]) - ang(A[0], A[1]);
-        const common = { currentAnchor: meanPoint(A), referenceAnchor: meanPoint(B) };
-        seeds.unshift({ rotation: rot + Math.PI, ...common }, { rotation: rot, ...common });
-      }
-
-      let best = null;
-      for (const seed of seeds) {
-        const fit = bestFitRigid(current, reference, seed);
-        if (fit && (!best || fit.residual < best.residual)) best = fit;
-      }
+      const best = bestFitTranslation(current, reference);
       if (!best) { status('alignment failed'); return; }
 
-      const { origin: oldOrigin, offset: oldOffset } = placementOf(b, f);
-      const om = [(oldOrigin.lon - frame.lon) * frame.mLon,
-                  (oldOrigin.lat - frame.lat) * frame.mLat];
-      const c = Math.cos(best.rotation), s = Math.sin(best.rotation);
-      const nm = [c * om[0] - s * om[1] + best.translation[0],
-                  s * om[0] + c * om[1] + best.translation[1]];
+      const om = [(cur.origin.lon - frame.lon) * frame.mLon,
+                  (cur.origin.lat - frame.lat) * frame.mLat];
+      const nm = [om[0] + best.translation[0], om[1] + best.translation[1]];
       f.origin = { lon: frame.lon + nm[0] / frame.mLon, lat: frame.lat + nm[1] / frame.mLat };
-      f.offset = { ...oldOffset, rot: oldOffset.rot + best.rotation };
+      f.offset = { ...cur.offset, rot: parentRot };
       persist(); refresh();
-      status(`aligned ${f.floorId} to ${ref.floorId}: ` +
-        `Δ${(best.rotation * 180 / Math.PI).toFixed(1)}°, ` +
+      const deg = ((parentRot * 180 / Math.PI) % 360 + 360) % 360;
+      status(`aligned ${f.floorId} to ${ref.floorId}: rotation locked at ${deg.toFixed(2)}°, ` +
+        `moved ${Math.hypot(best.translation[0], best.translation[1]).toFixed(2)} m, ` +
         `residual ${best.residual.toFixed(2)} m`);
     }
 
@@ -770,12 +832,22 @@
       const b = building(), f = floor();
       const enabled = !!b && !!f;
       for (const el of document.querySelectorAll('#panel input, #panel select, #panel button')) {
-        // reset/file stay usable; the stepper and align button get their own
-        // states below.
-        if (el.id === 'resetBtn' || el.id === 'file' || el.id === 'alignBtn' ||
+        // File pickers and the add/stepper/align/reload buttons get their own
+        // states below; everything else needs a selected floor.
+        if (el.id === 'reloadBtn' || el.id === 'file' ||
+            el.id === 'floorFile' || el.id === 'buildingFile' ||
+            el.id === 'addBuildingBtn' || el.id === 'addFloorBtn' ||
+            el.id === 'alignBtn' ||
             el.id === 'floorPrevBtn' || el.id === 'floorNextBtn') continue;
         el.disabled = !enabled;
       }
+      // "+ building" must work even with an empty config; "+ floor" needs only
+      // a building (a building may temporarily have zero floors).
+      $('addBuildingBtn').disabled = false;
+      $('addFloorBtn').disabled = !b;
+      // The building picker stays usable when the selected building has no
+      // floors (otherwise deleting the last floor stranded the user there).
+      $('building').disabled = !b;
       const prevBtn = $('floorPrevBtn'), nextBtn = $('floorNextBtn');
       prevBtn.disabled = !enabled || selected.floor <= 0;
       nextBtn.disabled = !enabled || selected.floor >= (b?.floors.length ?? 0) - 1;
@@ -801,57 +873,161 @@
       localStorage.setItem(LS_KEY, JSON.stringify(config));
     }
 
+    /** Fetch the deployed config, bypassing both the HTTP and local caches.
+     *  Returns false (leaving `config` untouched) when the server is unreachable. */
+    async function loadServerConfig() {
+      try {
+        const res = await fetch(`/buildings-config.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return false;
+        config = await res.json();
+        return true;
+      } catch { return false; }
+    }
+
     async function loadInitial() {
       const saved = localStorage.getItem(LS_KEY);
       if (saved) {
         try { config = JSON.parse(saved); selected = { building: 0, floor: 0 }; return; } catch { /* fall through */ }
       }
-      try {
-        const res = await fetch('/buildings-config.json');
-        config = res.ok ? await res.json() : [];
-      } catch { config = []; }
+      await loadServerConfig();
+    }
+
+    /**
+     * Explicit "reload config from server": throw away local edits (the
+     * localStorage copy, in-memory floor JSON and portal caches) and replace
+     * the config with the deployed buildings-config.json. Without this, a
+     * temporary edit persisted silently across every page reload.
+     */
+    async function reloadFromServer() {
+      const ok = await loadServerConfig();
+      if (!ok) { status('reload failed - could not fetch buildings-config.json'); return; }
+      localStorage.removeItem(LS_KEY);
+      floorData.clear();
+      osmCacheBBox = null;
+      selected = { building: 0, floor: 0 };
+      editMode = null;
+      didInitialFit = false;
+      portalsDirty = false;
+      refresh();
+      status(`reloaded ${config.length} building${config.length === 1 ? '' : 's'} from server`);
     }
 
     // --- uploads -----------------------------------------------------------
-    async function ingestFiles(files, attachTo) {
+    // mode: 'auto'     match an existing building by code, else create one
+    //       'floor'    attach every file to the selected building
+    //       'building' always create a new building (batch files by code)
+    async function ingestFiles(files, opts = {}) {
+      const mode = opts.mode ?? 'auto';
+      const attachTo = opts.attachTo ?? null;
+      if (!files.length) return;
+      if (mode === 'floor' && !attachTo) {
+        status('select a building before adding a floor');
+        return;
+      }
+      const created = new Map();       // building_code -> new building in this batch
       for (const file of files) {
         let data;
         try { data = JSON.parse(await file.text()); }
         catch { status(`✗ ${file.name}: not JSON`); continue; }
-        const id = data.building_code ?? file.name.replace(/\.json$/i, '');
-        const name = data.building_name ?? '';
-        let b = attachTo ?? config.find(x => x.id === id);
-        if (!b) {
-          b = { id, buildingName: name, groundFloor: data.level ?? '01', floors: [] };
-          config.push(b);
+        if (!Array.isArray(data.shapes)) {
+          status(`✗ ${file.name}: not a floor JSON (no shapes array)`);
+          continue;
         }
-        const floorId = data.level ?? String(b.floors.length + 1).padStart(2, '0');
-        const fid = floorKey(b, { floorId });
-        const url = `/${file.name}`;
-        const existing = b.floors.find(f => f.floorId === floorId);
+        const code = data.building_code ?? file.name.replace(/\.json$/i, '');
+        const name = data.building_name ?? '';
+        let b = mode === 'floor' ? attachTo
+              : mode === 'building' ? created.get(code)
+              : config.find(x => x.id === code);
+        if (!b) {
+          // A brand-new building gets a placement immediately, centred on the
+          // current view. Without origin/offset its walls used to fail to
+          // render (makeToLL saw undefined), which looked like "the building
+          // wasn't added at all".
+          b = {
+            id: mode === 'building' ? uniqueBuildingId(code) : code,
+            buildingName: name,
+            groundFloor: normaliseFloorId(data.level ?? '01'),
+            floors: [],
+            ...newBuildingPlacement(data),
+          };
+          config.push(b);
+          if (mode === 'building') created.set(code, b);
+        }
+        // A building from an older config (or a previous buggy import) may
+        // still have no placement at all; give it one before it renders.
+        if (!b.origin && !b.offset &&
+            !b.floors.some(fl => fl.origin || fl.offset)) {
+          Object.assign(b, newBuildingPlacement(data));
+        }
+        const floorId = normaliseFloorId(data.level ?? (b.floors.length + 1));
+        const url = '/' + encodeURIComponent(file.name);
+        const existing = b.floors.find(f => normaliseFloorId(f.floorId) === floorId);
         const entry = existing ?? { floorId };
         entry.url = url;
         entry.showRoomLabels = true;
         delete entry.portals;         // fresh JSON: recompute the portal cache
         b.groundFloor = b.groundFloor ?? floorId;
         if (!existing) b.floors.push(entry);
-        floorData.set(fid, data);
+        floorData.set(floorKey(b, entry), data);
         ensurePortals(b, entry, data);
         status(`✓ ${file.name} → ${b.id} ${floorId} (${data.shapes?.length ?? 0} shapes)`);
         selected = { building: config.indexOf(b), floor: b.floors.indexOf(entry) };
       }
+      didInitialFit = false;          // bring the imported plan into view
+      editMode = null;
       persist();
       refresh();
+    }
+
+    /** Floor ids are strings in the config; keep numeric levels 2-digit ("01"). */
+    function normaliseFloorId(value) {
+      const s = String(value);
+      return /^\d+$/.test(s) ? s.padStart(2, '0') : s;
+    }
+
+    /** A free building id: code, or code-2, code-3, ... (explicit + building). */
+    function uniqueBuildingId(base) {
+      const taken = new Set(config.map(b => b.id));
+      if (!taken.has(base)) return base;
+      let n = 2;
+      while (taken.has(`${base}-${n}`)) n++;
+      return `${base}-${n}`;
+    }
+
+    /**
+     * Placement for a building created by an upload: put its plan centre on
+     * the current map centre, so it is immediately visible and can be dragged
+     * to its real position. (origin = plan centre, offset = DXF plan centre.)
+     */
+    function newBuildingPlacement(data) {
+      const bb = floorBBox(data);
+      const c = map.getCenter();
+      return {
+        origin: { lon: c.lng, lat: c.lat },
+        offset: {
+          x: bb ? (bb.x0 + bb.x1) / 2 : 0,
+          y: bb ? (bb.y0 + bb.y1) / 2 : 0,
+          rot: 0,
+        },
+      };
     }
 
     // --- UI wiring ---------------------------------------------------------
     function wire(id, ev, fn) { $(id).addEventListener(ev, fn); }
 
-    // One handler: null attachTo = new building (or matched by code), set by
-    // "+ floor" to attach to the selected building.
-    let attachTo = null;
-    wire('addFloorBtn', 'click', () => { attachTo = building(); $('file').click(); });
-    wire('file', 'change', e => { ingestFiles([...e.target.files], attachTo); attachTo = null; });
+    // Each action owns its own file input: "+ building" can never leak an
+    // attach intent into a later pick, which used to make new buildings get
+    // swallowed by the selected one.
+    const chosen = (e) => {
+      const files = [...e.target.files];
+      e.target.value = '';             // re-picking the same file must fire change
+      return files;
+    };
+    wire('addBuildingBtn', 'click', () => $('buildingFile').click());
+    wire('addFloorBtn', 'click', () => $('floorFile').click());
+    wire('file', 'change', e => ingestFiles(chosen(e), { mode: 'auto' }));
+    wire('floorFile', 'change', e => ingestFiles(chosen(e), { mode: 'floor', attachTo: building() }));
+    wire('buildingFile', 'change', e => ingestFiles(chosen(e), { mode: 'building' }));
     wire('building', 'change', e => { selected = { building: +e.target.value, floor: 0 }; editMode = null; refresh(); });
     // Floor stepper (replaces the old floor/floorId/url inputs: floorId comes
     // from the JSON's metadata and the URL from the uploaded filename, so
@@ -929,12 +1105,7 @@
       selected = { building: Math.max(0, config.length - 1), floor: 0 };
       persist(); refresh();
     });
-    wire('resetBtn', 'click', async () => {
-      localStorage.removeItem(LS_KEY);
-      await loadInitial();
-      refresh();
-      status('reset from server');
-    });
+    wire('reloadBtn', 'click', reloadFromServer);
     wire('downloadBtn', 'click', async () => {
       // Make sure every configured floor carries its portal cache before we
       // serialize, so the app never has to extract them at load time.
@@ -990,7 +1161,7 @@
     const drop = $('drop');
     for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); });
     for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); });
-    drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], null));
+    drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], { mode: 'auto' }));
 
     loadInitial().then(() => refresh());
 

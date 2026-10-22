@@ -545,7 +545,8 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { buildGraph, graphFromState } from './navgraph.mjs';
-    import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments } from './campus.mjs';
+    import { extractPortals, portalsFromCache, buildCampusRouter, shapeSegments,
+             isWallLayer, isDoorLayer } from './campus.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
@@ -2770,12 +2771,9 @@
       const wallLayerId = floor.wallLayerId ?? `${base}-walls`;
       const roomLayerId = floor.roomLayerId ?? `${base}-roomnumbers`;
 
-      // Case-insensitive: most buildings write "Windows", AS106 writes
-      // "WINDOWS".
-      const walls = data.shapes.filter((i) => {
-        const l = i.layer.toLowerCase();
-        return l === 'walls' || l === 'windows';
-      });
+      // Case-insensitive, singular or plural: most buildings write "Windows",
+      // AS106 writes "WINDOWS", HSB (AS156) uses WALL/window on floor 01.
+      const walls = data.shapes.filter((i) => isWallLayer(i.layer));
       // True vertices from shapeSegments, not the bbox diagonal: a rotated
       // wall run drawn as its bbox shows up as a diagonal slash across the
       // corner, and the navgraph/obstacle sets inherit the same corruption.
@@ -2795,11 +2793,11 @@
         properties: { text: String(roomno.text ?? '').trim() },
       })).filter((f) => f.properties.text);
 
-      // Interior door leaves (the DOORS layer): each entity is a short leaf
-      // line; its midpoint is the doorway. A room search targets the room's
-      // DOOR, not its number label, so the route stops at the opening.
+      // Interior door leaves (the DOOR/DOORS layer): each entity is a short
+      // leaf line; its midpoint is the doorway. A room search targets the
+      // room's DOOR, not its number label, so the route stops at the opening.
       const doorPoints = data.shapes
-        .filter((s) => s.layer.toLowerCase() === 'doors')
+        .filter((s) => isDoorLayer(s.layer))
         .map((s) => {
           const leaf = (s.items ?? []).find((it) => it.op === 'line' && it.points?.length >= 2);
           if (leaf) {

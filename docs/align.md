@@ -8,13 +8,23 @@ matching their exterior perimeters. Pure geometry, unit-agnostic — points are
 
 - `convexHull(points)` (monotone chain), `meanPoint`, `ringSamples`,
   `hullSamples`.
-- `bestFitRigid(current, reference, seed)` → a rigid transform.
+- `bestFitRigid(current, reference, seed)` → a rigid transform (rotation +
+  translation).
+- `bestFitTranslation(current, reference)` → translation only (rotation is
+  not a free variable).
 
 ## Why it's built this way
 
 **Rigid, not scaled.** Both floors are drawn in inches, so the transform is
 rotation + translation only (scale fixed at 1). Allowing scale would let a
 mis-aligned floor "shrink to fit" and hide the error.
+
+**Rotation follows the parent.** The import tool's *align to ground* forces the
+selected floor's rotation to the ground floor's rotation first, then calls
+`bestFitTranslation` for the position. Floors of one building share a
+registration rotation, so leaving rotation free let a symmetric outline settle
+on a 90°/180° twin. `bestFitRigid` remains available (and tested) for callers
+that genuinely need the full pose.
 
 **Seed, then refine.** A rigid fit from scratch can fall into a local minimum.
 So `bestFitRigid` first finds a good seed, then refines:
@@ -34,8 +44,9 @@ on the building outline.
 - Used by `import.html` when stacking plans; the runtime router never calls it.
 - Sampled points and hull are dependent on the input ordering only through the
   sort inside `convexHull`, so results are deterministic.
-- The transform is returned in the caller's frame; `import.html` turns it into
-  the floor `offset.rot/x/y` consumed by `geo.mjs`.
+- The transform is returned in the caller's frame; `import.html` applies the
+  parent rotation to `offset.rot` and the translation to `origin`, the
+  placement consumed by `geo.mjs`.
 
 ## See also
 

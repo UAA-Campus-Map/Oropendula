@@ -59,8 +59,11 @@ export function lonLatToDxf(origin, lon, lat, rot, scale = DXF_SCALE) {
  * @returns {(x:number,y:number)=>[number,number]}
  */
 export function makeToLL(building, floor) {
-  const origin = floor.origin ?? building.origin;
-  const offset = floor.offset ?? building.offset;
+  // Match placementOf(): a building created before it was placed has no
+  // origin/offset yet. Defaulting here keeps a render from throwing (which
+  // used to leave a newly imported building's plan blank).
+  const origin = floor.origin ?? building.origin ?? { lon: 0, lat: 0 };
+  const offset = floor.offset ?? building.offset ?? { x: 0, y: 0, rot: 0 };
   return (x, y) =>
     dxfCoordsToLonLat(origin, x - offset.x, y - offset.y, offset.rot);
 }

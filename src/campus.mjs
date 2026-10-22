@@ -122,6 +122,23 @@ const PORTAL_LAYERS = {
 };
 
 /**
+ * Wall/window layers, singular or plural, any case. Plans are inconsistent:
+ * AS106 writes WINDOWS, while HSB (AS156) uses WALL/window on floor 01 and
+ * Walls/WINDOWS on floor 02. The app, import tool and tests share this so a
+ * floor can never render in one and be blank in the other.
+ */
+export function isWallLayer(layer) {
+  const l = String(layer ?? '').toLowerCase();
+  return l === 'wall' || l === 'walls' || l === 'window' || l === 'windows';
+}
+
+/** Door-leaf layers, singular or plural, any case (DOOR / DOORS). */
+export function isDoorLayer(layer) {
+  const l = String(layer ?? '').toLowerCase();
+  return l === 'door' || l === 'doors';
+}
+
+/**
  * Union-find clustering of shapes by expanded-bbox overlap.
  * Two shapes join when their bboxes come within `thresh` DXF units.
  * @returns {number[][]} clusters as lists of shape indices
@@ -209,7 +226,7 @@ export function extractPortals(shapes, toLL) {
   const floodSegs = shapes
     .filter(s => isLayer(s, FLOOD_NAMES))
     .flatMap(shapeSegments);
-  const doorShapes = shapes.filter(s => PORTAL_LAYERS.doors.has(s.layer.toLowerCase()));
+  const doorShapes = shapes.filter(s => isDoorLayer(s.layer));
   if (floodSegs.length === 0) return {elevators: [], stairs: [], exits: []};
 
   // A "doorway" is the group of door shapes at one physical opening: the
@@ -669,9 +686,16 @@ export function buildObstacleIndex(llSegments, scale) {
   const stamped = new Int32Array(segs.length);
 
   /**
-   * Proper segment intersection test with an endpoint margin: crossings
-   * within `margin` metres of either segment's end don't count, so edges
-   * that merely meet a wall at a doorway or a corner pass through.
+   * Proper segment intersection test with an endpoint margin on the QUERY
+   * segment only: crossings within `margin` metres of the query's ends don't
+   * count, so a path/stub that merely meets a wall at a doorway passes.
+   *
+   * The margin is deliberately NOT applied to the obstacle segment. Plans are
+   * drawn with walls fragmented into many sub-metre pieces (AS162 has 821 of
+   * 1026 wall segments under 2 m); skipping crossings near an obstacle end
+   * made every such fragment invisible, so a straight outdoor line could cut
+   * through a building. Only a crossing exactly at an obstacle vertex is
+   * ignored (where two fragments meet).
    */
   const crosses = (ax, ay, bx, by, margin) => {
     const query = ++stamp;
@@ -693,7 +717,9 @@ export function buildObstacleIndex(llSegments, scale) {
           const lenAB = Math.hypot(rx, ry), lenCD = Math.hypot(sx, sy);
           const mAB = t * lenAB, mCD = u * lenCD;
           if (mAB <= margin || mAB >= lenAB - margin) continue;
-          if (mCD <= margin || mCD >= lenCD - margin) continue;
+          // Ignore only a crossing on an obstacle vertex, never inside a
+          // short wall fragment.
+          if (mCD < 0.02 || mCD > lenCD - 0.02) continue;
           return true;
         }
       }
@@ -1018,7 +1044,12 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   }
   const scale = metresPerDeg(nodes[0]?.ll[1] ?? 61.19);
   const N = nodes.length;
-  const atGround = n => n.floor.floorId === n.building.groundFloor;
+  // Outdoor legs exist at ground level only. Using the building's configured
+  // groundFloor was wrong for level-3-only structures: AS164 (Parrish Bridge)
+  // is a skybridge landing with groundFloor "03", so its doors became outdoor
+  // doors and a route stepped from an outdoor leg straight onto floor 03 with
+  // no vertical connector. Floor level 1 is the campus ground plane.
+  const atGround = n => (parseInt(n.floor.floorId, 10) || 0) === 1;
   const floorNum = id => parseInt(id, 10) || 0;
 
   // Attach every node to its floor's graph once. A manually placed portal often

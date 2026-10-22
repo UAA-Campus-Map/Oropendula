@@ -15,10 +15,10 @@ import { readFileSync } from 'fs';
 import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
-import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache } from './campus.mjs';
+import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache, isWallLayer, isDoorLayer } from './campus.mjs';
 import { loadOsmShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
-import { convexHull, hullSamples, bestFitRigid } from './align.mjs';
+import { convexHull, hullSamples, bestFitRigid, bestFitTranslation, meanPoint } from './align.mjs';
 
 import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
@@ -132,7 +132,7 @@ function basisFromJson(cfg, floor, data) {
   const toLL = makeToLL(cfg, floor);
   // Same wall filter as index.html's loadFloor() (case-insensitive: AS106
   // writes WINDOWS in caps).
-  const walls = data.shapes.filter(s => ['walls', 'windows'].includes(s.layer.toLowerCase()));
+  const walls = data.shapes.filter(s => isWallLayer(s.layer));
   const lines = walls.flatMap(s =>
     shapeSegments(s).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
   return {
@@ -322,6 +322,44 @@ console.log('\nFloor auto-align:');
     seeded ? `${(seeded.rotation * 180 / Math.PI).toFixed(2)}°, ${seeded.residual.toFixed(4)} m` : 'null');
   check('bestFitRigid handles empty input', bestFitRigid([], reference) === null &&
     bestFitRigid(current, []) === null);
+
+  // The import tool creates a building before it has been placed. makeToLL
+  // must still yield finite coordinates (it used to throw on undefined origin,
+  // which silently blanked the first render of a new building).
+  const bare = makeToLL({ id: 'NEW' }, { floorId: '01' });
+  const bareP = bare(1000, 500);
+  check('makeToLL defaults an unplaced building', bareP.every(Number.isFinite),
+    bareP.map(v => v.toFixed(6)).join(', '));
+  const placed = makeToLL(
+    { origin: { lon: -149.83, lat: 61.19 }, offset: { x: 400, y: 300, rot: 0 } }, {});
+  const [cx, cy] = placed(400, 300);
+  check('makeToLL maps the plan datum onto its origin',
+    Math.abs(cx + 149.83) < 1e-12 && Math.abs(cy - 61.19) < 1e-12);
+
+  // Translation-only alignment: the import tool locks a floor's rotation to
+  // its parent, then solves position. No rotation may be introduced.
+  const shifted = reference.map(([x, y]) => [x + 37, y - 19]);
+  const tfit = bestFitTranslation(shifted, reference);
+  check('bestFitTranslation recovers a pure translation',
+    !!tfit && Math.abs(tfit.translation[0] + 37) < 0.05 &&
+    Math.abs(tfit.translation[1] - 19) < 0.05 && tfit.residual < 0.05,
+    tfit ? `t ${tfit.translation.map(v => v.toFixed(2)).join(', ')}; ` +
+      `residual ${tfit.residual.toFixed(4)} m` : 'null');
+
+  const c0 = meanPoint(reference);
+  const cth = Math.cos(0.35), sth = Math.sin(0.35);
+  const spun = reference.map(([x, y]) => {
+    const dx = x - c0[0], dy = y - c0[1];
+    return [cth * dx - sth * dy + c0[0], sth * dx + cth * dy + c0[1]];
+  });
+  const rfit = bestFitTranslation(spun, reference);
+  check('bestFitTranslation leaves rotation alone',
+    !!rfit && Math.hypot(rfit.translation[0], rfit.translation[1]) < 10 &&
+    rfit.residual > 1,
+    rfit ? `t ${Math.hypot(rfit.translation[0], rfit.translation[1]).toFixed(2)} m, ` +
+      `residual ${rfit.residual.toFixed(2)} m` : 'null');
+  check('bestFitTranslation handles empty input',
+    bestFitTranslation([], reference) === null && bestFitTranslation(current, []) === null);
 }
 
 // The PDR particle filter relies on these O(1) accessors staying consistent
@@ -891,7 +929,15 @@ console.log('Portal sanity:');
 check('every building has exits', buildings.every(b => b.floors[0].exits.length > 0));
 check('AS103 has elevators', buildings.find(b => b.id === 'AS103').floors[0].elevators.length > 0);
 check('AS102 has no elevator layer (expected)', buildings.find(b => b.id === 'AS102').floors[0].elevators.length === 0);
-check('every building has stairs', buildings.every(b => b.floors[0].stairs.length > 0));
+check('every multi-floor building has a vertical connector',
+  buildings.every(b => b.floors.length < 2 ||
+    b.floors.some(f => (f.stairs?.length ?? 0) + (f.elevators?.length ?? 0) > 0)));
+check('wall layers accept singular and plural forms',
+  ['wall', 'walls', 'WALL', 'Walls', 'window', 'windows', 'WINDOWS'].every(isWallLayer) &&
+  !isWallLayer('doors') && !isWallLayer(undefined));
+check('door layers accept DOOR and DOORS',
+  ['door', 'doors', 'DOOR', 'Doors'].every(isDoorLayer) &&
+  !isDoorLayer('wall') && !isDoorLayer(undefined));
 
 // Exits must sit OUTSIDE the footprint (walls + windows + solid partitions,
 // the same layer set campus.mjs uses); the rare fallback is allowed only
@@ -932,7 +978,7 @@ check('every building has stairs', buildings.every(b => b.floors[0].stairs.lengt
   for (const cfg of BUILDING_CONFIGS) {
     const data = JSON.parse(readFileSync(new URL(cfg.file, import.meta.url), 'utf8'));
     const doorSegs = data.shapes
-      .filter(s => ['door', 'doors'].includes(s.layer.toLowerCase()))
+      .filter(s => isDoorLayer(s.layer))
       .map(s => [[s.bbox[0], s.bbox[1]], [s.bbox[2], s.bbox[3]]]);
     const b = buildings.find(x => x.id === cfg.id);
     for (const e of b.floors[0].exits) {
@@ -1090,7 +1136,10 @@ console.log('\nTest 7: outdoor path network (synthetic grid)');
   const pad = 150;
   const lon0 = minLon - pad / mPerDeg.lon, lat0 = minLat - pad / mPerDeg.lat;
   const lon1 = maxLon + pad / mPerDeg.lon, lat1 = maxLat + pad / mPerDeg.lat;
-  const stepM = 25;
+  // 10 m keeps at least one line in the narrow gaps between buildings (25 m
+  // could leave a 23 m gap uncovered after the campus bbox changed, making the
+  // router legitimately fall back to a clear straight outdoor leg).
+  const stepM = 10;
   const cols = Math.round((lon1 - lon0) * mPerDeg.lon / stepM), rows = Math.round((lat1 - lat0) * mPerDeg.lat / stepM);
   const at = (i, which) => which === 0 ? lon0 + (lon1 - lon0) * i / cols : lat0 + (lat1 - lat0) * i / rows;
   const shapes = [];
@@ -1313,6 +1362,27 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
 }
 if (want('osm')) {
 console.log('\nOSM paths cache:');
+  // CAD walls are split into sub-metre fragments. The obstacle index must see
+  // them, or a straight outdoor leg can cut through a building whose exterior
+  // wall is drawn in small pieces (the AS162 bug).
+  {
+    const scale = metresPerDegree(61.19);
+    const lon0 = -149.83, lat0 = 61.19;
+    const segs = [];
+    for (let i = 0; i < 20; i++) {
+      segs.push([[lon0 + i / scale.lon, lat0],
+                 [lon0 + (i + 1) / scale.lon, lat0]]);
+    }
+    const idx = buildObstacleIndex(segs, scale);
+    const mid = lon0 + 10.5 / scale.lon;
+    const north = lat0 + 5 / scale.lat, south = lat0 - 5 / scale.lat;
+    check('a fragmented wall blocks a crossing',
+      idx.crosses(mid * scale.lon, north * scale.lat,
+                  mid * scale.lon, south * scale.lat, 1));
+    check('a crossing near the query end is still allowed',
+      !idx.crosses(mid * scale.lon, north * scale.lat,
+                   mid * scale.lon, (lat0 - 0.5 / scale.lat) * scale.lat, 2));
+  }
   const cache = osmCache;
   check('osm-paths.json exists', !!cache);
   if (cache) {
@@ -1703,6 +1773,33 @@ console.log('\nPortal preference (force stairs / elevators):');
   check('ignoring elevators forces stairs',
     !!rS && rS.segments.some(s => s.tier === 'stairs') &&
     !rS.segments.some(s => s.tier === 'elevator'));
+}
+
+if (want('multifloor')) {
+console.log('\nElevated-only structures are not ground doors:');
+  // AS164 (Parrish Bridge) exists only on floor 03. Its doors must never
+  // become outdoor doors, or a route can step from an outdoor leg straight
+  // onto floor 03 with no vertical connector (the HSB 301 bug).
+  const lat0 = 61.15, lon0 = -149.88;
+  const mpd = metresPerDegree(lat0);
+  const half = 6;
+  const dx = half / mpd.lon, dy = half / mpd.lat;
+  const square = (cx, cy) => {
+    const c = [[cx - dx, cy - dy], [cx + dx, cy - dy], [cx + dx, cy + dy], [cx - dx, cy + dy]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const mk = (id, floorId, cx) => ({
+    id, groundFloor: floorId,
+    floors: [{ floorId, ...square(cx, lat0), elevators: [], stairs: [],
+               exits: [{ id: 'd', ll: [cx, lat0] }] }],
+  });
+  const A = mk('A', '01', lon0);
+  const B = mk('B', '03', lon0 + 40 / mpd.lon);
+  const r = buildCampusRouter([A, B]).route(
+    [lon0, lat0], [lon0 + 40 / mpd.lon, lat0],
+    { startFloor: '01', endFloor: '03' });
+  check('a level-3-only building is not reachable by an outdoor door', !r);
 }
 
 // ---------------------------------------------------------------------------

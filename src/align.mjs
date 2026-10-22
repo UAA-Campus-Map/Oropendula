@@ -11,6 +11,12 @@
  *   2. refine - a few trimmed nearest-neighbour/Procrustes passes.
  *
  * Pure and unit-agnostic: points are [x, y] pairs in any common frame.
+ *
+ * Two fits are exported: bestFitRigid() solves the full pose (rotation +
+ * translation) and is useful when the floors' rotations are unknown, while
+ * bestFitTranslation() keeps the current rotation and solves position only.
+ * The import tool's "align to ground" locks the selected floor to the parent
+ * (ground floor) rotation and uses the translation-only fit.
  */
 
 /** Mean of a point set. */
@@ -157,5 +163,48 @@ export function bestFitRigid(current, reference, seed = null) {
     rotation: theta,
     translation: t,
     residual: meanNearest(current.map((p) => apply(p, theta, t)), reference),
+  };
+}
+
+/**
+ * Best-fit translation with NO rotation: T(p) = p + t mapping `current` onto
+ * `reference`. Used when a floor must keep the parent floor's rotation, so the
+ * only free variable is position. Same trimmed nearest-neighbour refinement as
+ * `bestFitRigid`, started from the centroid offset.
+ *
+ * @param {[number,number][]} current
+ * @param {[number,number][]} reference
+ * @returns {{translation:number[], residual:number}|null}
+ */
+export function bestFitTranslation(current, reference) {
+  if (!current?.length || !reference?.length) return null;
+  const cCur = meanPoint(current), cRef = meanPoint(reference);
+  let t = [cRef[0] - cCur[0], cRef[1] - cCur[1]];
+
+  for (let pass = 0; pass < 5; pass++) {
+    const pairs = current
+      .map((p) => {
+        const q = [p[0] + t[0], p[1] + t[1]];
+        let bestQ = null, bestD = Infinity;
+        for (const r of reference) {
+          const dx = q[0] - r[0], dy = q[1] - r[1];
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD) { bestD = d2; bestQ = r; }
+        }
+        return { q, r: bestQ, d: Math.sqrt(bestD) };
+      })
+      .sort((a, b) => a.d - b.d)
+      .slice(0, Math.max(3, Math.ceil(current.length * 0.8)));
+
+    const cq = meanPoint(pairs.map((p) => p.q));
+    const cr = meanPoint(pairs.map((p) => p.r));
+    const dT = [cr[0] - cq[0], cr[1] - cq[1]];
+    t = [t[0] + dT[0], t[1] + dT[1]];
+    if (Math.hypot(dT[0], dT[1]) < 0.05) break;
+  }
+
+  return {
+    translation: t,
+    residual: meanNearest(current.map((p) => [p[0] + t[0], p[1] + t[1]]), reference),
   };
 }
