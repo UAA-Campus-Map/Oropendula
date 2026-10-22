@@ -116,7 +116,10 @@ function polyLength(p, scale) {
 // ---------------------------------------------------------------------------
 
 const PORTAL_LAYERS = {
-  elevator: new Set(['elevator']),
+  // Plans name this layer inconsistently: ELEVATOR, Elevator, Elevators,
+  // elevators. (Only the exact layer name is matched, so "theater
+  // elevations" is not mistaken for an elevator layer.)
+  elevator: new Set(['elevator', 'elevators']),
   stairs: new Set(['stair', 'stairs']),
   doors: new Set(['door', 'doors']),
 };
@@ -167,6 +170,71 @@ function clusterShapes(shapes, thresh) {
     groups.get(r).push(i);
   }
   return [...groups.values()];
+}
+
+/** Area in m² of a shape's DXF bbox. */
+function bboxAreaM2(shape) {
+  const [x0, y0, x1, y1] = shape.bbox;
+  return Math.abs((x1 - x0) * (y1 - y0)) * M_PER_DXF_UNIT ** 2;
+}
+
+/** Minimum span (m) between the two edge marks of one elevator car. */
+const ELEVATOR_CAR_MIN_M = 1.2;
+
+/**
+ * Split one elevator bank into physical cars.
+ *
+ * CAD plans draw a car either as a closed rectangle (often with four corner
+ * marks) or as just the four corner marks. Adjacent cars in a bank are closer
+ * to each other (the shaft gap) than the two ends of one car, so plain 2 m
+ * proximity clustering merges the whole bank into a single stop. Closed car
+ * outlines are authoritative; otherwise pair the projected mark positions and
+ * treat a pair spanning at least ELEVATOR_CAR_MIN_M as one car.
+ *
+ * @param {number[]} idxs - indices into `shapes` for one 2 m cluster
+ * @param {object[]} shapes - the floor's ELEVATOR-layer shapes
+ * @returns {number[][]} one index list per car, or `[idxs]` when unsure
+ */
+function splitElevatorCars(idxs, shapes) {
+  const members = idxs.map((i) => ({ i, s: shapes[i] }));
+  const outlines = members.filter(({ s }) =>
+    (s.items ?? []).some((it) => it.closed) && bboxAreaM2(s) > 1);
+  if (outlines.length >= 2) return outlines.map(({ i }) => [i]);
+  if (members.length < 2) return [idxs];
+
+  // Project shape centres onto their principal axis (handles rotated banks).
+  const pts = members.map(({ s }) => {
+    const [x0, y0, x1, y1] = s.bbox;
+    return [((x0 + x1) / 2) * M_PER_DXF_UNIT, ((y0 + y1) / 2) * M_PER_DXF_UNIT];
+  });
+  const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  let xx = 0, xy = 0, yy = 0;
+  for (const [x, y] of pts) {
+    const dx = x - mx, dy = y - my;
+    xx += dx * dx; xy += dx * dy; yy += dy * dy;
+  }
+  const ang = 0.5 * Math.atan2(2 * xy, xx - yy);
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const projected = members
+    .map((m, k) => ({ i: m.i, u: (pts[k][0] - mx) * ux + (pts[k][1] - my) * uy }))
+    .sort((a, b) => a.u - b.u);
+
+  // Marks at the same position across the car's width share one bucket.
+  const buckets = [];
+  for (const p of projected) {
+    const last = buckets[buckets.length - 1];
+    if (!last || p.u - last.u > 0.25) buckets.push({ u: p.u, idxs: [p.i] });
+    else last.idxs.push(p.i);
+  }
+  const groups = [];
+  for (let k = 0; k + 1 < buckets.length;) {
+    if (buckets[k + 1].u - buckets[k].u > ELEVATOR_CAR_MIN_M) {
+      groups.push([...buckets[k].idxs, ...buckets[k + 1].idxs]);
+      k += 2;
+    } else k += 1;
+  }
+  return groups.length >= 2 ? groups : [idxs];
 }
 
 /** Point-to-segment distance in DXF units. */
@@ -543,17 +611,20 @@ export function extractPortals(shapes, toLL) {
     }
     const layerShapes = shapes.filter(s => kindFor(s.layer) === layerKind);
     for (const idxs of clusterShapes(layerShapes, CLUSTER_RADIUS_M / M_PER_DXF_UNIT)) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const i of idxs) {
-        const [bx0, by0, bx1, by1] = layerShapes[i].bbox;
-        x0 = Math.min(x0, bx0); y0 = Math.min(y0, by0);
-        x1 = Math.max(x1, bx1); y1 = Math.max(y1, by1);
+      const groups = layerKind === 'elevator' ? splitElevatorCars(idxs, layerShapes) : [idxs];
+      for (const group of groups) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const i of group) {
+          const [bx0, by0, bx1, by1] = layerShapes[i].bbox;
+          x0 = Math.min(x0, bx0); y0 = Math.min(y0, by0);
+          x1 = Math.max(x1, bx1); y1 = Math.max(y1, by1);
+        }
+        let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        const snapped = snapStop(cx, cy);
+        if (!snapped) continue;       // can't make it reachable
+        [cx, cy] = snapped;
+        out.push({id: `${outKey}-${id++}`, ll: toLL(cx, cy), dxf: [cx, cy]});
       }
-      let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      const snapped = snapStop(cx, cy);
-      if (!snapped) continue;       // can't make it reachable
-      [cx, cy] = snapped;
-      out.push({id: `${outKey}-${id++}`, ll: toLL(cx, cy), dxf: [cx, cy]});
     }
   }
   return byKind;
@@ -1401,6 +1472,17 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   function route(startLL, endLL, opts = {}) {
     const startHit = buildingAt(startLL, opts.startFloor);
     const endHit = buildingAt(endLL, opts.endFloor);
+
+    // Room labels and imprecise taps can sit in furniture/hatching with no
+    // walkable cell under them. Snap to the nearest walkable point on the
+    // detected floor; otherwise attachToFloor and the indoor prefix/suffix
+    // fail and the whole route comes back null.
+    const snapWalkable = (floor, ll) => {
+      if (!floor?.navGraph || floor.navGraph.isWalkable(ll)) return ll;
+      return floor.navGraph.nearestWalkable(ll, 30) ?? ll;
+    };
+    if (startHit) startLL = snapWalkable(startHit.floor, startLL);
+    if (endHit) endLL = snapWalkable(endHit.floor, endLL);
 
     // Same building, same floor: a single indoor leg is always at least as
     // good as anything routed through exits.

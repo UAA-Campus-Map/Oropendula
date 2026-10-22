@@ -932,6 +932,24 @@ check('AS102 has no elevator layer (expected)', buildings.find(b => b.id === 'AS
 check('every multi-floor building has a vertical connector',
   buildings.every(b => b.floors.length < 2 ||
     b.floors.some(f => (f.stairs?.length ?? 0) + (f.elevators?.length ?? 0) > 0)));
+  const as105Idx = CONFIG.findIndex(c => c.id === 'AS105');
+  const as105Floors = as105Idx >= 0 ? floorBasis[as105Idx] : [];
+  check('AS105 splits the two-car elevator bank (floors 01-03)',
+    as105Floors.length >= 3 &&
+    as105Floors.slice(0, 3).every(f => f.freshPortals.elevators.length === 2),
+    as105Floors.map(f => f.freshPortals.elevators.length).join(','));
+  const as105cfg = CONFIG.find(c => c.id === 'AS105');
+  check('AS105 cached portals carry both cars',
+    !!as105cfg && as105cfg.floors.slice(0, 3).every(f =>
+      (f.portals?.elevators?.length ?? 0) === 2));
+  const as111Idx = CONFIG.findIndex(c => c.id === 'AS111');
+  const as111Floors = as111Idx >= 0 ? floorBasis[as111Idx] : [];
+  check('AS111 detects its plural "Elevators" layer (floor 01)',
+    as111Floors.length >= 1 && as111Floors[0].freshPortals.elevators.length === 2,
+    as111Floors.map(f => f.freshPortals.elevators.length).join(','));
+  const as111cfg = CONFIG.find(c => c.id === 'AS111');
+  check('AS111 cached portals include the floor-01 elevators',
+    !!as111cfg && (as111cfg.floors[0].portals?.elevators?.length ?? 0) === 2);
 check('wall layers accept singular and plural forms',
   ['wall', 'walls', 'WALL', 'Walls', 'window', 'windows', 'WINDOWS'].every(isWallLayer) &&
   !isWallLayer('doors') && !isWallLayer(undefined));

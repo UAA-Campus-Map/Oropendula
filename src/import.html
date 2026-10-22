@@ -44,6 +44,12 @@
     }
     #panel button:disabled { opacity: 0.45; cursor: default; }
     #panel button.active { background: #2980b9; border-color: #2980b9; color: #ffffff; }
+    #panel .link-btn {
+      display: block; width: 100%; text-align: center; padding: 6px;
+      border: 1px solid #bbbbbb; border-radius: 6px; background: #ffffff;
+      color: #333333; text-decoration: none; font-size: 12px; font-weight: 600;
+    }
+    #panel .link-btn:hover { background: #f2f8ff; }
 
     .section-doors {
       background: #f2f8ff; border: 1px solid #cfe3f7; border-radius: 8px;
@@ -70,6 +76,9 @@
     <h1>Building import &amp; placement</h1>
     <div id="drop">Drop a building JSON here<br>(or use the picker)</div>
     <input type="file" id="file" accept=".json,application/json" multiple />
+    <div class="row">
+      <a class="link-btn" href="/import-progress.html">Import progress &rarr;</a>
+    </div>
     <input type="file" id="floorFile" accept=".json,application/json" multiple hidden />
     <input type="file" id="buildingFile" accept=".json,application/json" multiple hidden />
 

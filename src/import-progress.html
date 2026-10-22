@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Import progress — Floor data</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --accent: #2563eb;
+      --ok: #16a34a;
+      --warn: #f59e0b;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --bg: #eef1f6;
+      --surface: #ffffff;
+      --line: rgba(15, 23, 42, 0.10);
+      --shadow: 0 14px 40px -18px rgba(15, 23, 42, 0.35);
+      --shadow-sm: 0 4px 16px -8px rgba(15, 23, 42, 0.25);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #eef2f8;
+        --muted: #93a1b5;
+        --bg: #0b0f16;
+        --surface: #111827;
+        --line: rgba(255, 255, 255, 0.12);
+        --shadow: 0 16px 44px -18px rgba(0, 0, 0, 0.8);
+        --shadow-sm: 0 6px 18px -10px rgba(0, 0, 0, 0.8);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+        Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1100px 500px at 100% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+        var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 26px 20px 64px; }
+    header {
+      display: flex; flex-wrap: wrap; align-items: flex-start;
+      justify-content: space-between; gap: 16px; margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -0.02em; }
+    .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; max-width: 680px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn {
+      appearance: none; border: 1px solid var(--line); border-radius: 11px;
+      background: var(--surface); color: var(--ink); font: inherit;
+      font-size: 13px; font-weight: 650; padding: 10px 14px; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 7px;
+      box-shadow: var(--shadow-sm); transition: transform .12s ease, border-color .15s;
+    }
+    .btn:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .btn:active { transform: scale(.97); }
+    .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+    .btn[disabled] { opacity: .55; cursor: default; }
+
+    .catalog-line {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+      margin: 0 0 18px; color: var(--muted); font-size: 12.5px;
+    }
+    .catalog-line a { color: var(--accent); text-decoration: none; }
+    .catalog-line a:hover { text-decoration: underline; }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+      padding: 18px 18px 16px; box-shadow: var(--shadow);
+    }
+    .card-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .big { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 2px; }
+    .big strong { font-size: 42px; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+    .big span { font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .pct { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--muted); }
+    .bar { height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow: hidden; margin: 10px 0 8px; }
+    .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width .4s ease; }
+    .bar.done > i { background: var(--ok); }
+    .card-sub { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+      margin: 26px 0 10px;
+    }
+    .toolbar h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+    .toolbar .spacer { flex: 1; }
+    .search {
+      appearance: none; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--surface); color: var(--ink); font: inherit; font-size: 13px;
+      padding: 9px 12px; min-width: 190px; box-shadow: var(--shadow-sm);
+    }
+    .check { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; cursor: pointer; }
+    .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+    .table-wrap {
+      background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow); overflow: auto;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    thead th {
+      position: sticky; top: 0; z-index: 1; text-align: left;
+      background: color-mix(in srgb, var(--surface) 92%, var(--ink) 8%);
+      color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+      padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    tbody td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 13.5px; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+    .bname { font-weight: 700; line-height: 1.25; }
+    .bcode { color: var(--muted); font-size: 12px; letter-spacing: .01em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .bcode.solo { color: var(--ink); font-size: 13.5px; font-weight: 700; margin-top: 0; }
+    .balias {
+      display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+      font-size: 10.5px; font-weight: 750; letter-spacing: .02em;
+    }
+    .status {
+      display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+      padding: 3px 9px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+    }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .status.complete { color: #166534; background: #dcfce7; }
+    .status.partial { color: #92400e; background: #fef3c7; }
+    .status.missing { color: #475569; background: #e2e8f0; }
+    @media (prefers-color-scheme: dark) {
+      .status.complete { color: #bbf7d0; background: rgba(22,163,74,.22); }
+      .status.partial { color: #fde68a; background: rgba(245,158,11,.18); }
+      .status.missing { color: #cbd5e1; background: rgba(148,163,184,.16); }
+    }
+    .minibar { width: 130px; height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow: hidden; }
+    .minibar > i { display: block; height: 100%; background: var(--accent); }
+    .minibar.done > i { background: var(--ok); }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .chip {
+      display: inline-block; padding: 2px 7px; border-radius: 7px; font-size: 11.5px;
+      font-weight: 650; color: var(--muted); background: color-mix(in srgb, var(--ink) 7%, transparent);
+      font-variant-numeric: tabular-nums;
+    }
+    .chip.extra { color: #92400e; background: #fef3c7; }
+    .empty { color: var(--muted); }
+
+    .callout {
+      margin: 16px 0 0; padding: 12px 14px; border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+      background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+      color: var(--ink); font-size: 13px; line-height: 1.45;
+    }
+    .callout.error { border-color: #dc2626; background: color-mix(in srgb, #dc2626 9%, var(--surface)); }
+    .callout[hidden] { display: none; }
+    .foot { margin-top: 26px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .foot code { font-size: 11.5px; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+    .loading { color: var(--muted); font-size: 14px; padding: 30px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Import progress</h1>
+        <p class="sub">
+          Buildings and floors already present in the deployed
+          <code>buildings-config.json</code>, compared with the floor plans in the
+          Extraction-Tool <em>Floor Data</em> folder.
+        </p>
+      </div>
+      <div class="actions">
+        <button id="refresh" class="btn" type="button">Refresh</button>
+        <a class="btn primary" href="/import.html">Open import tool →</a>
+      </div>
+    </header>
+
+    <p class="catalog-line">
+      <span id="catalog-summary">Loading catalog…</span>
+      <a id="catalog-source" href="https://github.com/UAA-Campus-Map/Extraction-Tool/tree/main/Data%20Extraction/Floor%20Data"
+         target="_blank" rel="noreferrer">Source folder ↗</a>
+      <button id="folder-btn" class="btn" type="button" style="padding:6px 10px;font-size:12px">
+        Use local Floor Data folder…
+      </button>
+      <button id="catalog-reset" class="btn" type="button" style="padding:6px 10px;font-size:12px" hidden>
+        Use bundled snapshot
+      </button>
+      <input id="folder-input" type="file" webkitdirectory directory multiple hidden />
+    </p>
+
+    <div id="error" class="callout error" hidden></div>
+
+    <section class="cards" aria-label="Overall import progress">
+      <div class="card">
+        <div class="card-label">Buildings</div>
+        <div class="big"><strong id="buildings-done">—</strong><span id="buildings-total">/ —</span>
+          <span class="pct" id="buildings-pct"></span></div>
+        <div class="bar" id="buildings-bar"><i></i></div>
+        <div class="card-sub" id="buildings-sub">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Floors</div>
+        <div class="big"><strong id="floors-done">—</strong><span id="floors-total">/ —</span>
+          <span class="pct" id="floors-pct"></span></div>
+        <div class="bar" id="floors-bar"><i></i></div>
+        <div class="card-sub" id="floors-sub">—</div>
+      </div>
+    </section>
+
+    <div id="extra-note" class="callout" hidden></div>
+
+    <div class="toolbar">
+      <h2>Per building</h2>
+      <div class="spacer"></div>
+      <input id="search" class="search" type="search" placeholder="Filter building name or code…" autocomplete="off" />
+      <label class="check"><input id="only-incomplete" type="checkbox" /> Only incomplete</label>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Building</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Missing floors</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="4" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="foot">
+      Counts use the deployed <code>/buildings-config.json</code> (what the live app loads),
+      not unsaved edits in the import tool. The bundled catalog is a snapshot of the private
+      Extraction-Tool folder; use <em>Use local Floor Data folder…</em> after the source changes,
+      or regenerate <code>floor-catalog.json</code> with
+      <code>node gen-floor-catalog.mjs "&lt;Floor Data dir&gt;"</code>.
+    </p>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const normBuilding = (s) => String(s ?? '').trim().toUpperCase();
+    const normFloor = (v) => {
+      const s = String(v ?? '').trim().toUpperCase();
+      return /^\d+$/.test(s) ? s.padStart(2, '0') : s;
+    };
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const pct = (done, total) => total ? Math.round((done / total) * 100) : 0;
+
+    const LS_CATALOG = 'import-progress-catalog';
+
+    let catalog = null;
+    let rows = [];
+    let extraBuildings = [];
+
+    async function loadJson(url) {
+      const res = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+      return res.json();
+    }
+
+    /** Build the same catalog shape from a folder picker's file list. */
+    async function catalogFromFiles(files) {
+      const by = new Map();
+      for (const file of files) {
+        const name = file.name || '';
+        if (!/\.json$/i.test(name)) continue;
+        const base = name.replace(/\.json$/i, '').replace(/-p\d+$/i, '');
+        const m = base.match(/^([A-Za-z]+\d*)-(.+)$/);
+        if (!m) continue;
+        const building = m[1].toUpperCase();
+        const floor = normFloor(m[2]);
+        if (!by.has(building)) by.set(building, { floors: new Set(), files: [] });
+        const entry = by.get(building);
+        entry.floors.add(floor);
+        entry.files.push(file);
+      }
+      const buildings = {};
+      const names = {};
+      const ids = {};
+      for (const building of [...by.keys()].sort((a, c) => a.localeCompare(c))) {
+        const entry = by.get(building);
+        buildings[building] = [...entry.floors].sort();
+        // The name and UAA ID are repeated on every floor JSON; read the
+        // smallest one per building so picking a folder stays quick.
+        entry.files.sort((a, c) => (a.size ?? 0) - (c.size ?? 0));
+        try {
+          const data = JSON.parse(await entry.files[0].text());
+          if (data.building_name) names[building] = String(data.building_name).trim();
+          if (data.ID) ids[building] = String(data.ID).trim();
+        } catch { /* name is optional */ }
+      }
+      return {
+        source: 'local folder',
+        generated: new Date().toISOString().slice(0, 10),
+        buildings,
+        names,
+        ids,
+      };
+    }
+
+    function localCatalog() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_CATALOG) || 'null');
+        return saved && saved.buildings ? saved : null;
+      } catch { return null; }
+    }
+
+    function compare(config) {
+      const imported = new Map();
+      for (const b of config) {
+        const id = normBuilding(b.id);
+        const floors = new Set((b.floors ?? []).map((f) => normFloor(f.floorId)));
+        imported.set(id, floors);
+      }
+      const list = [];
+      for (const [rawId, floors] of Object.entries(catalog.buildings ?? {})) {
+        const id = normBuilding(rawId);
+        const have = imported.get(id) ?? new Set();
+        const total = floors.length;
+        const done = floors.filter((f) => have.has(normFloor(f))).length;
+        const missing = floors.filter((f) => !have.has(normFloor(f)));
+        const extra = [...have].filter((f) => !floors.some((x) => normFloor(x) === f));
+        list.push({
+          id: rawId, total, done, missing, extra,
+          status: done === 0 ? 'missing' : done === total ? 'complete' : 'partial',
+        });
+      }
+      list.sort((a, c) => a.id.localeCompare(c.id));
+      extraBuildings = [...imported.keys()].filter((id) =>
+        !list.some((r) => normBuilding(r.id) === id));
+      return list;
+    }
+
+    function renderSummary() {
+      const totalB = rows.length;
+      const doneB = rows.filter((r) => r.done > 0).length;
+      const completeB = rows.filter((r) => r.status === 'complete').length;
+      const partialB = rows.filter((r) => r.status === 'partial').length;
+      const notStartedB = totalB - doneB;
+      const totalF = rows.reduce((n, r) => n + r.total, 0);
+      const doneF = rows.reduce((n, r) => n + r.done, 0);
+
+      $('buildings-done').textContent = String(doneB);
+      $('buildings-total').textContent = `/ ${totalB}`;
+      $('buildings-pct').textContent = `${pct(doneB, totalB)}%`;
+      $('buildings-bar').querySelector('i').style.width = `${pct(doneB, totalB)}%`;
+      $('buildings-bar').classList.toggle('done', doneB === totalB);
+      $('buildings-sub').textContent =
+        `${completeB} complete · ${partialB} in progress · ${notStartedB} not started`;
+
+      $('floors-done').textContent = String(doneF);
+      $('floors-total').textContent = `/ ${totalF}`;
+      $('floors-pct').textContent = `${pct(doneF, totalF)}%`;
+      $('floors-bar').querySelector('i').style.width = `${pct(doneF, totalF)}%`;
+      $('floors-bar').classList.toggle('done', doneF === totalF);
+      $('floors-sub').textContent = totalF - doneF > 0
+        ? `${totalF - doneF} floor plan${totalF - doneF === 1 ? '' : 's'} remaining`
+        : 'All floor plans imported';
+    }
+
+    function renderRows() {
+      const q = $('search').value.trim().toUpperCase();
+      const onlyIncomplete = $('only-incomplete').checked;
+      const nameFor = (id) => catalog.names?.[id] ?? catalog.names?.[normBuilding(id)] ?? '';
+      const aliasFor = (id) => catalog.ids?.[id] ?? catalog.ids?.[normBuilding(id)] ?? '';
+      const shown = rows.filter((r) => {
+        const haystack = [r.id, nameFor(r.id), aliasFor(r.id)].join(' ').toUpperCase();
+        return (!q || haystack.includes(q)) &&
+          (!onlyIncomplete || r.status !== 'complete');
+      });
+
+      if (!shown.length) {
+        $('rows').innerHTML = '<tr><td colspan="4" class="empty">No buildings match this filter.</td></tr>';
+        return;
+      }
+      $('rows').innerHTML = shown.map((r) => {
+        const label = r.status === 'complete' ? 'Complete'
+          : r.status === 'partial' ? 'In progress' : 'Not started';
+        const name = nameFor(r.id);
+        const alias = aliasFor(r.id);
+        const extra = r.extra.length
+          ? `<div class="chips" style="margin-top:4px">${r.extra.map((f) =>
+              `<span class="chip extra" title="Imported but not in the catalog">+${esc(f)}</span>`).join('')}</div>`
+          : '';
+        const building = (name ? `<div class="bname">${esc(name)}</div>` : '') +
+          `<div class="bcode${name ? '' : ' solo'}">${esc(r.id)}` +
+          (alias && normBuilding(alias) !== normBuilding(r.id)
+            ? `<span class="balias" title="UAA building code">${esc(alias)}</span>` : '') +
+          `</div>${extra}`;
+        const missing = r.missing.length
+          ? `<div class="chips">${r.missing.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>`
+          : '<span class="empty">—</span>';
+        return `<tr>
+          <td>${building}</td>
+          <td><span class="status ${r.status}">${label}</span></td>
+          <td><div class="minibar ${r.status === 'complete' ? 'done' : ''}"
+            role="progressbar" aria-valuemin="0" aria-valuemax="${r.total}"
+            aria-valuenow="${r.done}" title="${r.done} of ${r.total} floors imported">
+            <i style="width:${pct(r.done, r.total)}%"></i></div></td>
+          <td>${missing}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderExtraNote() {
+      const el = $('extra-note');
+      if (!extraBuildings.length) { el.hidden = true; return; }
+      el.hidden = false;
+      el.textContent = `Also imported but absent from the catalog: ${extraBuildings.join(', ')}.`;
+    }
+
+    function renderCatalogLine() {
+      const totalB = Object.keys(catalog.buildings ?? {}).length;
+      const totalF = Object.values(catalog.buildings ?? {}).reduce((n, f) => n + f.length, 0);
+      const date = catalog.generated ? ` · ${catalog.generated}` : '';
+      $('catalog-summary').textContent =
+        `Catalog: ${totalB} buildings / ${totalF} floors${date}${catalog.source ? ` · ${catalog.source}` : ''}`;
+      $('catalog-reset').hidden = !localCatalog();
+    }
+
+    function render() {
+      renderCatalogLine();
+      renderSummary();
+      renderRows();
+      renderExtraNote();
+    }
+
+    async function refresh() {
+      $('error').hidden = true;
+      $('refresh').disabled = true;
+      try {
+        const [bundled, config] = await Promise.all([
+          loadJson('/floor-catalog.json'),
+          loadJson('/buildings-config.json'),
+        ]);
+        const local = localCatalog();
+        catalog = local
+          ? {
+              ...bundled,
+              ...local,
+              names: { ...(bundled.names ?? {}), ...(local.names ?? {}) },
+              ids: { ...(bundled.ids ?? {}), ...(local.ids ?? {}) },
+            }
+          : bundled;
+        if (!catalog.buildings || typeof catalog.buildings !== 'object') {
+          throw new Error('floor-catalog.json has no buildings map');
+        }
+        if (!Array.isArray(config)) throw new Error('buildings-config.json is not an array');
+        rows = compare(config);
+        render();
+      } catch (err) {
+        $('error').hidden = false;
+        $('error').textContent = `Could not load progress data: ${err.message}`;
+      } finally {
+        $('refresh').disabled = false;
+      }
+    }
+
+    $('refresh').addEventListener('click', refresh);
+    $('search').addEventListener('input', renderRows);
+    $('only-incomplete').addEventListener('change', renderRows);
+
+    $('folder-btn').addEventListener('click', () => $('folder-input').click());
+    $('folder-input').addEventListener('change', async (e) => {
+      const files = [...(e.target.files ?? [])];
+      e.target.value = '';
+      if (!files.length) return;
+      $('error').hidden = true;
+      $('catalog-summary').textContent = 'Reading local Floor Data folder…';
+      let local;
+      try {
+        local = await catalogFromFiles(files);
+      } catch (err) {
+        $('error').hidden = false;
+        $('error').textContent = `Could not read that folder: ${err.message}`;
+        return;
+      }
+      const total = Object.values(local.buildings).reduce((n, f) => n + f.length, 0);
+      if (!total) {
+        $('error').hidden = false;
+        $('error').textContent = 'No AS###-<floor>.json plans found in that folder.';
+        return;
+      }
+      localStorage.setItem(LS_CATALOG, JSON.stringify(local));
+      refresh();
+    });
+    $('catalog-reset').addEventListener('click', () => {
+      localStorage.removeItem(LS_CATALOG);
+      refresh();
+    });
+
+    refresh();
+  </script>
+</body>
+</html>

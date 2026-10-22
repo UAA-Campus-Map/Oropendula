@@ -55,6 +55,15 @@ Loads a DXF floor, places it with `geo.mjs`, aligns stacked floors with
 registration (including the cached portal set). **Buildings are added through this
 tool, never by hand-editing `index.html`.**
 
+## `import-progress.html` — import dashboard
+
+Compares the deployed `buildings-config.json` against `floor-catalog.json` and
+shows how many buildings/floors are imported, per-building missing floors, and a
+link into the import tool. The catalog is a snapshot of the private
+Extraction-Tool `Data Extraction/Floor Data` folder; regenerate it with
+`node gen-floor-catalog.mjs "<Floor Data dir>"`. The page can also read a local
+folder directly (stored in `localStorage`) when the source changes.
+
 ## `locate-test.html` — a positioning testbed
 
 A test-only live map for PDR: loads floor plans + basemap, draws the GPS fix and

@@ -1,0 +1,359 @@
+{
+  "source": "UAA-Campus-Map/Extraction-Tool — Data Extraction/Floor Data",
+  "generated": "2026-10-22",
+  "buildings": {
+    "AS101": [
+      "01",
+      "02",
+      "B1"
+    ],
+    "AS102": [
+      "01",
+      "B1"
+    ],
+    "AS103": [
+      "01",
+      "02",
+      "B1"
+    ],
+    "AS104": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS105": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS106": [
+      "01",
+      "02",
+      "B1"
+    ],
+    "AS110": [
+      "01",
+      "02"
+    ],
+    "AS111": [
+      "01",
+      "02"
+    ],
+    "AS112": [
+      "01",
+      "02",
+      "03",
+      "B1"
+    ],
+    "AS114": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS117": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS118": [
+      "01",
+      "02",
+      "B1"
+    ],
+    "AS119": [
+      "01",
+      "02"
+    ],
+    "AS120": [
+      "01",
+      "02",
+      "B1"
+    ],
+    "AS121": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS122": [
+      "01",
+      "02",
+      "INTERSTITIAL"
+    ],
+    "AS123": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS124": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "B1"
+    ],
+    "AS125": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS127": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS128": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS129": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS130": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS131": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS132": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS133": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS135": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS136": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS137": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS138": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS139": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS140": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS141": [
+      "01",
+      "02"
+    ],
+    "AS142": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05"
+    ],
+    "AS143": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05"
+    ],
+    "AS144": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05"
+    ],
+    "AS150": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS151": [
+      "01",
+      "02"
+    ],
+    "AS153": [
+      "01",
+      "02"
+    ],
+    "AS154": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "INTERSTITIAL"
+    ],
+    "AS155": [
+      "01",
+      "02",
+      "03"
+    ],
+    "AS156": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS157": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "B1"
+    ],
+    "AS158": [
+      "01"
+    ],
+    "AS160": [
+      "01"
+    ],
+    "AS161": [
+      "01"
+    ],
+    "AS162": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS163": [
+      "01",
+      "02",
+      "03",
+      "04"
+    ],
+    "AS164": [
+      "03"
+    ]
+  },
+  "names": {
+    "AS101": "Eugene Short Hall",
+    "AS102": "Sally Monserud Hall",
+    "AS103": "Beatrice McDonald Hall",
+    "AS104": "Gordon Hartlieb Hall",
+    "AS105": "Edward & Cathryn Rasmuson Hall",
+    "AS106": "Lucy Cuddy Hall",
+    "AS110": "Auto/Diesel Technology Building",
+    "AS111": "Professional Studies Building",
+    "AS112": "Wendy Williamson Auditorium",
+    "AS114": "Allied Health Sciences Building",
+    "AS117": "Avis Alaska Sports Complex",
+    "AS118": "Enrollment Service Center",
+    "AS119": "Student Union",
+    "AS120": "Arcade and Bridge Lounge",
+    "AS121": "Engineering & Computation Building",
+    "AS122": "Natural Sciences Building",
+    "AS123": "Social Sciences Building",
+    "AS124": "Consortium Library",
+    "AS125": "Administration/Humanities Building",
+    "AS127": "Fine Arts Building",
+    "AS128": "Student Housing Building #1",
+    "AS129": "Student Housing Building #2",
+    "AS130": "Student Housing Building #3",
+    "AS131": "Student Housing Building #4",
+    "AS132": "Student Housing Building #5",
+    "AS133": "Student Housing Building #6",
+    "AS135": "Temple Wood Building A",
+    "AS136": "Temple Wood Building B",
+    "AS137": "Temple Wood Building C",
+    "AS138": "Temple Wood Building D",
+    "AS139": "Temple Wood Building E",
+    "AS140": "Temple Wood Building F",
+    "AS141": "Commons",
+    "AS142": "East Hall Student Housing",
+    "AS143": "West Hall Student Housing",
+    "AS144": "North Hall Student Housing",
+    "AS150": "Central Parking Garage",
+    "AS151": "Ecosystem-Biomedical Health Laboratory",
+    "AS153": "Alaska Native Science and Engineering Programs Building",
+    "AS154": "ConocoPhillips Integrated Science Building",
+    "AS155": "East Parking Garage",
+    "AS156": "Health Sciences Building",
+    "AS157": "Alaska Airlines Center",
+    "AS158": "ANSEP Academy Building",
+    "AS160": "Engineering Temporary Building #1",
+    "AS161": "Engineering Temporary Building #2",
+    "AS162": "Engineering & Industry Building",
+    "AS163": "Engineering Parking Garage",
+    "AS164": "Parrish Bridge"
+  },
+  "ids": {
+    "AS101": "ESH",
+    "AS102": "SMH",
+    "AS103": "BMH",
+    "AS104": "GHH",
+    "AS105": "RH",
+    "AS106": "CUDY",
+    "AS110": "ADT",
+    "AS111": "PSB",
+    "AS112": "WWA",
+    "AS114": "AHS",
+    "AS117": "AASC",
+    "AS118": "ESC",
+    "AS119": "SU",
+    "AS120": "ABL",
+    "AS121": "ECB",
+    "AS122": "NSB",
+    "AS123": "SSB",
+    "AS124": "LIB",
+    "AS125": "ADM",
+    "AS127": "ART",
+    "AS128": "SH1",
+    "AS129": "SH2",
+    "AS130": "SH3",
+    "AS131": "SH4",
+    "AS132": "SH5",
+    "AS133": "SH6",
+    "AS135": "TWA",
+    "AS136": "TWB",
+    "AS137": "TWC",
+    "AS138": "TWD",
+    "AS139": "TWE",
+    "AS140": "TWF",
+    "AS141": "CMMNS",
+    "AS142": "EASTH",
+    "AS143": "WESTH",
+    "AS144": "NORTHH",
+    "AS150": "CPG",
+    "AS151": "EBL",
+    "AS153": "ANSEP",
+    "AS154": "CPISB",
+    "AS155": "EPG",
+    "AS156": "HSB",
+    "AS157": "AAC",
+    "AS158": "AAB",
+    "AS160": "ETB1",
+    "AS161": "ETB2",
+    "AS162": "EIB",
+    "AS163": "ENPG",
+    "AS164": "PB"
+  }
+}
