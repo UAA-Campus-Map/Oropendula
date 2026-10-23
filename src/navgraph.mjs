@@ -544,7 +544,9 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
     : null;
 
   return {findPath, nodes, stats, isWalkable, nearestWalkable, inBounds,
-          attach, dijkstraFromAttach, distToAttach, pathToAttach, headingField};
+          attach, dijkstraFromAttach, distToAttach, pathToAttach, headingField,
+          // Read-only raster access for room/space analysis (import tool/app).
+          raster: {blocked, W, H, OX, OY, cell: CELL}, toM, toLL};
 }
 
 /** Build the navigation graph for a set of wall centrelines (see buildGraphState). */

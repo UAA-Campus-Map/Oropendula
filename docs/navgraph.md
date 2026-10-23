@@ -13,7 +13,9 @@ path queries on it. Exports:
 The graph object exposes `findPath(startLL, endLL)`, the O(1) predicates
 `isWalkable(ll)`, `nearestWalkable(ll, maxRadius)`, `inBounds(ll, marginM)`, and
 the low-level attachment API (`attach`, `dijkstraFromAttach`, `distToAttach`,
-`pathToAttach`) used by the router and the particle filter.
+`pathToAttach`) used by the router and the particle filter. The additive
+`raster` / `toM` / `toLL` fields expose the clearance raster for room/space
+analysis such as the Room pin hallway check.
 
 ## Why it's built this way
 

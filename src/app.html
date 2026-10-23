@@ -446,7 +446,7 @@
     .cal-state-icon.calibrated { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 
     /* ---- calibration modal ---------------------------------------------- */
-    #cal-modal {
+    #cal-modal, #room-pin-modal {
       position: fixed;
       inset: 0;
       z-index: 60;
@@ -835,6 +835,14 @@
         <circle cx="12" cy="10" r="2.7"/>
       </svg>
     </button>
+    <button id="room-pin-btn" class="control-btn icon-btn"
+            title="Locate by room" aria-label="Locate by room">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 21V4h10v17M4 4l10-2v17M14 8h5v13M2 21h20"/>
+        <path d="M7 7h3M7 11h3M7 15h3M17 12h1M17 16h1"/>
+      </svg>
+    </button>
     <button id="menu-btn" class="control-btn icon-btn" title="Step length calibration"
             aria-label="Calibrate walking model">
       <span id="cal-state-icon" class="cal-state-icon" aria-label="Not calibrated">!</span>
@@ -1063,6 +1071,31 @@
     </div>
   </div>
 
+  <!-- Locate by room: place a manual PDR anchor in the hallway outside a
+       room with exactly one hallway door. -->
+  <div id="room-pin-modal" hidden>
+    <div class="modal-backdrop" data-room-close></div>
+    <div class="modal-panel" role="dialog" aria-modal="true"
+         aria-labelledby="room-pin-title">
+      <div class="modal-head">
+        <h2 id="room-pin-title">Locate by room</h2>
+        <button id="room-pin-close" class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead" id="room-pin-context">Find a room to place yourself outside.</p>
+        <div class="cal-field">
+          <span class="info-label">Room number</span>
+          <input id="room-pin-input" class="cal-input" type="text"
+                 placeholder="e.g. 211" autocomplete="off" />
+        </div>
+        <p id="room-pin-error" class="cal-error" hidden></p>
+        <button id="room-pin-go" class="cal-btn cal-primary" style="width:100%">
+          Place me outside this room
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Hide the splash once the app reports it is ready (or gives up), mirroring
     // the live status line so the loading screen says what is happening.
@@ -1208,6 +1241,12 @@
     const menuBtn = document.getElementById('menu-btn');
     const locationBtn = document.getElementById('location-btn');
     const anchorBtn = document.getElementById('anchor-btn');
+    const roomPinBtn = document.getElementById('room-pin-btn');
+    const roomPinModal = document.getElementById('room-pin-modal');
+    const roomPinInput = document.getElementById('room-pin-input');
+    const roomPinGo = document.getElementById('room-pin-go');
+    const roomPinError = document.getElementById('room-pin-error');
+    const roomPinContext = document.getElementById('room-pin-context');
     const viewBtn = document.getElementById('view-btn');
     const followBtn = document.getElementById('follow-btn');
     const floorDown = document.getElementById('floor-down');
@@ -1323,12 +1362,21 @@
       statusText.textContent = 'Tap the map where you are';
     });
 
-    function anchorAt(ll) {
+    roomPinBtn.addEventListener('click', openRoomPin);
+    roomPinGo.addEventListener('click', submitRoomPin);
+    roomPinInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submitRoomPin(); }
+      if (e.key === 'Escape') closeRoomPin();
+    });
+    document.getElementById('room-pin-close').addEventListener('click', closeRoomPin);
+    roomPinModal.querySelector('[data-room-close]')?.addEventListener('click', closeRoomPin);
+
+    function anchorAt(ll, buildingHint = null) {
       positionSeeded = true;   // an explicit fix - the live position is real now
       // The floor currently displayed is authoritative ("I'm Here" on the 3rd
       // floor must bind to the 3rd floor, not whichever floor's centroid is
       // marginally nearest - stacked floors share a footprint).
-      ensureLocator(ll, floorOfView());
+      ensureLocator(ll, floorOfView(), buildingHint);
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
       // Manual "I'm Here": the tap is treated as an almost-exact position, so
       // seed the cloud with a minimal spread (1 m) rather than the usual 3 m.
@@ -1343,6 +1391,26 @@
       renderEstimate(locator.arbiter.estimate(performance.now()));
       statusText.textContent = `Anchored here (${locator.building.id} ${locator.floor.floorId})`;
       updateAutocalUI();   // refresh the walking-model panel / step length
+    }
+
+    /**
+     * Manual PDR placement at a known indoor point (Room pin). This is a
+     * deliberate indoor fix: stop GPS, bind to the exact building/floor, seed
+     * the particle cloud, and let PDR take over.
+     */
+    function manualPdrAnchor(building, floor, ll) {
+      const level = floorLevels.indexOf(floor.floorId) + 1;
+      if (level > 0) setFloor(level);
+      stopGps();
+      ensureLiveSetup();
+      ensureLocator(ll, floor.floorId, building.id);
+      if (!locator || locator.building.id !== building.id || locator.floor.floorId !== floor.floorId) {
+        statusText.textContent = 'Could not bind PDR to that room';
+        return false;
+      }
+      anchorAt(ll, building.id);
+      statusText.textContent = `PDR anchored outside ${building.sourceId ?? building.id} ${floor.floorId}`;
+      return true;
     }
 
     /**
@@ -2748,7 +2816,16 @@
     const DEFAULT_STEP_LENGTH_M = 0.72;
     function applyPersonalWalkTime(route) {
       if (!route || !(stepModel.base > 0)) return route;
-      const scale = DEFAULT_STEP_LENGTH_M / stepModel.base;
+      // The model's calibrated base is defined at cadenceRef. Use recent
+      // sensor cadence when it is fresh; otherwise the reference cadence.
+      const now = performance.now();
+      const cadence = recentCadenceHz != null && now - recentCadenceAt <= CADENCE_FRESH_MS
+        ? recentCadenceHz
+        : stepModel.cadenceRef;
+      const speed = stepModel.lengthFor(cadence) * cadence;
+      const referenceSpeed = DEFAULT_STEP_LENGTH_M * stepModel.cadenceRef;
+      if (!(speed > 0)) return route;
+      const scale = referenceSpeed / speed;
       if (Math.abs(scale - 1) < 1e-6) return route;
       let total = 0;
       const segments = (route.segments ?? []).map((s) => {
@@ -2820,6 +2897,230 @@
         if (clear) { best = dd; bestD = dist; }
       }
       return best ?? labelLL;
+    }
+
+    // --- Room pin: strict hallway-door resolution -------------------------
+    // A raw DOOR layer contains one point per leaf; cluster them into physical
+    // doorways before doing any room analysis.
+    const ROOM_DOOR_CLUSTER_M = 1.4;
+    const ROOM_DOOR_MAX_M = 15;
+    const ROOM_HALL_SCAN_M = 4;
+
+    function clusterFloorDoorways(floor) {
+      const pts = floor.doorPoints ?? [];
+      if (!pts.length) return [];
+      const m = metresPerDegree(pts[0][1]);
+      const clusters = [];
+      for (const p of pts) {
+        let best = null, bestD = ROOM_DOOR_CLUSTER_M;
+        for (const c of clusters) {
+          const d = Math.hypot((p[0] - c.ll[0]) * m.lon, (p[1] - c.ll[1]) * m.lat);
+          if (d <= bestD) { bestD = d; best = c; }
+        }
+        if (best) {
+          best.sumLon += p[0];
+          best.sumLat += p[1];
+          best.n++;
+          best.ll = [best.sumLon / best.n, best.sumLat / best.n];
+        } else {
+          clusters.push({sumLon: p[0], sumLat: p[1], n: 1, ll: p});
+        }
+      }
+      return clusters.map((c) => ({ll: c.ll, leaves: c.n}));
+    }
+
+    function findRoomLabelExact(building, roomText) {
+      const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
+      const want = norm(roomText);
+      if (!want) return {error: 'Type a room number first.'};
+      const exact = [];
+      for (const f of building.floors) {
+        for (const label of f.roomLabels ?? []) {
+          const text = String(label.properties.text ?? '').trim();
+          if (norm(text) !== want) continue;
+          exact.push({floor: f, text, labelLL: label.geometry.coordinates});
+        }
+      }
+      if (!exact.length) {
+        return {error: `Room "${roomText}" was not found in ${building.sourceId ?? building.id}.`};
+      }
+      if (exact.length > 1) {
+        return {error: `Room "${roomText}" is ambiguous (${exact.length} matches).`};
+      }
+      return exact[0];
+    }
+
+    function roomDoorCandidates(floor, labelLL) {
+      const g = floor.navGraph;
+      if (!g) return [];
+      const from = g.isWalkable(labelLL) ? labelLL : g.nearestWalkable(labelLL);
+      if (!from) return [];
+      const m = metresPerDegree(from[1]);
+      const out = [];
+      for (const c of clusterFloorDoorways(floor)) {
+        const door = g.isWalkable(c.ll) ? c.ll : g.nearestWalkable(c.ll);
+        if (!door) continue;
+        const dist = Math.hypot((door[0] - from[0]) * m.lon, (door[1] - from[1]) * m.lat);
+        if (dist > ROOM_DOOR_MAX_M) continue;
+        let clear = true;
+        const steps = Math.max(1, Math.ceil(dist / 0.2));
+        for (let s = 1; s <= steps; s++) {
+          const t = s / steps;
+          if (!g.isWalkable([from[0] + (door[0] - from[0]) * t,
+                              from[1] + (door[1] - from[1]) * t])) { clear = false; break; }
+        }
+        if (clear) out.push({...c, ll: door, dist});
+      }
+      return out;
+    }
+
+    function corridorPoint(floor, labelLL, doorLL, distance) {
+      const g = floor.navGraph;
+      const from = g.toM(labelLL), door = g.toM(doorLL);
+      let ux = door[0] - from[0], uy = door[1] - from[1];
+      const len = Math.hypot(ux, uy);
+      if (!(len > 0)) return null;
+      ux /= len; uy /= len;
+      const x = door[0] + ux * distance, y = door[1] + uy * distance;
+      const ll = g.toLL([x, y]);
+      if (!g.isWalkable(ll)) return null;
+      // Centre the point across the corridor, perpendicular to the room->door
+      // direction, so we do not drop the user against a hallway wall.
+      const px = -uy, py = ux;
+      let neg = 0, pos = 0;
+      for (let d = 0.25; d <= ROOM_HALL_SCAN_M; d += 0.25) {
+        const q = g.toLL([x + px * d, y + py * d]);
+        if (!g.isWalkable(q)) break;
+        pos = d;
+      }
+      for (let d = 0.25; d <= ROOM_HALL_SCAN_M; d += 0.25) {
+        const q = g.toLL([x - px * d, y - py * d]);
+        if (!g.isWalkable(q)) break;
+        neg = d;
+      }
+      const mid = (pos - neg) / 2;
+      const centre = g.toLL([x + px * mid, y + py * mid]);
+      return g.isWalkable(centre) ? centre : ll;
+    }
+
+    function routeDoorHits(route, floor, exceptDoorLL) {
+      const poly = [];
+      for (const s of route?.segments ?? []) {
+        if (s.tier === 'indoor' && s.polyline?.length) poly.push(s.polyline);
+      }
+      if (!poly.length) return Infinity;
+      let hits = 0;
+      for (const c of clusterFloorDoorways(floor)) {
+        if (distM(c.ll, exceptDoorLL) <= 1.5) continue;
+        let hit = false;
+        for (const line of poly) {
+          for (let i = 1; i < line.length; i++) {
+            if (distToSegment(c.ll, line[i - 1], line[i]) <= 0.6) { hit = true; break; }
+          }
+          if (hit) break;
+        }
+        if (hit) hits++;
+      }
+      return hits;
+    }
+
+    function probeDoor(floor, fromLL, targetDoorLL) {
+      let best = null, bestD = Infinity;
+      for (const c of clusterFloorDoorways(floor)) {
+        const d = distM(c.ll, targetDoorLL);
+        if (d < 8) continue;
+        const dd = distM(c.ll, fromLL);
+        if (dd < bestD) { bestD = dd; best = c; }
+      }
+      return best;
+    }
+
+    /** The hallway point just outside one door, or null if this door cannot be
+     *  shown to open onto a corridor. */
+    function hallwayPointForDoor(floor, labelLL, doorLL) {
+      if (!campusRouter) return null;
+      const probe = probeDoor(floor, labelLL, doorLL);
+      if (!probe) return null;
+      const g = floor.navGraph;
+      const probeLL = g.isWalkable(probe.ll) ? probe.ll : g.nearestWalkable(probe.ll);
+      if (!probeLL) return null;
+      for (const distance of [1.0, 1.4, 1.8, 2.2, 2.6, 3.0]) {
+        const ll = corridorPoint(floor, labelLL, doorLL, distance);
+        if (!ll) continue;
+        const route = campusRouter.route(ll, probeLL, {
+          startFloor: floor.floorId, endFloor: floor.floorId,
+        });
+        if (!route) continue;
+        if ((route.segments ?? []).some((s) => s.tier !== 'indoor')) continue;
+        // If this point is still inside the room, the route crosses the target
+        // door; routeDoorHits then sees an extra door. If it is a real
+        // corridor, only the probe endpoint is crossed.
+        if (routeDoorHits(route, floor, probeLL) === 0) return ll;
+      }
+      return null;
+    }
+
+    function resolveRoomPin(building, roomText) {
+      const hit = findRoomLabelExact(building, roomText);
+      if (hit.error) return hit;
+      const doors = roomDoorCandidates(hit.floor, hit.labelLL);
+      if (!doors.length) return {error: `Room ${hit.text} has no door connected to its space.`};
+      const hallway = [];
+      for (const d of doors) {
+        const ll = hallwayPointForDoor(hit.floor, hit.labelLL, d.ll);
+        if (ll) hallway.push({...d, hallwayLL: ll});
+      }
+      if (!hallway.length) {
+        return {error: `Room ${hit.text} has no door that opens onto a hallway.`};
+      }
+      if (hallway.length > 1) {
+        return {error: `Room ${hit.text} has multiple doors that open onto a hallway.`};
+      }
+      return {building, floor: hit.floor, room: hit.text,
+              doorLL: hallway[0].ll, ll: hallway[0].hallwayLL};
+    }
+
+    function currentRoomPinBuilding() {
+      if (locator?.building) return locator.building;
+      if (!campusRouter) return null;
+      const c = map.getCenter();
+      return campusRouter.buildingAt([c.lng, c.lat], floorOfView())?.building ?? null;
+    }
+
+    function setRoomPinError(msg) {
+      roomPinError.textContent = msg;
+      roomPinError.hidden = !msg;
+    }
+
+    function openRoomPin() {
+      const b = currentRoomPinBuilding();
+      if (!b) {
+        statusText.textContent = 'Open a building floor before locating by room';
+        return;
+      }
+      roomPinContext.textContent = `Building: ${buildingLabel(b.id)}`;
+      setRoomPinError('');
+      roomPinInput.value = '';
+      roomPinModal.hidden = false;
+      setTimeout(() => roomPinInput.focus(), 40);
+    }
+
+    function closeRoomPin() {
+      roomPinModal.hidden = true;
+      roomPinInput.blur();
+    }
+
+    function submitRoomPin() {
+      const b = currentRoomPinBuilding();
+      if (!b) { setRoomPinError('No current building.'); return; }
+      const q = roomPinInput.value.trim();
+      if (!q) { setRoomPinError('Type a room number first.'); return; }
+      const resolved = resolveRoomPin(b, q);
+      if (resolved.error) { setRoomPinError(resolved.error); return; }
+      if (!manualPdrAnchor(resolved.building, resolved.floor, resolved.ll)) return;
+      closeRoomPin();
+      map.flyTo({center: resolved.ll, zoom: Math.max(map.getZoom(), 19), duration: 650});
+      statusText.textContent = `PDR anchored outside ${resolved.room} (${resolved.building.sourceId ?? resolved.building.id} ${resolved.floor.floorId})`;
     }
 
     function findRoom(building, roomText) {
@@ -2961,6 +3262,12 @@
     // dead reckoning run at the same time; the arbiter picks whichever is
     // more accurate, so the app transitions in and out of buildings on its own.
     const stepModel = new StepLengthModel();
+    // Recent walking cadence for route ETAs. Sensor steps give cadence in Hz;
+    // hold the last value briefly so a route requested right after walking uses
+    // it, then fall back to the model's reference cadence after a pause.
+    let recentCadenceHz = null;
+    let recentCadenceAt = -Infinity;
+    const CADENCE_FRESH_MS = 10000;
     // Continuous GPS step-length auto-calibration (autocal.mjs): every good-GPS
     // walking stretch feeds the estimator; `stepModel.base` is only touched
     // once the estimate is within +-6% at 90% confidence - never before.
@@ -3060,15 +3367,21 @@
     // an upper-floor anchor used to bind to the ground floor. Falls back to
     // the centroid pick for GPS fixes / boot, which carry no floor. Re-built
     // only when the floor changes, so the particle cloud is preserved.
-    function ensureLocator([lon, lat], floorHint) {
+    function ensureLocator([lon, lat], floorHint, buildingHint = null) {
       let pick = null;
-      if (floorHint && campusRouter) {
+      if (buildingHint) {
+        const b = buildings.find((x) => x.id === buildingHint);
+        const f = b?.floors.find((x) => x.floorId === floorHint);
+        if (b && f) pick = { building: b, floor: f };
+      }
+      if (!pick && floorHint && campusRouter) {
         const hit = campusRouter.buildingAt([lon, lat], floorHint);
         if (hit) pick = { building: hit.building, floor: hit.floor };
       }
       if (!pick) pick = nearestFloor([lon, lat]);
       if (!pick) return;
-      if (locator && locator.floor === pick.floor) return;
+      if (locator && locator.floor === pick.floor &&
+          (!buildingHint || locator.building.id === buildingHint)) return;
       // A floor's raster (navGraph) ends at its own wall bbox. A connected
       // complex is split across several plans (AS117 and AS119 are one
       // building with separate navgraphs), so a body crossing from one into
@@ -3515,6 +3828,14 @@
       if (motion) { motion.start(); return; }
       motion = createMotion({
         onStep: ({ t, cadenceHz }) => {
+          // Keep the recent cadence for route ETAs. Smooth lightly so one
+          // irregular step interval does not swing the estimate.
+          if (Number.isFinite(cadenceHz) && cadenceHz > 0.3) {
+            recentCadenceHz = recentCadenceHz == null
+              ? cadenceHz
+              : recentCadenceHz * 0.7 + cadenceHz * 0.3;
+            recentCadenceAt = performance.now();
+          }
           // The guided indoor calibration counts steps while the walk is armed.
           if (calWizard.armed) {
             calWizard.steps++;

@@ -33,10 +33,19 @@ Internal math is metric. The **UI shows Imperial**: `distanceText` (feet, miles
 past ¼ mile), `stepLenText` (inches), `speedText` (ft/s), and the height
 estimator defaults to **ft·in** with a cm toggle.
 
-Route ETAs use the user's calibrated step length for walking legs:
-`seconds × (0.72 m / stepModel.base)`. The router still chooses the route with
-its nominal speeds, so a calibration changes the reported time, not the path.
-Elevator/stairs time remains fixed.
+Route ETAs use the user's calibrated step length and recent walking cadence for
+walking legs. The scale is:
+
+```text
+reference speed = 0.72 m × 1.8 steps/s
+current speed   = stepModel.lengthFor(cadence) × cadence
+seconds        *= reference speed / current speed
+```
+
+Recent sensor cadence (last ~10 s) is used when available; otherwise the
+model's reference cadence. The router still chooses the route with its nominal
+speeds, so calibration changes the reported time, not the path. Elevator/stairs
+time remains fixed.
 
 ### Floor ids
 
@@ -44,6 +53,16 @@ Floor ids are strings. `floors.mjs` is the shared source of truth: `B1`/`B2`
 sort **below** `01`, display as **Basement 1**/**Basement 2**, and map to 3D
 levels `0`/`-1` (ground `01` is level `1`). The floor stepper starts on the
 ground floor even when a building has a basement.
+
+### Room pin
+
+The right-edge **Locate by room** button places a manual PDR anchor in the
+hallway outside a room in the current building. It uses exact room-label
+matching, clusters DOOR-layer leaves into doorways, and only accepts a door
+that opens onto a hallway. If the room has multiple hallway doors, multiple
+hallways, no hallway door, or an open exterior gap, it refuses to place the
+pin. A successful placement stops GPS, binds PDR to that building/floor, and
+seeds the particle cloud at the centre of the hallway outside the door.
 
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
