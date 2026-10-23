@@ -446,7 +446,7 @@
     .cal-state-icon.calibrated { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 
     /* ---- calibration modal ---------------------------------------------- */
-    #cal-modal, #room-pin-modal {
+    #cal-modal, #room-pin-modal, #block-door-modal {
       position: fixed;
       inset: 0;
       z-index: 60;
@@ -843,6 +843,15 @@
         <path d="M7 7h3M7 11h3M7 15h3M17 12h1M17 16h1"/>
       </svg>
     </button>
+    <button id="block-door-btn" class="control-btn icon-btn"
+            title="Mark the next door or staircase blocked"
+            aria-label="Mark next door blocked" style="color:#dc2626">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>
+      </svg>
+    </button>
     <button id="menu-btn" class="control-btn icon-btn" title="Step length calibration"
             aria-label="Calibrate walking model">
       <span id="cal-state-icon" class="cal-state-icon" aria-label="Not calibrated">!</span>
@@ -1096,6 +1105,29 @@
     </div>
   </div>
 
+  <div id="block-door-modal" hidden>
+    <div class="modal-backdrop" data-block-close></div>
+    <div class="modal-panel" role="dialog" aria-modal="true"
+         aria-labelledby="block-door-title">
+      <div class="modal-head">
+        <h2 id="block-door-title">Mark door blocked?</h2>
+        <button id="block-door-close" class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead" id="block-door-context">
+          Block the next door or staircase on this route and find another way?
+        </p>
+        <p id="block-door-error" class="cal-error" hidden></p>
+        <div class="row" style="display:flex;gap:8px">
+          <button id="block-door-cancel" class="cal-btn" style="flex:1">Cancel</button>
+          <button id="block-door-confirm" class="cal-btn cal-primary" style="flex:1">
+            Block and reroute
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Hide the splash once the app reports it is ready (or gives up), mirroring
     // the live status line so the loading screen says what is happening.
@@ -1247,6 +1279,10 @@
     const roomPinGo = document.getElementById('room-pin-go');
     const roomPinError = document.getElementById('room-pin-error');
     const roomPinContext = document.getElementById('room-pin-context');
+    const blockDoorBtn = document.getElementById('block-door-btn');
+    const blockDoorModal = document.getElementById('block-door-modal');
+    const blockDoorContext = document.getElementById('block-door-context');
+    const blockDoorError = document.getElementById('block-door-error');
     const viewBtn = document.getElementById('view-btn');
     const followBtn = document.getElementById('follow-btn');
     const floorDown = document.getElementById('floor-down');
@@ -1370,6 +1406,12 @@
     });
     document.getElementById('room-pin-close').addEventListener('click', closeRoomPin);
     roomPinModal.querySelector('[data-room-close]')?.addEventListener('click', closeRoomPin);
+
+    blockDoorBtn.addEventListener('click', openBlockDoor);
+    document.getElementById('block-door-confirm').addEventListener('click', confirmBlockDoor);
+    document.getElementById('block-door-cancel').addEventListener('click', closeBlockDoor);
+    document.getElementById('block-door-close').addEventListener('click', closeBlockDoor);
+    blockDoorModal.querySelector('[data-block-close]')?.addEventListener('click', closeBlockDoor);
 
     function anchorAt(ll, buildingHint = null) {
       positionSeeded = true;   // an explicit fix - the live position is real now
@@ -2539,6 +2581,22 @@
 
     // The last computed route.
     let lastRoute = null;
+    let lastRouteRequest = null;   // {startLL, endLL, opts} for block-and-reroute
+    const blockedPortals = new Set();   // portal keys blocked this session
+
+    /** Plan a user route while honoring doors/staircases blocked this session. */
+    function planRoute(startLL, endLL, opts = {}) {
+      if (!campusRouter) return null;
+      lastRouteRequest = {
+        startLL: [startLL[0], startLL[1]],
+        endLL: [endLL[0], endLL[1]],
+        opts: { ...opts },
+      };
+      return campusRouter.route(startLL, endLL, {
+        ...opts,
+        avoidPortals: [...blockedPortals],
+      });
+    }
 
     /** Does this route segment lie on the given floor? (2D line filtering.) */
     function segmentOnFloor(s, floorId) {
@@ -2866,6 +2924,68 @@
       }
     }
 
+    // --- block the next door/staircase and re-plan -------------------------
+    let pendingBlockPortal = null;
+
+    function nextBlockablePortal(route) {
+      return (route?.portals ?? []).find((p) => p.kind === 'door' || p.kind === 'connector') ?? null;
+    }
+
+    function blockPortalLabel(p) {
+      if (!p) return '';
+      if (p.kind === 'connector') {
+        return `${p.id ?? 'connector'} at ${p.building} ${p.floor}`;
+      }
+      return `door at ${p.building} ${p.floor}`;
+    }
+
+    function setBlockDoorError(msg) {
+      blockDoorError.textContent = msg;
+      blockDoorError.hidden = !msg;
+    }
+
+    function openBlockDoor() {
+      const portal = nextBlockablePortal(lastRoute);
+      if (!lastRoute) {
+        statusText.textContent = 'Plan a route before blocking a door';
+        return;
+      }
+      if (!portal) {
+        statusText.textContent = 'No door or staircase left on this route to block';
+        return;
+      }
+      pendingBlockPortal = portal;
+      setBlockDoorError('');
+      blockDoorContext.textContent =
+        `Block ${blockPortalLabel(portal)} and find another route?`;
+      blockDoorModal.hidden = false;
+    }
+
+    function closeBlockDoor() {
+      blockDoorModal.hidden = true;
+      pendingBlockPortal = null;
+    }
+
+    function confirmBlockDoor() {
+      if (!pendingBlockPortal || !lastRouteRequest) {
+        setBlockDoorError('The route is no longer available. Cancel and plan again.');
+        return;
+      }
+      const portal = pendingBlockPortal;
+      blockedPortals.add(portal.key);
+      blockDoorModal.hidden = true;
+      pendingBlockPortal = null;
+      const req = lastRouteRequest;
+      const route = planRoute(req.startLL, req.endLL, req.opts);
+      if (route) {
+        showRoute(route);
+        statusText.textContent = `Blocked ${blockPortalLabel(portal)} — alternate route found`;
+      } else {
+        showRoute(null);
+        statusText.textContent = `Blocked ${blockPortalLabel(portal)} — no alternate route found`;
+      }
+    }
+
     // --- building / room search --------------------------------------------
     // A query carries the UAA building code from the floor JSON's `ID` field
     // (BMH) or the app's registration id (AS103), plus a room number. Rooms
@@ -3184,7 +3304,7 @@
         ? [currentEstimate.lon, currentEstimate.lat]
         : [map.getCenter().lng, map.getCenter().lat];
       const startFloor = (currentEstimate && locator) ? locator.floor.floorId : currentFloorId();
-      const route = campusRouter.route(startLL, room.ll,
+      const route = planRoute(startLL, room.ll,
         {startFloor, endFloor: room.floorId});
       // The room becomes the destination: marker + 3D pin on its floor.
       destinationFloor = room.floorId;
@@ -3224,7 +3344,7 @@
           // Each tap is read on the floor that was displayed when it was made,
           // so a single route can start and end on different floors.
           const endFloor = floorOfView();
-          const route = campusRouter.route(firstPathPoint, coordArray,
+          const route = planRoute(firstPathPoint, coordArray,
             {startFloor: firstPathFloor, endFloor});
           // Mark the destination on the floor it actually lands on (null when
           // outdoors), before rendering so the 3D pin is placed correctly.
@@ -3546,7 +3666,7 @@
         const from = [currentEstimate.lon, currentEstimate.lat];
         const dest = destinationMarker.getLngLat();
         const startFloor = locator?.floor?.floorId ?? currentFloorId();
-        const route = campusRouter.route(from, [dest.lng, dest.lat],
+        const route = planRoute(from, [dest.lng, dest.lat],
           { startFloor, endFloor: destinationFloor });
         if (route) {
           lastRoute = route;

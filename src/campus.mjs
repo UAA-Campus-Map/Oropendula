@@ -1147,6 +1147,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   }
   const scale = metresPerDeg(nodes[0]?.ll[1] ?? 61.19);
   const N = nodes.length;
+  const portalKey = (n) => `${n.building.id}|${n.floor.floorId}|${n.kind}|${n.id ?? ''}`;
   // Outdoor legs exist at ground level only. Using the building's configured
   // groundFloor was wrong for level-3-only structures: AS164 (Parrish Bridge)
   // is a skybridge landing with groundFloor "03", so its doors became outdoor
@@ -1468,14 +1469,16 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
    *
    * @param {number[]} startLL
    * @param {number[]} endLL
-   * @param {{startFloor?:string, endFloor?:string}} [opts] floor hints - the
-   *        floor the user is viewing. Omitted, the point's floor is detected
-   *        (ground first). Supplied, it wins (a building without that floor
-   *        uses its ground floor).
+   * @param {{startFloor?:string, endFloor?:string, avoidPortals?:string[]}} [opts]
+   *        floor hints, plus optional portal keys to avoid (blocked doors/
+   *        staircases). Omitted floors are detected (ground first).
    * @returns {{segments:object[], totalSeconds:number, totalMeters:number,
    *            summary:string}|null}
    */
   function route(startLL, endLL, opts = {}) {
+    const avoid = new Set(opts.avoidPortals ?? []);
+    const avoidIdx = new Set();
+    for (let i = 0; i < N; i++) if (avoid.has(portalKey(nodes[i]))) avoidIdx.add(i);
     const startHit = buildingAt(startLL, opts.startFloor);
     const endHit = buildingAt(endLL, opts.endFloor);
 
@@ -1505,6 +1508,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
           totalSeconds: meters / INDOOR_SPEED,
           totalMeters: meters,
           summary: `${startHit.building.id} ${startHit.floor.floorId} (indoor)`,
+          portals: [],
         };
       }
       // fall through: same floor but no direct line - route via exits
@@ -1530,6 +1534,9 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     // outdoors: walk the OSM network from the click to every exit
     if (!startHit) origin = outdoorAttachment(startLL, startSnap, startRun);
     if (!endHit) dest = outdoorAttachment(endLL, endSnap, endRun);
+    const withoutBlocked = (m) => m && new Map([...m].filter(([i]) => !avoidIdx.has(i)));
+    origin = withoutBlocked(origin);
+    dest = withoutBlocked(dest);
     if (!origin || !dest) return null;
 
     // --- direct outdoor walk, when neither end is inside a building --------
@@ -1551,7 +1558,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     // --- Dijkstra over the macro graph with virtual source/sink -----------
     // Node ids 0..N-1 are exits; N = virtual source, N+1 = virtual sink.
     const SRC = N, SNK = N + 1;
-    const adj = macroAdj.map(l => l.slice());
+    const adj = macroAdj.map(l => l.filter(([v]) => !avoidIdx.has(v)));
     adj.push([]); adj.push([]);
     for (const [ei, {sec}] of origin) adj[SRC].push([ei, sec]);
     for (const [ei, {sec}] of dest) adj[ei].push([SNK, sec]);
@@ -1583,6 +1590,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
         totalSeconds: meters / OUTDOOR_SPEED,
         totalMeters: meters,
         summary: 'outside',
+        portals: [],
       };
     }
 
@@ -1660,6 +1668,15 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       addOutdoorPoly(dest.get(lastIdx).polyline);
     }
 
+    const portals = [];
+    for (let k = 1; k < chain.length - 1; k++) {
+      const n = nodes[chain[k]];
+      if (n.kind === 'door' || n.kind === 'connector') {
+        portals.push({key: portalKey(n), kind: n.kind, building: n.building.id,
+                      floor: n.floor.floorId, id: n.id ?? null, ll: n.ll});
+      }
+    }
+
     const totalSeconds = segments.reduce((a, s) => a + (s.seconds || 0), 0);
     const parts = [];
     let lastBuilding = null;
@@ -1688,6 +1705,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       totalSeconds,
       totalMeters,
       summary: parts.join(' → '),
+      portals,
     };
   }
 

@@ -64,6 +64,13 @@ hallways, no hallway door, or an open exterior gap, it refuses to place the
 pin. A successful placement stops GPS, binds PDR to that building/floor, and
 seeds the particle cloud at the centre of the hallway outside the door.
 
+### Blocked doors/staircases
+
+The red crossed-circle button opens **Mark door blocked?**. Confirming blocks
+the next door or staircase on the current route for this session and re-plans
+from the same origin/destination. Blocked portals are passed to
+`campusRouter.route(..., {avoidPortals})`; no other route is affected.
+
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.

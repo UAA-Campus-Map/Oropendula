@@ -7,8 +7,10 @@ everything above that: how floors connect vertically, how buildings connect to
 each other and to the outdoors, and how to plan a trip across all of it.
 
 - `buildCampusRouter(buildings, outdoorShapes?)` → `{ route, buildingAt, stats }`.
-  - `route(startLL, endLL, { startFloor, endFloor })` → a route object
-    `{ segments, totalSeconds, totalMeters, summary }`, or `null`.
+  - `route(startLL, endLL, { startFloor, endFloor, avoidPortals })` → a route
+    object `{ segments, portals, totalSeconds, totalMeters, summary }`, or
+    `null`. `portals` lists the door/connector stops used in order;
+    `avoidPortals` suppresses blocked portal keys for this call.
   - `buildingAt(ll, floorId?)` → `{ building, floor }` or `null`.
 - Portal extraction and caching: `extractPortals`, `cachePortals`,
   `portalsFromCache`.
