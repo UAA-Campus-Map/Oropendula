@@ -767,7 +767,7 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 geo.mjs, osm.mjs, align.mjs, buildings-config.json or a building registration.
 **It takes category arguments so you don't run the whole ~23 s suite every
 time** (`node smoke.mjs --list` shows them): `align, walkability, pdr, arbiter,
-portals, router, osm, multifloor, motion, autocal`. No args = everything. The
+portals, router, osm, multifloor, motion, autocal, places`. No args = everything. The
 fast groups that need no real floors (`motion pdr arbiter autocal`) skip the
 ~4-20 s building load entirely and run in <1 s:
 `node smoke.mjs motion pdr arbiter autocal`. The building-loading groups share
@@ -871,6 +871,14 @@ files:
    a building's floor data is new (the ZIP intentionally contains only config,
    OSM paths, and navGraph bundles).
 4. `node smoke.mjs` stays a **local** pre-deploy gate (Node-only checks).
+
+### Deploying place nicknames
+
+Edit in `places.html`, **Download places.json**, run `node smoke.mjs places`
+(every entry must resolve on a registered floor), and upload `places.json`
+next to `app.html`. Student votes go to an external form
+(`PLACE_VOTE_FORM_URL` in `app.html`), so there is no server-side process or
+`/api/` endpoint.
 
 ## 2D / 3D view (index.html)
 
@@ -1025,6 +1033,17 @@ exists. `runSearch` routes from the live GPS/PDR estimate when
 "My Location" is running, else the map centre, makes the hit the destination
 marker/pin, jumps the floor picker to its floor and flies there. AS112 (WWA)
 is not registered in `buildings-config.json`, so it is not searchable.
+
+The room lookup (`splitRoomQuery`, `findRoom`, `doorwayFor`) lives in
+**`places.mjs`**, shared with `places.html` and smoke.
+`app.html` also searches **place nicknames** (`places.json`, edited in
+`places.html`) and the phone's **favorites** (localStorage), with a suggestion
+dropdown. Order: a picked suggestion, a full name ("Subway"), then
+`<code> <room>`, then a partial name. Favorites stay on the phone; the route
+card links to the vote form (`PLACE_VOTE_FORM_URL`, empty = hidden), and
+admins add accepted names to `places.json`. `places.json` is optional: missing means no
+nicknames, never a failed boot. Details, server setup and invariants:
+[`docs/places.md`](../docs/places.md).
 
 ## Browser demo notes
 

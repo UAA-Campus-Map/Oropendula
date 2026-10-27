@@ -136,6 +136,16 @@ Extraction-Tool `Data Extraction/Floor Data` folder; regenerate it with
 `node gen-floor-catalog.mjs "<Floor Data dir>"`. The page can also read a local
 folder directly (stored in `localStorage`) when the source changes.
 
+## `places.html` — the places admin page
+
+Edits `places.json`, the place nicknames the search box understands ("Subway",
+"Robotics Club"). Add/edit/delete places, pick the room from the labels drawn
+on each registered building's plans (a ✓/✗ column shows whether it resolves),
+add the names students voted for in the suggestion form, then
+**Download places.json** and upload it. Work in progress is kept in
+localStorage like `import.html`. Behind nginx basic auth. See
+[`places.md`](places.md).
+
 ## `locate-test.html` — a positioning testbed
 
 A test-only live map for PDR: loads floor plans + basemap, draws the GPS fix and

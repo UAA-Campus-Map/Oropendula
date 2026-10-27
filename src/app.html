@@ -115,6 +115,49 @@
     .route-title { display: block; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .route-meta { display: block; margin-top: 2px; font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
     .route-chevron { flex: none; width: 20px; height: 20px; color: var(--muted); transition: transform 0.25s ease; }
+    /* Favorite row: lines up with the title (14px pad + 40px icon + 12px gap). */
+    .route-fav { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px 66px; }
+    .fav-btn {
+      max-width: 100%;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .fav-btn.saved { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+    .vote-link { flex: none; font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+    .fav-form { display: flex; gap: 6px; flex: 1; min-width: 0; }
+    .fav-form input {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-solid);
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;   /* 16px keeps iOS from zooming on focus */
+    }
+    .fav-form button {
+      flex: none;
+      padding: 7px 14px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
     #route-card.expanded .route-chevron { transform: rotate(180deg); }
     .route-steps {
       max-height: 0;
@@ -282,6 +325,44 @@
       transition: transform 0.12s ease, filter 0.2s;
     }
     #search-go:active { transform: scale(0.95); filter: brightness(1.05); }
+
+    /* ---- place suggestions (dropdown under the search box) --------------- */
+    #topbar:focus-within { z-index: 30; }   /* the list overlaps the route card */
+    .search-control { position: relative; }
+    #search-suggest {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      margin: 0;
+      padding: 6px;
+      list-style: none;
+      background: var(--surface-solid);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      max-height: 50dvh;
+      overflow-y: auto;
+    }
+    .suggest-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .suggest-item:hover, .suggest-item.active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .suggest-star { flex: none; width: 18px; text-align: center; color: var(--warn); }
+    .suggest-body { flex: 1; min-width: 0; }
+    .suggest-name { display: block; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .suggest-sub { display: block; margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); }
 
     .topbar-row { display: flex; align-items: center; gap: var(--gap); }
 
@@ -846,9 +927,11 @@
         <circle cx="11" cy="11" r="7"></circle>
         <path d="M21 21l-4.3-4.3"></path>
       </svg>
-      <input id="search-input" type="search" placeholder="Search — BMH 114A"
-             autocomplete="off" aria-label="Building code and room number" />
-      <button id="search-go" title="Route to room">Go</button>
+      <input id="search-input" type="search" placeholder="Search — Subway, BMH 114A"
+             autocomplete="off" aria-label="Place name, or building code and room number"
+             aria-controls="search-suggest" aria-expanded="false" />
+      <button id="search-go" title="Route there">Go</button>
+      <ul id="search-suggest" role="listbox" aria-label="Places" hidden></ul>
     </div>
     <div class="topbar-row">
       <div class="floor-control" aria-label="Displayed floor">
@@ -882,6 +965,16 @@
         <path d="M6 9l6 6 6-6"/>
       </svg>
     </button>
+    <!-- Save the destination under the student's own name (search routes only). -->
+    <div id="route-fav" class="route-fav" hidden>
+      <button id="fav-btn" class="fav-btn" type="button">☆ Save</button>
+      <form id="fav-form" class="fav-form" hidden>
+        <input id="fav-name" maxlength="60" autocomplete="off"
+               placeholder="What do you call it?" aria-label="Name for this place" />
+        <button type="submit">Save</button>
+      </form>
+      <a id="vote-link" class="vote-link" target="_blank" rel="noopener" hidden>Vote to add</a>
+    </div>
     <div id="route-steps" class="route-steps"></div>
   </div>
 
@@ -1281,6 +1374,8 @@
     import { ParticleFilter } from './locate.mjs';
     import { CompassSnapper } from './headingfield.mjs';
     import { PositionArbiter } from './arbiter.mjs';
+    import { splitRoomQuery, findRoom, doorwayFor, normName, placeTarget, buildPlaceIndex,
+             searchPlaces, resolvePlace } from './places.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
     // Protocol registration
@@ -1382,6 +1477,31 @@
     const floorLabel = document.getElementById('floor-label');
     const searchInput = document.getElementById('search-input');
     const searchGo = document.getElementById('search-go');
+    const suggestList = document.getElementById('search-suggest');
+    const favRow = document.getElementById('route-fav');
+    const favBtn = document.getElementById('fav-btn');
+    const favForm = document.getElementById('fav-form');
+    const favNameInput = document.getElementById('fav-name');
+    const voteLink = document.getElementById('vote-link');
+
+    // Places of interest: places.json (the shared default, edited in
+    // places.html) plus this phone's favorites, which never touch that file.
+    // Declared up here because the search box is live while boot awaits.
+    const FAVORITES_KEY = 'places-favorites';
+    // Link to the "suggest a place" form (students sign in with their UAA
+    // account there; admins read the responses and add winners in
+    // places.html). Empty hides the vote link. {name} and {place} are
+    // replaced, URL-encoded, with the nickname and its placeTarget key, e.g.
+    // a Google Forms pre-filled link: ...viewform?entry.111={name}&entry.222={place}
+    const PLACE_VOTE_FORM_URL = '';
+    let places = [];
+    let favorites = loadFavorites();
+    let placeIndex = buildPlaceIndex(places, favorites);
+    let suggestions = [];      // entries in the dropdown
+    let suggestActive = -1;    // keyboard-highlighted suggestion
+    // The current search destination, {name, place}; null for routes that did
+    // not come from search (calibration walk, dev tap-to-route).
+    let searchDest = null;
 
     const compassDisplay = document.getElementById('compass');
     const compassRawDisplay = document.getElementById('compass-raw');
@@ -1434,7 +1554,12 @@
     locationBtn.addEventListener('click', startLiveLocate);
     viewBtn.addEventListener('click', () => { is3D = !is3D; applyViewMode(); });
     searchGo.addEventListener('click', runSearch);
-    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+    searchInput.addEventListener('keydown', onSearchKey);
+    searchInput.addEventListener('input', renderSuggestions);
+    searchInput.addEventListener('focus', renderSuggestions);
+    searchInput.addEventListener('blur', hideSuggestions);
+    favBtn.addEventListener('click', onFavButton);
+    favForm.addEventListener('submit', (e) => { e.preventDefault(); saveFavorite(); });
 
     // Follow is active only while engaged and not paused by a gesture.
     function followActive() { return followMode && !followPaused; }
@@ -2069,21 +2194,12 @@
     /** Parse "BMH 114A" into { building, floor, room } using findRoom. */
     function resolveRoomQuery(q) {
       if (!campusRouter) return null;
-      const ql = q.toLowerCase();
-      const candidates = [];
-      for (const b of buildings) {
-        if (b.sourceId) candidates.push({ b, key: b.sourceId.toLowerCase() });
-        candidates.push({ b, key: b.id.toLowerCase() });
-      }
-      candidates.sort((a, c) => c.key.length - a.key.length);
-      const hit = candidates.find((c) => ql.startsWith(c.key));
-      if (!hit) return null;
-      const roomText = q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim();
-      if (!roomText) return null;
-      const room = findRoom(hit.b, roomText);
+      const split = splitRoomQuery(buildings, q);
+      if (!split || !split.roomText) return null;
+      const room = findRoom(split.building, split.roomText);
       if (!room) return null;
-      const floor = hit.b.floors.find((f) => f.floorId === room.floorId);
-      return floor ? { building: hit.b, floor, room } : null;
+      const floor = split.building.floors.find((f) => f.floorId === room.floorId);
+      return floor ? { building: split.building, floor, room } : null;
     }
 
     function submitIndoorRoom() {
@@ -2112,6 +2228,7 @@
 
       // Guide on the map: show the route, mark the start door with a green flag
       // and the target door with a checkered flag, then frame the whole walk.
+      searchDest = null;   // a calibration walk is not a place to save
       destinationFloor = target.floorId;
       // The flags replace any destination pin; reroute is suppressed during the
       // calibration anyway, so a stale destination marker would only confuse.
@@ -3121,11 +3238,12 @@
       const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
       statusText.textContent = `Route is ${distanceText(route.totalMeters)} · ${time}`;
       if (routeCard) {
-        const query = searchInput.value.trim();
+        const query = searchDest?.name ?? searchInput.value.trim();
         if (routeTitle) routeTitle.textContent = query ? `To ${query}` : route.summary;
         if (routeMeta) routeMeta.textContent =
           `${distanceText(route.totalMeters)} · ${time} walk`;
         if (routeSteps) routeSteps.replaceChildren(...routePreviewSteps(route).map(routeStepEl));
+        updateFavUI();
         routeCard.hidden = false;
       }
     }
@@ -3190,39 +3308,6 @@
         showRoute(null);
         statusText.textContent = `Blocked ${blockPortalLabel(portal)} — no alternate route found`;
       }
-    }
-
-    // --- building / room search --------------------------------------------
-    // A query carries the UAA building code from the floor JSON's `ID` field
-    // (BMH) or the app's registration id (AS103), plus a room number. Rooms
-    // are the roomLabels built in loadFloor - the exact same array the
-    // displayed room-numbers layer uses.
-    /**
-     * The room's DOORWAY: the nearest door (DOORS-layer midpoint) that a
-     * straight walk from the label reaches without crossing a wall. A segment
-     * label->door that stays walkable means they share one open space, so the
-     * door belongs to this room (not an adjacent one across a wall). Falls back
-     * to the label when the floor has no such door.
-     */
-    function doorwayFor(floor, labelLL) {
-      if (!floor || !floor.navGraph || !floor.doorPoints?.length) return labelLL;
-      const g = floor.navGraph;
-      const from = g.isWalkable(labelLL) ? labelLL : (g.nearestWalkable?.(labelLL) ?? labelLL);
-      const mpd = metresPerDegree(from[1]);
-      let best = null, bestD = Infinity;
-      for (const d of floor.doorPoints) {
-        const dd = g.isWalkable(d) ? d : (g.nearestWalkable?.(d) ?? d);
-        const dist = Math.hypot((dd[0] - from[0]) * mpd.lon, (dd[1] - from[1]) * mpd.lat);
-        if (dist >= bestD || dist > 15) continue;
-        const steps = Math.max(1, Math.ceil(dist / 0.2));
-        let clear = true;
-        for (let s = 1; s <= steps; s++) {
-          const t = s / steps;
-          if (!g.isWalkable([from[0] + (dd[0] - from[0]) * t, from[1] + (dd[1] - from[1]) * t])) { clear = false; break; }
-        }
-        if (clear) { best = dd; bestD = dist; }
-      }
-      return best ?? labelLL;
     }
 
     // --- Room pin: strict hallway-door resolution -------------------------
@@ -3414,24 +3499,12 @@
     }
 
     /**
-     * Split "BMH 114A" / "BMH114A" / "AS103114" into building + room. The
-     * longest known building code at the start wins, exactly like the search
-     * bar. With no code, the caller supplies the current building.
+     * Split "BMH 114A" / "BMH114A" / "AS103114" into building + room, exactly
+     * like the search bar. With no code, building is null and the caller
+     * supplies the current building.
      */
-    function splitRoomQuery(q) {
-      const ql = q.toLowerCase();
-      const candidates = [];
-      for (const b of buildings) {
-        if (b.sourceId) candidates.push({b, key: b.sourceId.toLowerCase()});
-        candidates.push({b, key: b.id.toLowerCase()});
-      }
-      candidates.sort((a, c) => c.key.length - a.key.length);
-      const hit = candidates.find((c) => ql.startsWith(c.key));
-      if (!hit) return {building: null, roomText: q.trim()};
-      return {
-        building: hit.b,
-        roomText: q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim(),
-      };
+    function splitRoomPinQuery(q) {
+      return splitRoomQuery(buildings, q) ?? {building: null, roomText: q.trim()};
     }
 
     function setRoomPinError(msg) {
@@ -3460,7 +3533,7 @@
     function submitRoomPin() {
       const q = roomPinInput.value.trim();
       if (!q) { setRoomPinError('Type a room number first.'); return; }
-      const split = splitRoomQuery(q);
+      const split = splitRoomPinQuery(q);
       const b = split.building ?? currentRoomPinBuilding();
       if (!b) { setRoomPinError('No current building.'); return; }
       if (!split.roomText) {
@@ -3475,52 +3548,53 @@
       statusText.textContent = `PDR anchored outside ${resolved.room} (${resolved.building.sourceId ?? resolved.building.id} ${resolved.floor.floorId})`;
     }
 
-    function findRoom(building, roomText) {
-      const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
-      const want = norm(roomText);
-      if (!want) return null;
-      // Room numbering usually starts with the floor (114A is on 1), so an
-      // exact hit on that floor beats an exact hit elsewhere.
-      const wantLevel = parseInt(want[0], 10);
-      const hitFor = (f, coord) => ({
-        ll: doorwayFor(f, coord), labelLL: coord, floorId: f.floorId,
-      });
-      let exact = null, prefixed = null;
-      for (const f of building.floors) {
-        for (const label of f.roomLabels ?? []) {
-          const text = norm(label.properties.text);
-          if (text === want) {
-            const hit = hitFor(f, label.geometry.coordinates);
-            if (!isNaN(wantLevel) && floorLevelOf(f.floorId) === wantLevel) return hit;
-            exact ??= hit;
-          } else if (!prefixed && text.startsWith(want)) {
-            prefixed = hitFor(f, label.geometry.coordinates);
-          }
-        }
-      }
-      return exact ?? prefixed;
-    }
+    // --- building / room / place search -----------------------------------
+    // A query is either a place name from places.json or the student's
+    // favorites ("Subway", "robotics club"), or a building code plus a room
+    // number. The code is the floor JSON's `ID` field (BMH) or the app's
+    // registration id (AS103). Rooms are the roomLabels built in loadFloor -
+    // the exact same array the displayed room-numbers layer uses. Room lookup
+    // and name matching live in places.mjs (shared with places.html/smoke).
 
     function runSearch() {
       const q = searchInput.value.trim();
       if (!campusRouter) { statusText.textContent = 'Buildings still loading'; return; }
-      if (!q) { statusText.textContent = 'Type a building and room, e.g. BMH 114A'; return; }
-      // Optional building code, exactly like the Locate by room dialog.
-      const split = splitRoomQuery(q);
-      if (!split.building) {
+      if (!q) { statusText.textContent = 'Type a place or a building and room, e.g. BMH 114A'; return; }
+      hideSuggestions();
+      // Highlighted with the arrow keys: take that one.
+      if (suggestActive >= 0 && suggestions[suggestActive]) return goToPlace(suggestions[suggestActive]);
+      const best = searchPlaces(placeIndex, q, 1)[0];
+      // A place name typed in full wins over room parsing.
+      if (best && best.score === 0) return goToPlace(best);
+      const split = splitRoomQuery(buildings, q);
+      const code = split ? (split.building.sourceId ?? split.building.id) : null;
+      const room = split?.roomText ? findRoom(split.building, split.roomText) : null;
+      if (room) return routeTo(room, {name: q, place: {building: code, room: room.text}});
+      // Partial place names ("robotics") come after room numbers.
+      if (best) return goToPlace(best);
+      if (!split) {
         const codes = buildings.map((b) => b.sourceId ?? b.id).join(', ');
-        statusText.textContent = `Unknown building in "${q}" - try ${codes}`;
+        statusText.textContent = `No place or building matches "${q}" - try ${codes}`;
         return;
       }
-      const building = split.building;
-      const roomText = split.roomText;
-      const room = roomText ? findRoom(building, roomText) : null;
-      if (!room) {
-        statusText.textContent = roomText
-          ? `No room "${roomText}" in ${building.sourceId ?? building.id}`
-          : 'Include a room number, e.g. BMH 114A';
+      statusText.textContent = split.roomText
+        ? `No room "${split.roomText}" in ${code}`
+        : 'Include a room number, e.g. BMH 114A';
+    }
+
+    /** Route to a places.json / favorite entry. */
+    function goToPlace(entry) {
+      const hit = resolvePlace(buildings, entry.place);
+      if (!hit) {
+        statusText.textContent = `"${entry.name}" is not on the map yet`;
         return;
       }
+      searchInput.value = entry.name;
+      routeTo(hit, {name: entry.name, place: entry.place});
+    }
+
+    /** Route to a resolved room or point ({ll, floorId}) and make it the destination. */
+    function routeTo(room, dest) {
       // Start from the live estimate ("My Location") when there is one, else
       // from wherever the map is centred.
       const startLL = currentEstimate
@@ -3529,6 +3603,7 @@
       const startFloor = (currentEstimate && locator) ? locator.floor.floorId : currentFloorId();
       const route = planRoute(startLL, room.ll,
         {startFloor, endFloor: room.floorId});
+      searchDest = dest;
       // The room becomes the destination: marker + 3D pin on its floor.
       destinationFloor = room.floorId;
       if (destinationMarker) destinationMarker.setLngLat(room.ll);
@@ -3541,6 +3616,153 @@
       showRoute(route);
       map.flyTo({center: room.ll, zoom: Math.max(map.getZoom(), 18.5), duration: 700});
       searchInput.blur();
+    }
+
+    // --- suggestions dropdown ---------------------------------------------
+    /** "SU Subway" for a room, "Floor 2" for a point. */
+    function placeSubtitle(place) {
+      if (place.ll) return `Floor ${floorLevelOf(place.floor)}`;
+      return `${place.building} ${place.room}`;
+    }
+
+    function renderSuggestions() {
+      const q = searchInput.value.trim();
+      // An empty box lists this phone's favorites.
+      suggestions = q ? searchPlaces(placeIndex, q, 6) : placeIndex.filter((e) => e.favorite).slice(0, 6);
+      suggestActive = -1;
+      suggestList.replaceChildren(...suggestions.map((entry, i) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'suggest-item';
+        btn.id = `suggest-${i}`;
+        btn.setAttribute('role', 'option');
+        const star = document.createElement('span');
+        star.className = 'suggest-star';
+        star.textContent = entry.favorite ? '★' : '';
+        const body = document.createElement('span');
+        body.className = 'suggest-body';
+        const name = document.createElement('span');
+        name.className = 'suggest-name';
+        name.textContent = entry.name;
+        const sub = document.createElement('span');
+        sub.className = 'suggest-sub';
+        sub.textContent = placeSubtitle(entry.place);
+        body.append(name, sub);
+        btn.append(star, body);
+        // Keep focus in the input so its blur does not hide the list mid-tap.
+        btn.addEventListener('pointerdown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+          hideSuggestions();
+          if (!campusRouter) { statusText.textContent = 'Buildings still loading'; return; }
+          goToPlace(entry);
+        });
+        li.append(btn);
+        return li;
+      }));
+      const open = suggestions.length > 0 && document.activeElement === searchInput;
+      suggestList.hidden = !open;
+      searchInput.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function hideSuggestions() {
+      suggestList.hidden = true;
+      searchInput.setAttribute('aria-expanded', 'false');
+      searchInput.removeAttribute('aria-activedescendant');
+    }
+
+    function onSearchKey(e) {
+      if (e.key === 'Enter') { runSearch(); return; }
+      if (e.key === 'Escape') { hideSuggestions(); suggestActive = -1; return; }
+      if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || suggestList.hidden) return;
+      e.preventDefault();
+      const n = suggestions.length;
+      suggestActive = e.key === 'ArrowDown'
+        ? (suggestActive + 1) % n
+        : (suggestActive <= 0 ? n - 1 : suggestActive - 1);
+      suggestList.querySelectorAll('.suggest-item').forEach((el, i) =>
+        el.classList.toggle('active', i === suggestActive));
+      searchInput.setAttribute('aria-activedescendant', `suggest-${suggestActive}`);
+    }
+
+    // --- favorites ------------------------------------------------------------
+    // Saved on this phone only (localStorage), so they never change
+    // places.json and nothing is sent anywhere. To get a name into everyone's
+    // search, a student opens PLACE_VOTE_FORM_URL; admins review the form
+    // responses and add accepted names in places.html.
+    function loadFavorites() {
+      try {
+        const list = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+        return Array.isArray(list)
+          ? list.filter((f) => f && normName(f.name) && ((f.building && f.room) || (f.ll && f.floor)))
+          : [];
+      } catch (e) { return []; }
+    }
+
+    function storeFavorites() {
+      try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); } catch (e) { /* ignore */ }
+      placeIndex = buildPlaceIndex(places, favorites);
+    }
+
+    /** Just the location fields of a place: {building, room} or {ll, floor}. */
+    function placeFields(place) {
+      return place.ll ? {ll: place.ll, floor: place.floor} : {building: place.building, room: place.room};
+    }
+
+    /** This phone's favorite for the current destination (one per place). */
+    function currentFavorite() {
+      if (!searchDest) return null;
+      const target = placeTarget(searchDest.place);
+      return favorites.find((f) => placeTarget(f) === target) ?? null;
+    }
+
+    function updateFavUI() {
+      favRow.hidden = !searchDest;
+      favForm.hidden = true;
+      favBtn.hidden = false;
+      const fav = currentFavorite();
+      favBtn.textContent = fav ? `★ Saved as “${fav.name}”` : '☆ Save';
+      favBtn.title = fav ? 'Remove from favorites' : 'Save this place under your own name';
+      favBtn.classList.toggle('saved', !!fav);
+      updateVoteLink(fav);
+    }
+
+    /** The form link for the current destination, or hidden when unset. */
+    function updateVoteLink(fav) {
+      voteLink.hidden = !PLACE_VOTE_FORM_URL || !searchDest;
+      if (voteLink.hidden) return;
+      const name = encodeURIComponent(fav?.name ?? searchDest.name);
+      const place = encodeURIComponent(placeTarget(searchDest.place));
+      voteLink.href = PLACE_VOTE_FORM_URL.replaceAll('{name}', name).replaceAll('{place}', place);
+    }
+
+    function onFavButton() {
+      const fav = currentFavorite();
+      if (fav) {
+        favorites = favorites.filter((f) => f !== fav);
+        storeFavorites();
+        statusText.textContent = `Removed “${fav.name}” from favorites`;
+        updateFavUI();
+        return;
+      }
+      favBtn.hidden = true;
+      voteLink.hidden = true;   // the name input needs the row's width
+      favForm.hidden = false;
+      favNameInput.value = searchDest.name;
+      favNameInput.focus();
+      favNameInput.select();   // typing replaces the suggested name
+    }
+
+    function saveFavorite() {
+      if (!searchDest) return;
+      const name = favNameInput.value.trim().replace(/\s+/g, ' ').slice(0, 60);
+      if (!normName(name)) { favNameInput.focus(); return; }
+      const fav = {name, ...placeFields(searchDest.place)};
+      favorites.push(fav);
+      storeFavorites();
+      favNameInput.blur();
+      statusText.textContent = `Saved “${name}” to favorites`;
+      updateFavUI();
     }
 
     // Map click handler
@@ -3573,6 +3795,7 @@
           // outdoors), before rendering so the 3D pin is placed correctly.
           const destHit = campusRouter.buildingAt(coordArray, endFloor);
           destinationFloor = destHit ? destHit.floor.floorId : null;
+          searchDest = null;
           if (destinationMarker) destinationMarker.setLngLat(coords);
           else destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
           showRoute(route);
@@ -4558,6 +4781,12 @@
     // Building registrations live in buildings-config.json (repo root),
     // produced by import.html. Edit registrations there, not here.
     const buildingsConfig = await (await fetch('/buildings-config.json')).json();
+    // Place nicknames (places.json, produced by places.html). Optional,
+    // unlike the config: a missing or broken file only means no nicknames.
+    const placesPromise = fetch('/places.json')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list) => (Array.isArray(list) ? list : []))
+      .catch(() => []);
 
     // Kick off all boot downloads NOW (before the MapLibre style finishes
     // loading) so network time overlaps map setup:
@@ -5177,6 +5406,8 @@
 
         campusRouter = buildCampusRouter(buildings, osmShapes, ignorePortals);
         window.campusRouter = campusRouter;   // handy for console debugging
+        places = await placesPromise;
+        placeIndex = buildPlaceIndex(places, favorites);
         createPortalLayer();
         populateFloorPicker(buildings);
         buildStructure3D();                  // extruded walls + floor plates

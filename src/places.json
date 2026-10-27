@@ -1,0 +1,51 @@
+[
+  {
+    "id": "su-subway",
+    "names": ["Subway"],
+    "category": "food",
+    "building": "SU",
+    "room": "Subway"
+  },
+  {
+    "id": "su-enrollment-services",
+    "names": ["Enrollment Services Center", "Enrollment"],
+    "category": "service",
+    "building": "SU",
+    "room": "Enrollment"
+  },
+  {
+    "id": "aasc-pool",
+    "names": ["Pool", "Swimming Pool"],
+    "category": "recreation",
+    "building": "AASC",
+    "room": "POOL"
+  },
+  {
+    "id": "aasc-ice-rink",
+    "names": ["Ice Rink"],
+    "category": "recreation",
+    "building": "AASC",
+    "room": "ICE RINK"
+  },
+  {
+    "id": "smh-student-lounge",
+    "names": ["Student Lounge"],
+    "category": "study",
+    "building": "SMH",
+    "room": "Student Lounge"
+  },
+  {
+    "id": "smh-simulation-suite",
+    "names": ["Simulation Suite", "Sim Suite"],
+    "category": "lab",
+    "building": "SMH",
+    "room": "Sim. Suite"
+  },
+  {
+    "id": "smh-cna-lab",
+    "names": ["CNA Lab"],
+    "category": "lab",
+    "building": "SMH",
+    "room": "CNA Lab"
+  }
+]
