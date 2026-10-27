@@ -110,10 +110,25 @@ in code, docs, deployment, and import-tool settings.
   drives the live marker from the arbiter (GPS + PDR). "I'm Here" stops GPS
   and taps a manual anchor (for when the fix is wrong); "My Location" starts
   GPS again.
-- `smoke.mjs` — the test gate (`node smoke.mjs`). Check count scales with
-  exit count (~96 currently); **all must pass**, zero failures tolerated. It
-  reads its registrations from `buildings-config.json` — the same file
-  index.html fetches, so the two can never drift.
+- `app.html` — the production Navigator frontend: the same modules and
+  navigation logic as index.html behind a mobile-first UI (route preview card,
+  calibration modal, cached navGraph bundle boot, place search/favorites).
+  See `docs/apps.md`.
+- `places.mjs` — place nicknames and the shared room lookup used by
+  `app.html`, `places.html` and smoke: `splitRoomQuery` / `findRoom` /
+  `doorwayFor`, name normalisation and ranking, `placeTarget` / `parseTarget`,
+  `buildPlaceIndex` / `searchPlaces`, `resolvePlace` / `validatePlaces`.
+  `places.json` is optional and edited in `places.html`. See
+  `docs/places.md`.
+- `places.html` — static places admin page: edits `places.json`, validates
+  rooms against the registered floor labels, and downloads the file for an
+  out-of-band upload. It has no server-side write endpoint and is served
+  without auth.
+- `smoke.mjs` — the test gate (`node smoke.mjs`). Check count scales with the
+  floor/exit count (several hundred currently); **all must pass**, zero
+  failures tolerated. It reads its registrations from
+  `buildings-config.json` — the same file index.html fetches, so the two can
+  never drift.
 
 ## Routing model
 
@@ -416,6 +431,16 @@ showRoomLabels, wallLayerId?, roomLayerId?}]}`.
 - All plans are inches (`DXF_SCALE = 0.0254`); a "mm" scaling attempt was
   wrong and was reverted. Whatever you set **must** go through `makeToLL` so
   walls, labels, portals and the import tool all agree.
+- Floor JSONs come from the external DXF extractor. It drops lines drawn with
+  a dashed linetype (HIDDEN, DASHED, overhead, grids, centre/neighbour
+  outlines) and records the count in `shapes_dashed_dropped`. Those are
+  drafting data, not walls. The JSON does **not** store linetype, so a refresh
+  is not auditable from the repo: eyeball any floor whose `wall`/`walls`/
+  `window` layers change, and regenerate that building's `.nvg.gz` when they
+  do. Door/stair/elevator layers must stay untouched; `node smoke.mjs portals`
+  proves the cached portals still match a fresh extraction. The Oct 2026
+  refresh changed walls only on AS105-02, AS121-03 and AS150-02; those three
+  bundles were regenerated.
 
 Current registrations: AS103 `{0,0,0}`, AS101 `{2880,390,0.005}`,
 AS102 `{1392,1144,0}`, AS105 `{267,0,119.39}`, AS106 `{475,400,0}` (floor-
@@ -764,14 +789,17 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 ## Testing
 
 `node smoke.mjs` — the only gate; run it after any change to campus.mjs,
-geo.mjs, osm.mjs, align.mjs, buildings-config.json or a building registration.
+geo.mjs, osm.mjs, align.mjs, buildings-config.json, a building registration, a
+floor JSON or a navGraph bundle.
 **It takes category arguments so you don't run the whole ~23 s suite every
-time** (`node smoke.mjs --list` shows them): `align, walkability, pdr, arbiter,
-portals, router, osm, multifloor, motion, autocal, places`. No args = everything. The
-fast groups that need no real floors (`motion pdr arbiter autocal`) skip the
-~4-20 s building load entirely and run in <1 s:
-`node smoke.mjs motion pdr arbiter autocal`. The building-loading groups share
-one load. It covers:
+time** (`node smoke.mjs --list` shows them): `align, walkability, pdr, corridor,
+arbiter, portals, router, osm, multifloor, motion, autocal, anchorcal,
+headingfield, places`. No args = everything. The groups that need no real-floor
+load (`motion pdr arbiter autocal anchorcal headingfield`) skip the ~4-20 s
+building load entirely and run in <1 s:
+`node smoke.mjs motion pdr arbiter autocal anchorcal headingfield`. `places`
+reads the floor JSON room labels but builds no navGraph. The building-loading
+groups share one load. It covers:
 portal sanity, exits outside the footprint / near real doors, exit reachability
 for every building, six end-to-end routes (same floor, cross-building, outdoor
 click, vertical, cross-floor, cross-campus), a hermetic synthetic outdoor grid
@@ -793,6 +821,13 @@ constrained space certifying without a downward base bias, the position-only
 fallback certifying, cadence normalisation, and split-half inconsistency
 withholding the claim. Debug
 scripts live in `/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
+
+As of the Oct 2026 floor refresh, the suite still reports one pre-existing
+failure in "all 12 building pairs route without cutting walls": the test starts
+at `text_lines[0]`, which is a shaft in AS118 and a doorless room in AS154. The
+same 90 pairs fail on the pre-refresh JSONs, so it is a test-fixture bug, not a
+routing regression. Do not deploy on a red gate; fix or explicitly annotate that
+fixture first.
 
 Runtime ~24 s wall / ~38 s CPU (8 buildings / 17 floors; varies with machine
 load and the live OSM fetch). The per-floor basis (JSON parse, wall segments,
@@ -855,6 +890,11 @@ List the changed paths with `git status --short` first so nothing is missed and
 nothing extra is sent. The large static assets (floor JSONs, PMTiles, MapLibre
 `*.mjs`) only need re-uploading when they themselves change.
 
+A floor-data refresh must be deployed as a pair: every changed floor JSON plus
+the regenerated `.nvg.gz` for each building whose **wall** geometry changed. The
+runtime only checks the bundle's building/floor ids, not its geometry, so a
+mixed JSON/bundle deploy silently draws one plan and routes on another.
+
 ### Deploying building additions (no server-side commands)
 
 Everything generated is produced by `import.html`; the server only receives
@@ -876,9 +916,12 @@ files:
 
 Edit in `places.html`, **Download places.json**, run `node smoke.mjs places`
 (every entry must resolve on a registered floor), and upload `places.json`
-next to `app.html`. Student votes go to an external form
-(`PLACE_VOTE_FORM_URL` in `app.html`), so there is no server-side process or
-`/api/` endpoint.
+next to `app.html`. The first deploy of the feature also needs `places.html`
+and `places.mjs`; upload `app.html` whenever its search changes. `places.html`
+is static and has **no server-side write endpoint**, and it is served
+**without basic auth** — publishing always requires the download + upload
+step. Student votes go to an external form (`PLACE_VOTE_FORM_URL` in
+`app.html`), so there is no server-side process or `/api/` endpoint.
 
 ## 2D / 3D view (index.html)
 

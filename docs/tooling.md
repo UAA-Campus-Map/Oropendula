@@ -46,7 +46,10 @@ node gen-navgraphs.mjs AS127 AS154  # selected buildings only
 
 The import tool's Deploy section can also generate the selected building or all
 buildings. Regenerate after changing floor JSON, placement, or any graph input;
-the import tool removes the `graphUrl` when it detects such an edit.
+the import tool removes the `graphUrl` when it detects such an edit. A data-only
+refresh still needs a regeneration for every building whose `wall`/`walls`/
+`window` geometry changed — the JSON and its `.nvg.gz` must be deployed as a
+pair, because the runtime only checks the bundle's building/floor ids.
 
 ### `zip.mjs`
 Tiny dependency-free ZIP writer used by the import tool's deploy diff. JSON
@@ -75,20 +78,23 @@ or does not cover the bbox.
 Populates the portal cache **inside `buildings-config.json`** using
 `extractPortals` + `cachePortals`. Run it whenever a floor JSON changes. Only DXF
 positions are stored, so the cache is independent of a floor's placement and
-never goes stale when a plan is re-aligned.
+never goes stale when a plan is re-aligned. If a wall layer changed, also
+regenerate that building's `.nvg.gz` with `gen-navgraphs.mjs` (or the import
+tool) and deploy the JSON and bundle together.
 
 ## `smoke.mjs` — the test suite
 
 `node smoke.mjs [categories]`; no arguments runs everything. Categories:
 
 ```
-align, walkability, pdr, arbiter, portals, router, osm, multifloor, motion, autocal, places
+align, walkability, pdr, corridor, arbiter, portals, router, osm, multifloor,
+motion, autocal, anchorcal, headingfield, places
 ```
 
-The fast subset that needs **no real floor data**:
+The fast subset that needs **no real-floor navGraph build**:
 
 ```
-node smoke.mjs motion pdr arbiter autocal places
+node smoke.mjs motion pdr arbiter autocal anchorcal headingfield places
 ```
 
 (`places` reads the floor JSONs' room labels but builds no navGraph; see
@@ -105,6 +111,13 @@ GPS walks; `router`/`multifloor` route the real campus, checking invariants like
 
 When you add a feature, add a synthetic test that would fail without it (the
 step-length mixture tests are a good template), and keep the fast subset fast.
+
+Known pre-existing failure (Oct 2026): the "all 12 building pairs route without
+cutting walls" check starts at `text_lines[0]`, a shaft in AS118 and a doorless
+room in AS154; the same 90 pairs fail on the pre-refresh JSONs. It is a
+test-fixture bug, not a routing regression, but the gate is still red until the
+fixture is fixed or the check is explicitly annotated. Do not deploy on a red
+gate.
 
 ## See also
 

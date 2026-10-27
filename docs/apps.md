@@ -143,8 +143,9 @@ Edits `places.json`, the place nicknames the search box understands ("Subway",
 on each registered building's plans (a ✓/✗ column shows whether it resolves),
 add the names students voted for in the suggestion form, then
 **Download places.json** and upload it. Work in progress is kept in
-localStorage like `import.html`. Behind nginx basic auth. See
-[`places.md`](places.md).
+localStorage like `import.html`. It is a static page with no server-side write
+endpoint and is served without basic auth; publishing still requires the
+download + upload step. See [`places.md`](places.md).
 
 ## `locate-test.html` — a positioning testbed
 

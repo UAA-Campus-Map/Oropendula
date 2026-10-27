@@ -105,19 +105,15 @@ result per (place, name).
   Empty hides the link.
 - An empty search box lists the favorites in the dropdown.
 
-## Server setup (once)
+## Admin page exposure
 
-Only the admin page needs protecting. Inside the existing nginx `server` block:
-
-```nginx
-location = /places.html {
-    auth_basic "Places admin";
-    auth_basic_user_file /etc/nginx/places.htpasswd;
-}
-```
-
-Create the password file with `htpasswd -c /etc/nginx/places.htpasswd <admin>`
-(package `httpd-tools` / `apache2-utils`).
+`places.html` is served as a normal static page, **without basic auth**. That is
+deliberate: it has no write endpoint and cannot change the server. It only reads
+the public `places.json`, `buildings-config.json` and floor JSONs; all edits stay
+in the browser (and that admin's `localStorage`) until someone downloads
+`places.json` and uploads it out of band. Restricting the page is a deployment
+choice, not a requirement of the app, and the current deployment does not gate
+it.
 
 ## Implementation notes
 
@@ -135,6 +131,9 @@ Create the password file with `htpasswd -c /etc/nginx/places.htpasswd <admin>`
 - `node smoke.mjs places` (fast, no navGraph build): matching and ranking,
   targets, validation, room lookup on a synthetic building, and every shipped
   `places.json` entry resolving on the registered floors.
+- Publishing needs `places.json` plus, on the first deploy, `places.html` and
+  `places.mjs` (and `app.html` when its search changes). Upload
+  `places.json`, never edit it on the server.
 
 ## See also
 
