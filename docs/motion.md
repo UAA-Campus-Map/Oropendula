@@ -74,6 +74,10 @@ single "Motion & Orientation Access" prompt enables both), and guard against
 concurrent `start()` calls so a second call joins the in-flight request instead
 of re-prompting.
 
+The calibration UI now requests sensors when the user **chooses a calibration
+method**, not when the modal is merely opened. That keeps the request inside the
+method-choice tap, which is the user gesture iOS requires.
+
 ## Implementation notes / invariants
 
 - Units: accelerations `m/s²` including gravity; headings **radians clockwise

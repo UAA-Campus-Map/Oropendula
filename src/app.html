@@ -1414,7 +1414,7 @@
     const calScreens = [...calModal.querySelectorAll('.cal-screen')];
 
     // Event listeners
-    menuBtn.addEventListener('click', () => { openCalModal(); ensureSensors(); });
+    menuBtn.addEventListener('click', () => { openCalModal(); });
     document.getElementById('cal-close').addEventListener('click', closeCalModal);
     document.getElementById('cal-done-close').addEventListener('click', closeCalModal);
     calModal.querySelector('.modal-backdrop').addEventListener('click', closeCalModal);
@@ -1626,7 +1626,12 @@
 
     // Method chooser + static wiring.
     calModal.querySelectorAll('.cal-option').forEach((btn) => {
-      btn.addEventListener('click', () => selectCalMethod(btn.dataset.method));
+      btn.addEventListener('click', () => {
+        // Permission must be requested directly from the method-choice tap.
+        // Do it before any screen/DOM work consumes the user activation.
+        ensureSensors();
+        selectCalMethod(btn.dataset.method);
+      });
     });
     document.getElementById('cal-advanced-btn').addEventListener('click', () => showCalScreen('advanced'));
     document.getElementById('cal-advanced-back').addEventListener('click', () => showCalScreen('choose'));
@@ -1814,14 +1819,17 @@
      * granted or denied and no longer blocks the first steps.
      */
     function ensureSensors() {
-      if (motion) motion.start(); else startMotion();
+      const p = motion ? motion.start() : startMotion();
+      // Permission denial is reported through motion.onStatus; swallow the
+      // rejection so a denied prompt does not become an unhandled promise.
+      Promise.resolve(p).catch(() => {});
     }
 
     function selectCalMethod(method) {
+      ensureSensors();   // this tap is the user gesture the sensors need
       calWizard.method = method;
       document.getElementById('cal-guide').hidden = true;
       clearCalFlags();
-      ensureSensors();   // this tap is the user gesture the sensors need
       if (method === 'height') {
         updateHeightPreview();
         showCalScreen('height');
@@ -4160,7 +4168,7 @@
     // Step/heading input to the arbiter. Sensor permission is requested here
     // (a user gesture started the flow).
     function startMotion() {
-      if (motion) { motion.start(); return; }
+      if (motion) return motion.start();
       motion = createMotion({
         onStep: ({ t, cadenceHz }) => {
           // Keep the recent cadence for route ETAs. Smooth lightly so one
@@ -4214,7 +4222,7 @@
         if (savedHeadingBias != null) baseHeadingBias = savedHeadingBias;
       }
       applyHeadingTrim();
-      motion.start();
+      return motion.start();
     }
 
     function successPosition(position) {
