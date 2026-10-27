@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 78,
-  "shape_count": 1908,
+  "shape_count": 1905,
   "shapes_filtered": 0,
+  "shapes_dashed_dropped": 3,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -25528,23 +25529,6 @@
       ]
     },
     {
-      "bbox": [2673.33, 676.29, 2712.88, 798.01],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2673.33, 676.29],
-            [2712.88, 798.01]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [2522.0, 77.36, 2524.4, 84.73],
       "stroke": [0.0, 1.0, 1.0],
       "fill": null,
@@ -26798,40 +26782,6 @@
           "points": [
             [517.63, 1007.78],
             [517.63, 1017.78]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [526.63, 1368.98, 684.54, 1420.29],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [684.54, 1368.98],
-            [526.63, 1420.29]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2754.9, 0.0, 2760.09, 9.83],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2754.9, 9.83],
-            [2760.09, 0.0]
           ]
         }
       ]

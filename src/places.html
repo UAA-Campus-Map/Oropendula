@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Places admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --accent: #2563eb;
+      --bg: #f4f6fa;
+      --surface: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: rgba(15, 23, 42, 0.12);
+      --ok: #16a34a;
+      --warn: #b45309;
+      --bad: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f16;
+        --surface: #121a27;
+        --ink: #eef2f8;
+        --muted: #93a1b5;
+        --line: rgba(255, 255, 255, 0.13);
+        --ok: #4ade80;
+        --warn: #fbbf24;
+        --bad: #f87171;
+      }
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    header h1 { font-size: 17px; margin: 0 auto 0 0; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
+    @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+    section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+    section + section { margin-top: 16px; }
+    h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+    h2 .count { color: var(--muted); font-weight: 600; }
+    button { padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.danger { color: var(--bad); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+    textarea { min-height: 84px; resize: vertical; }
+    label { display: block; margin: 10px 0 0; font-weight: 600; font-size: 13px; }
+    label small { font-weight: 400; color: var(--muted); }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; min-width: 0; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+    #banner { display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 16px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); border-bottom: 1px solid var(--line); }
+    #filter { margin-bottom: 10px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 12px; color: var(--muted); border-top: 0; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    tbody tr.selected { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .names { font-weight: 600; }
+    .names span + span::before { content: " · "; color: var(--muted); font-weight: 400; }
+    .ok { color: var(--ok); }
+    .bad { color: var(--bad); }
+    .muted { color: var(--muted); }
+    #problems { margin: 0; padding-left: 18px; color: var(--bad); }
+    #problems:empty::before { content: "No problems."; color: var(--ok); margin-left: -18px; }
+    #status { margin: 0 16px 16px; color: var(--muted); white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Places admin</h1>
+    <button id="new-btn" class="primary">New place</button>
+    <button id="load-btn">Load file…</button>
+    <input id="load-file" type="file" accept=".json,application/json" hidden />
+    <button id="download-btn" class="primary">Download places.json</button>
+  </header>
+  <p id="banner" hidden>
+    <span>Local edits not yet downloaded. Upload the downloaded <code>places.json</code> to publish them.</span>
+    <button id="reset-btn" class="danger">Discard and reload server version</button>
+  </p>
+
+  <main>
+    <div>
+      <section>
+        <h2>Places <span id="place-count" class="count"></span></h2>
+        <input id="filter" type="search" placeholder="Filter by name, building or room" autocomplete="off" />
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Names</th><th>Location</th><th>Category</th><th>On map</th></tr></thead>
+            <tbody id="place-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <h2>Problems</h2>
+        <ul id="problems"></ul>
+      </section>
+    </div>
+
+    <div>
+      <section id="editor" hidden>
+        <h2 id="editor-title">Edit place</h2>
+        <form id="place-form">
+          <label>Names <small>(one per line; what students type in search)</small>
+            <textarea id="f-names" required placeholder="AI &amp; Robotics Lab&#10;Robotics Club&#10;AI Club"></textarea>
+          </label>
+          <div class="row">
+            <label>Category
+              <input id="f-category" list="categories" placeholder="lab" />
+            </label>
+            <label>Id <small>(auto when empty)</small>
+              <input id="f-id" placeholder="eib-ai-robotics-lab" />
+            </label>
+          </div>
+          <label>Location</label>
+          <div class="row">
+            <label style="margin:4px 0 0;font-weight:400"><input type="radio" name="kind" value="room" checked style="width:auto"> Room on a floor plan</label>
+            <label style="margin:4px 0 0;font-weight:400"><input type="radio" name="kind" value="point" style="width:auto"> Point (lon/lat)</label>
+          </div>
+          <div id="room-fields" class="row">
+            <label>Building
+              <select id="f-building"></select>
+            </label>
+            <label>Room <small>(as drawn)</small>
+              <input id="f-room" list="room-options" autocomplete="off" placeholder="303" />
+            </label>
+          </div>
+          <div id="point-fields" class="row" hidden>
+            <label>Lon <input id="f-lon" inputmode="decimal" placeholder="-149.8231" /></label>
+            <label>Lat <input id="f-lat" inputmode="decimal" placeholder="61.1901" /></label>
+            <label>Floor <input id="f-floor" placeholder="01" /></label>
+          </div>
+          <p id="f-check" class="hint"></p>
+          <div class="actions">
+            <button type="submit" class="primary">Save place</button>
+            <button type="button" id="cancel-btn">Cancel</button>
+            <button type="button" id="delete-btn" class="danger">Delete</button>
+          </div>
+        </form>
+        <datalist id="room-options"></datalist>
+        <datalist id="categories">
+          <option value="lab"></option><option value="club"></option><option value="study"></option>
+          <option value="food"></option><option value="service"></option><option value="office"></option>
+          <option value="recreation"></option><option value="landmark"></option><option value="other"></option>
+        </datalist>
+      </section>
+
+      <section>
+        <h2>Student suggestions</h2>
+        <p class="hint" style="margin-top:0">Students vote through the form linked from the app (<code>PLACE_VOTE_FORM_URL</code> in <code>app.html</code>). Read the responses there; each one carries the nickname and its place key (<code>SU Subway</code> or <code>ll:lon,lat@floor</code>). Add the names you accept above, then download and upload <code>places.json</code>.</p>
+      </section>
+    </div>
+  </main>
+  <p id="status"></p>
+
+  <script type="module">
+    import { normName, resolvePlace, validatePlaces, normRoom } from './places.mjs';
+
+    const WIP_KEY = 'places-admin-wip';
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $('status');
+
+    let places = [];         // the working copy
+    let serverPlaces = [];   // what /places.json served
+    let campus = [];         // [{id, sourceId, sourceName, floors: [{floorId, roomLabels}]}]
+    let editing = null;      // index into places, or -1 for a new place
+
+    // --- loading ----------------------------------------------------------
+    async function loadServerPlaces() {
+      try {
+        const res = await fetch('/places.json', {cache: 'no-store'});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const list = await res.json();
+        return Array.isArray(list) ? list : [];
+      } catch (e) {
+        statusEl.textContent = `No places.json on the server (${e.message}); starting empty.`;
+        return [];
+      }
+    }
+
+    /** Room labels of every registered floor, for room pickers and checks. */
+    async function loadCampus() {
+      const config = await (await fetch('/buildings-config.json')).json();
+      let done = 0;
+      const total = config.reduce((n, c) => n + c.floors.length, 0);
+      return Promise.all(config.map(async (cfg) => {
+        const b = {id: cfg.id, sourceId: null, sourceName: null, floors: []};
+        for (const floor of cfg.floors) {
+          try {
+            const data = await (await fetch(floor.url)).json();
+            b.sourceId ??= data.ID ?? null;
+            b.sourceName ??= data.building_name ?? null;
+            // findRoom only compares label text here, so DXF x/y stand in
+            // for lon/lat.
+            b.floors.push({floorId: floor.floorId, roomLabels: (data.text_lines ?? [])
+              .map((t) => ({geometry: {coordinates: [t.x, t.y]}, properties: {text: String(t.text ?? '').trim()}}))
+              .filter((f) => f.properties.text)});
+          } catch (e) {
+            console.warn(`${cfg.id} ${floor.floorId}:`, e);
+          }
+          statusEl.textContent = `Loading floor plans ${++done}/${total}…`;
+        }
+        return b;
+      }));
+    }
+
+    function saveWip() {
+      try { localStorage.setItem(WIP_KEY, JSON.stringify(places)); } catch (e) { /* ignore */ }
+      refreshBanner();
+    }
+
+    function refreshBanner() {
+      $('banner').hidden = JSON.stringify(places) === JSON.stringify(serverPlaces);
+    }
+
+    // --- list + problems --------------------------------------------------
+    const codeOf = (b) => b.sourceId ?? b.id;
+    function locationText(p) {
+      if (p.ll) return `${(+p.ll[1]).toFixed(5)}, ${(+p.ll[0]).toFixed(5)} · floor ${p.floor}`;
+      return `${p.building} ${p.room}`;
+    }
+
+    function render() {
+      const q = normName($('filter').value);
+      const rows = $('place-rows');
+      rows.replaceChildren();
+      places.forEach((p, i) => {
+        const hay = normName([...(p.names ?? []), p.building, p.room, p.category].join(' '));
+        if (q && !hay.includes(q)) return;
+        const tr = document.createElement('tr');
+        if (i === editing) tr.className = 'selected';
+        const names = document.createElement('td');
+        names.className = 'names';
+        for (const n of p.names ?? []) {
+          const s = document.createElement('span');
+          s.textContent = n;
+          names.append(s);
+        }
+        const loc = document.createElement('td');
+        loc.textContent = locationText(p);
+        const cat = document.createElement('td');
+        cat.textContent = p.category ?? '';
+        cat.className = 'muted';
+        const ok = document.createElement('td');
+        const hit = campus.length ? resolvePlace(campus, p) : null;
+        ok.textContent = !campus.length ? '…' : hit ? `✓ floor ${hit.floorId}` : '✗ not found';
+        ok.className = hit ? 'ok' : 'bad';
+        tr.append(names, loc, cat, ok);
+        tr.addEventListener('click', () => openEditor(i));
+        rows.append(tr);
+      });
+      $('place-count').textContent = `(${places.length})`;
+      const problems = validatePlaces(places);
+      if (campus.length) {
+        for (const p of places) {
+          if ((p.building && p.room || p.ll) && !resolvePlace(campus, p)) {
+            problems.push(`"${p.id}": ${locationText(p)} is not on a registered floor plan`);
+          }
+        }
+      }
+      $('problems').replaceChildren(...problems.map((t) => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        return li;
+      }));
+    }
+
+    // --- editor -------------------------------------------------------------
+    function setKind(kind) {
+      for (const r of document.querySelectorAll('input[name=kind]')) r.checked = r.value === kind;
+      $('room-fields').hidden = kind !== 'room';
+      $('point-fields').hidden = kind !== 'point';
+      checkForm();
+    }
+
+    function fillBuildings() {
+      const sel = $('f-building');
+      sel.replaceChildren(...campus.map((b) => {
+        const o = document.createElement('option');
+        o.value = codeOf(b);
+        o.textContent = b.sourceName ? `${codeOf(b)} — ${b.sourceName}` : codeOf(b);
+        return o;
+      }));
+    }
+
+    function fillRooms() {
+      const b = campus.find((x) => codeOf(x) === $('f-building').value);
+      const labels = new Set();
+      for (const f of b?.floors ?? []) for (const l of f.roomLabels) labels.add(l.properties.text);
+      $('room-options').replaceChildren(...[...labels].sort((a, c) => a.localeCompare(c, 'en', {numeric: true}))
+        .map((t) => { const o = document.createElement('option'); o.value = t; return o; }));
+    }
+
+    function openEditor(i) {
+      editing = i;
+      const p = i >= 0 ? places[i] : {names: [], category: ''};
+      $('editor').hidden = false;
+      $('editor-title').textContent = i >= 0 ? 'Edit place' : 'New place';
+      $('delete-btn').hidden = i < 0;
+      $('f-names').value = (p.names ?? []).join('\n');
+      $('f-category').value = p.category ?? '';
+      $('f-id').value = p.id ?? '';
+      // A building that is not registered yet (e.g. EIB) still shows.
+      if (p.building && ![...$('f-building').options].some((o) => o.value === p.building)) {
+        const o = document.createElement('option');
+        o.value = o.textContent = p.building;
+        $('f-building').append(o);
+      }
+      if (p.building) $('f-building').value = p.building;
+      fillRooms();
+      $('f-room').value = p.room ?? '';
+      $('f-lon').value = p.ll?.[0] ?? '';
+      $('f-lat').value = p.ll?.[1] ?? '';
+      $('f-floor').value = p.floor ?? '';
+      setKind(p.ll ? 'point' : 'room');
+      render();
+      $('f-names').focus();
+    }
+
+    function closeEditor() {
+      editing = null;
+      $('editor').hidden = true;
+      render();
+    }
+
+    /** The place the form describes (not yet validated). */
+    function formPlace() {
+      const kind = document.querySelector('input[name=kind]:checked').value;
+      const names = [...new Set($('f-names').value.split('\n').map((s) => s.trim().replace(/\s+/g, ' ')).filter(Boolean))];
+      const p = {id: $('f-id').value.trim(), names};
+      const category = $('f-category').value.trim();
+      if (category) p.category = category;
+      if (kind === 'room') {
+        p.building = $('f-building').value;
+        p.room = $('f-room').value.trim();
+      } else {
+        p.ll = [parseFloat($('f-lon').value), parseFloat($('f-lat').value)];
+        p.floor = $('f-floor').value.trim();
+      }
+      if (!p.id) p.id = autoId(p);
+      return p;
+    }
+
+    function autoId(p) {
+      const slug = (s) => normName(s).replace(/ /g, '-');
+      const base = [p.building ? slug(p.building) : 'place', slug(p.names[0] ?? p.room ?? '')].filter(Boolean).join('-');
+      let id = base, n = 2;
+      while (places.some((q, i) => q.id === id && i !== editing)) id = `${base}-${n++}`;
+      return id;
+    }
+
+    function checkForm() {
+      if (editing === null) return;
+      const p = formPlace();
+      const el = $('f-check');
+      if (!campus.length) { el.textContent = ''; return; }
+      const hit = (p.room || p.ll?.every(Number.isFinite)) ? resolvePlace(campus, p) : null;
+      if (hit) {
+        el.className = 'hint ok';
+        el.textContent = p.ll ? 'Point is valid.' : `Found on floor ${hit.floorId} (label “${hit.text}”).`;
+      } else {
+        el.className = 'hint bad';
+        el.textContent = p.ll ? 'Enter lon, lat and floor.'
+          : p.room ? `No room “${p.room}” on the ${p.building} plans. Search will not find it until the label exists.`
+          : 'Pick a room.';
+      }
+    }
+
+    function savePlace(e) {
+      e.preventDefault();
+      const p = formPlace();
+      const next = places.slice();
+      if (editing >= 0) next[editing] = p; else next.push(p);
+      // Block only problems this edit introduces.
+      const before = new Set(validatePlaces(places));
+      const problems = validatePlaces(next).filter((t) => !before.has(t));
+      if (problems.length) { statusEl.textContent = problems.join('\n'); return; }
+      places = next;
+      saveWip();
+      statusEl.textContent = `Saved “${p.names[0]}”. Download places.json to publish.`;
+      closeEditor();
+    }
+
+    function deletePlace() {
+      if (editing === null || editing < 0) return;
+      const p = places[editing];
+      if (!confirm(`Delete “${p.names?.[0] ?? p.id}”?`)) return;
+      places = places.filter((_, i) => i !== editing);
+      saveWip();
+      closeEditor();
+    }
+
+    // --- download / load ------------------------------------------------------
+    function download() {
+      const problems = validatePlaces(places);
+      if (problems.length && !confirm(`places.json has problems:\n\n${problems.join('\n')}\n\nDownload anyway?`)) return;
+      const blob = new Blob([JSON.stringify(places, null, 2) + '\n'], {type: 'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'places.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      statusEl.textContent = 'Downloaded places.json. Upload it next to app.html (see agents.md, Deployment).';
+    }
+
+    async function loadFile(file) {
+      try {
+        const list = JSON.parse(await file.text());
+        if (!Array.isArray(list)) throw new Error('expected an array of places');
+        places = list;
+        saveWip();
+        closeEditor();
+        statusEl.textContent = `Loaded ${list.length} places from ${file.name}.`;
+      } catch (e) {
+        statusEl.textContent = `Could not load ${file.name}: ${e.message}`;
+      }
+    }
+
+    // --- wiring ---------------------------------------------------------------
+    $('new-btn').addEventListener('click', () => openEditor(-1));
+    $('cancel-btn').addEventListener('click', closeEditor);
+    $('delete-btn').addEventListener('click', deletePlace);
+    $('place-form').addEventListener('submit', savePlace);
+    $('place-form').addEventListener('input', checkForm);
+    $('f-building').addEventListener('change', () => { fillRooms(); checkForm(); });
+    for (const r of document.querySelectorAll('input[name=kind]')) r.addEventListener('change', () => setKind(r.value));
+    $('filter').addEventListener('input', render);
+    $('download-btn').addEventListener('click', download);
+    $('load-btn').addEventListener('click', () => $('load-file').click());
+    $('load-file').addEventListener('change', (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
+    $('reset-btn').addEventListener('click', () => {
+      if (!confirm('Discard your local edits and reload places.json from the server?')) return;
+      places = structuredClone(serverPlaces);
+      try { localStorage.removeItem(WIP_KEY); } catch (e) { /* ignore */ }
+      closeEditor();
+      refreshBanner();
+    });
+
+    serverPlaces = await loadServerPlaces();
+    let wip = null;
+    try { wip = JSON.parse(localStorage.getItem(WIP_KEY) || 'null'); } catch (e) { /* ignore */ }
+    places = Array.isArray(wip) ? wip : structuredClone(serverPlaces);
+    refreshBanner();
+    render();
+    try {
+      campus = await loadCampus();
+      fillBuildings();
+      statusEl.textContent = `${places.length} places · ${campus.length} registered buildings.`;
+    } catch (e) {
+      statusEl.textContent = `Could not load the floor plans (${e.message}); room checks are off.`;
+    }
+    render();
+  </script>
+</body>
+</html>

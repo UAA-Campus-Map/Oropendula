@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 94,
-  "shape_count": 2352,
+  "shape_count": 2350,
   "shapes_filtered": 114,
+  "shapes_dashed_dropped": 2,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -14457,40 +14458,6 @@
           "radius": 82.74,
           "start_angle": 342.89,
           "end_angle": 17.11
-        }
-      ]
-    },
-    {
-      "bbox": [1388.0, 1148.0, 1439.5, 1148.0],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [1388.0, 1148.0],
-            [1439.5, 1148.0]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [1388.0, 1142.0, 1439.5, 1142.0],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [1388.0, 1142.0],
-            [1439.5, 1142.0]
-          ]
         }
       ]
     },

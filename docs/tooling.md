@@ -82,14 +82,17 @@ never goes stale when a plan is re-aligned.
 `node smoke.mjs [categories]`; no arguments runs everything. Categories:
 
 ```
-align, walkability, pdr, arbiter, portals, router, osm, multifloor, motion, autocal
+align, walkability, pdr, arbiter, portals, router, osm, multifloor, motion, autocal, places
 ```
 
 The fast subset that needs **no real floor data**:
 
 ```
-node smoke.mjs motion pdr arbiter autocal
+node smoke.mjs motion pdr arbiter autocal places
 ```
+
+(`places` reads the floor JSONs' room labels but builds no navGraph; see
+`places.md`.)
 
 Everything else builds real floors (shared across groups via `basis-worker`).
 

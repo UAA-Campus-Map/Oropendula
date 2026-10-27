@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 101,
-  "shape_count": 1575,
+  "shape_count": 1574,
   "shapes_filtered": 0,
+  "shapes_dashed_dropped": 1,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -18761,23 +18762,6 @@
           "points": [
             [5058.72, 1429.03],
             [5214.73, 1429.03]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [5107.73, 1417.03, 5227.73, 1417.03],
-      "stroke": [1.0, 0.498, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FURNITURE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [5107.73, 1417.03],
-            [5227.73, 1417.03]
           ]
         }
       ]

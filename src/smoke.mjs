@@ -27,6 +27,7 @@ import { AnchorStepCalibrator } from './anchorcal.mjs';
 import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
 import { buildPassages, makeHeadingField, CompassSnapper, distPi } from './headingfield.mjs';
 import { PositionArbiter } from './arbiter.mjs';
+import { normName, placeTarget, parseTarget, buildPlaceIndex, searchPlaces, splitRoomQuery, findRoom, resolvePlace, validatePlaces } from './places.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
 // import.html); smoke reads the same file index.html fetches.
@@ -88,6 +89,7 @@ const ALL_CATEGORIES = [
   'autocal',     // GPS step-length auto-calibration
   'anchorcal',   // step-length refinement from manual anchors
   'headingfield', // allowed compass directions + compass snapping
+  'places',      // place nicknames, places.json, favorites
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
 if (process.argv.includes('--list') || process.argv.includes('-h') || process.argv.includes('--help')) {
@@ -2878,6 +2880,98 @@ if (want('headingfield')) {
     const r = s.update(1.0, null);
     check('with no field the snapper does nothing', !r.locked && r.correctionRad === 0);
   }
+}
+// ---------------------------------------------------------------------------
+// Places of interest (places.mjs + places.json). Fast: reads floor JSON
+// labels only, no navGraph build.
+// ---------------------------------------------------------------------------
+if (want('places')) {
+console.log('\nPlaces of interest (places.mjs, places.json):');
+
+// Name matching: punctuation, case and stop words never decide a match.
+check('normName drops case, punctuation and stop words',
+  normName('AI & Robotics Lab') === 'ai robotics lab' && normName('  the  POOL ') === 'pool');
+const demo = [
+  {id: 'eib-ai', building: 'EIB', room: '303', names: ['AI & Robotics Lab', 'Robotics Club', 'AI Club']},
+  {id: 'su-subway', building: 'SU', room: 'Subway', names: ['Subway']},
+  {id: 'statue', ll: [-149.82, 61.19], floor: '01', names: ['Seawolf Statue']},
+];
+const demoIndex = buildPlaceIndex(demo, [{name: 'robo lab', building: 'EIB', room: '303'}]);
+const top = (q) => searchPlaces(demoIndex, q, 3);
+check('exact nickname ranks first', top('robotics club')[0]?.name === 'Robotics Club' && top('robotics club')[0].score === 0);
+check('ampersand and case ignored', top('ai robotics lab')[0]?.name === 'AI & Robotics Lab');
+check('name prefix beats word match', top('robotics')[0]?.name === 'Robotics Club');
+check('every query word must start a name word',
+  top('ai club')[0]?.name === 'AI Club' && top('club ai')[0]?.name === 'AI Club' && top('ai pizza').length === 0);
+check('substring match as a last resort', top('awolf')[0]?.name === 'Seawolf Statue');
+check('favorites are searchable and win ties', top('robo')[0]?.favorite === true, top('robo').map((e) => e.name).join(', '));
+check('one result per place and name',
+  searchPlaces(buildPlaceIndex([...demo, demo[0]]), 'ai', 10).filter((e) => e.name === 'AI Club').length === 1);
+check('empty query matches nothing', top('  &  ').length === 0);
+
+// Targets are the vote key: stable and reversible.
+check('room target', placeTarget({building: 'su', room: 'Subway'}) === 'SU Subway');
+const pt = placeTarget({ll: [-149.8231234, 61.19], floor: '02'});
+check('point target round-trips',
+  pt === 'll:-149.823123,61.190000@02' && parseTarget(pt).floor === '02' && parseTarget(pt).ll[0] === -149.823123);
+check('room target round-trips', parseTarget('EIB 303A').building === 'EIB' && parseTarget('EIB 303A').room === '303A');
+
+// Schema checks the admin page and this gate share.
+check('valid places pass', validatePlaces(demo).length === 0, validatePlaces(demo).join('; '));
+const bad = validatePlaces([
+  {id: 'a', names: ['Lab'], building: 'EIB', room: '1'},
+  {id: 'a', names: ['x'], building: 'EIB', room: '2'},
+  {id: 'b', names: [], building: 'EIB', room: '3'},
+  {id: 'c', names: ['THE lab!'], building: 'EIB', room: '4'},
+  {id: 'd', names: ['Somewhere']},
+]);
+check('duplicate id, no names, shared nickname and no location are all caught',
+  bad.some((p) => p.includes('duplicate id')) && bad.some((p) => p.includes('at least one name')) &&
+  bad.some((p) => p.includes('names both a and c')) && bad.some((p) => p.includes('building + room')),
+  bad.join('; '));
+
+// Room lookup on a synthetic two-floor building (the app's search path).
+const label = (text, lon, lat) => ({type: 'Feature', geometry: {type: 'Point', coordinates: [lon, lat]}, properties: {text}});
+const fake = [{id: 'AS103', sourceId: 'BMH', floors: [
+  {floorId: '01', roomLabels: [label('114A', 1, 1), label('213', 9, 9), label('Student Lounge', 2, 2)]},
+  {floorId: '02', roomLabels: [label('213', 3, 3), label('114A1', 4, 4)]},
+]}];
+check('longest building code wins the split',
+  splitRoomQuery(fake, 'AS103 114A')?.roomText === '114A' && splitRoomQuery(fake, 'bmh114a')?.roomText === '114a' &&
+  splitRoomQuery(fake, 'Subway') === null);
+check('room on its numbered floor wins', findRoom(fake[0], '213')?.floorId === '02');
+check('exact beats prefix', findRoom(fake[0], '114A')?.labelLL[0] === 1 && findRoom(fake[0], '114A').text === '114A');
+check('named rooms match too', findRoom(fake[0], 'student lounge')?.floorId === '01');
+check('resolvePlace finds rooms by UAA code', resolvePlace(fake, {building: 'bmh', room: '213'})?.floorId === '02');
+check('resolvePlace: unregistered building is null', resolvePlace(fake, {building: 'EIB', room: '303'}) === null);
+
+// The shipped places.json: valid, and every entry resolves on the campus
+// registered in buildings-config.json (same label/registration path as the
+// app's loadFloor). A room the extractor does not draw fails here.
+let shipped = null;
+try { shipped = JSON.parse(readFileSync(new URL('./places.json', import.meta.url), 'utf8')); }
+catch (e) { check('places.json parses', false, e.message); }
+if (shipped) {
+  const problems = validatePlaces(shipped);
+  check(`places.json is valid (${shipped.length} places)`, problems.length === 0, problems.join('; '));
+  const labelCampus = CONFIG.map((cfg) => {
+    const b = {id: cfg.id, sourceId: null, floors: []};
+    for (const floor of cfg.floors) {
+      const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
+      const toLL = makeToLL(cfg, floor);
+      b.sourceId ??= data.ID ?? null;
+      b.floors.push({floorId: floor.floorId, roomLabels: (data.text_lines ?? []).map((t) =>
+        label(String(t.text ?? '').trim(), ...toLL(t.x, t.y))).filter((f) => f.properties.text)});
+    }
+    return b;
+  });
+  for (const p of shipped) {
+    const hit = resolvePlace(labelCampus, p);
+    const floors = hit?.building?.floors.map((f) => f.floorId) ?? [];
+    check(`place "${p.id}" resolves`, hit && (!p.ll || floors.includes(p.floor)),
+      hit ? `${hit.building?.sourceId ?? ''} floor ${hit.floorId}` : `${placeTarget(p)} not found`);
+  }
+}
 }
 
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : failures + ' FAILURES'}`);process.exit(failures === 0 ? 0 : 1);

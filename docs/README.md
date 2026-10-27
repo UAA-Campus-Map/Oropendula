@@ -38,7 +38,8 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 | 9 | [autocal.md](autocal.md) | `autocal.mjs` | online step-length calibration from GPS |
 | 10 | [align.md](align.md) | `align.mjs` | rigid floor alignment for the import tool |
 | 11 | [tooling.md](tooling.md) | workers + scripts | `gen-osm`, `gen-navgraphs`, `gen-portals`, `navgraph-worker`, `navgraph-bundle-worker`, `zip`, `basis-worker`, `smoke.mjs` |
-| 12 | [apps.md](apps.md) | HTML entry points | `app.html`, `index.html`, `import.html`, `locate-test.html` |
+| 12 | [apps.md](apps.md) | HTML entry points | `app.html`, `index.html`, `import.html`, `places.html`, `locate-test.html` |
+| 13 | [places.md](places.md) | `places.mjs` | place nicknames in search, student favorites, form voting |
 
 ## How to keep these true
 

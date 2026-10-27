@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 49,
-  "shape_count": 1589,
+  "shape_count": 1583,
   "shapes_filtered": 59,
+  "shapes_dashed_dropped": 6,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -18541,57 +18542,6 @@
       ]
     },
     {
-      "bbox": [6226.54, 8359.36, 6301.29, 8359.36],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [6301.29, 8359.36],
-            [6226.54, 8359.36]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [6226.54, 8352.74, 6226.54, 8359.36],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [6226.54, 8352.74],
-            [6226.54, 8359.36]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [6301.29, 8352.74, 6301.29, 8359.36],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [6301.29, 8359.36],
-            [6301.29, 8352.74]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [6084.17, 8359.36, 6084.17, 8367.36],
       "stroke": [1.0, 1.0, 0.0],
       "fill": null,
@@ -19986,23 +19936,6 @@
       ]
     },
     {
-      "bbox": [9287.79, 8347.05, 9334.79, 8347.05],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [9334.79, 8347.05],
-            [9287.79, 8347.05]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [7901.54, 8345.3, 7903.79, 8345.3],
       "stroke": [0.0, 1.0, 1.0],
       "fill": null,
@@ -20304,40 +20237,6 @@
           "points": [
             [7901.54, 8348.3],
             [7859.04, 8348.3]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [7967.79, 8345.3, 8014.79, 8345.3],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [8014.79, 8345.3],
-            [7967.79, 8345.3]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [7857.92, 8345.3, 7903.79, 8345.3],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [7903.79, 8345.3],
-            [7857.92, 8345.3]
           ]
         }
       ]
