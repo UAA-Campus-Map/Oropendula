@@ -1239,7 +1239,7 @@ console.log('\nTest 7c: outdoor attachment projects onto edges');
 
 console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
 {
-  const OSM_URL = 'https://navigator.cheeseverse.net/scak.pmtiles';
+  const OSM_URL = 'https://uaa-campus-map.net/scak.pmtiles';
   const lat8 = as103.floors[0].exits[0].ll[1];
   const mPerDeg8 = metresPerDegree(lat8);
   const obstacleSegs = buildings.flatMap(bld => bld.floors.flatMap(f => f.obstacleLines ?? []));

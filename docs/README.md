@@ -8,6 +8,18 @@ Start with the monolith of hard-won context in [`src/agents.md`](../src/agents.m
 these pages expand it, one module at a time. Everything here reflects the code on
 `main`.
 
+## Canonical site
+
+Production is served at **https://uaa-campus-map.net**. The static site root is
+`/usr/share/nginx/html` on that host, and the basemap/style/PMTiles assets are
+loaded from the same domain:
+
+- `https://uaa-campus-map.net/style.json`
+- `https://uaa-campus-map.net/scak.pmtiles`
+
+The previous hostname is retired; use `uaa-campus-map.net` in code, docs,
+deployment commands, and import-tool settings.
+
 ## Reading order
 
 The runtime pipeline runs **sensors → motion → locate → arbiter → app**:

@@ -15,7 +15,7 @@ import { pmtilesGetZxy } from './pmtiles-node.mjs';
 import { makeToLL, metresPerDegree } from './geo.mjs';
 import { portalsFromCache } from './campus.mjs';
 
-const OSM_URL = 'https://navigator.cheeseverse.net/scak.pmtiles';
+const OSM_URL = 'https://uaa-campus-map.net/scak.pmtiles';
 const PAD_M = 200;   // must match OSM_BBOX_PAD_M in index.html
 
 const CONFIG = JSON.parse(readFileSync(new URL('./buildings-config.json', import.meta.url), 'utf8'));

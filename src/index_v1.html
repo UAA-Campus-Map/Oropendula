@@ -62,7 +62,7 @@
         // //     attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         // // }).addTo(map);
         // const p = new pmtiles.PMTiles(
-        //       "https://navigator.cheeseverse.net/uaa.pmtiles"
+        //       "https://uaa-campus-map.net/uaa.pmtiles"
         //     );
         //     p.getHeader().then((h) => {
         //       let layer = pmtiles.leafletRasterLayer(p, {
@@ -78,10 +78,10 @@
         //     fillOpacity: 0.2,
         //     radius: 500
         // }).addTo(map);
-        // var lch = 'https://navigator.cheeseverse.net/lch.png',
+        // var lch = 'https://uaa-campus-map.net/lch.png',
         //     lchBounds = [[61.1896135, -149.8327691], [61.1901653, -149.8318228]];
         // L.imageOverlay(lch, lchBounds).addTo(map);
-        // var bmh = 'https://navigator.cheeseverse.net/bmh.png',
+        // var bmh = 'https://uaa-campus-map.net/bmh.png',
         //     bmhBounds = [[61.189445, -149.833406], [61.190137, -149.834033]];
         // L.imageOverlay(bmh, bmhBounds).addTo(map);
 
@@ -93,13 +93,13 @@
         // }
 
 
-        // var su2 = 'https://navigator.cheeseverse.net/su2.png',
+        // var su2 = 'https://uaa-campus-map.net/su2.png',
         //     su2Bounds = [[61.1897, -149.8254], [61.19047, -149.82695]];
         // L.imageOverlay(su2, su2Bounds).addTo(map);
-        // var rh2 = 'https://navigator.cheeseverse.net/rh2.png',
+        // var rh2 = 'https://uaa-campus-map.net/rh2.png',
         //     rh2Bounds = [[61.18937, -149.83154], [61.189825, -149.830355]];
         // L.imageOverlay(rh2, rh2Bounds).addTo(map);
-        // var aasc2 = 'https://navigator.cheeseverse.net/aasc2.png',
+        // var aasc2 = 'https://uaa-campus-map.net/aasc2.png',
         //     aasc2Bounds = [[61.18945, -149.82657], [61.190476, -149.82916]];
         // L.imageOverlay(aasc2, aasc2Bounds).addTo(map);
 
@@ -137,7 +137,7 @@
 
     updateBuildingLocation = function() {
         testImage.remove();
-        var imageUrl = 'https://navigator.cheeseverse.net/aasc2.png',
+        var imageUrl = 'https://uaa-campus-map.net/aasc2.png',
             imageBounds = [[+document.getElementById("lata").value, +document.getElementById("lonb").value], [+document.getElementById("latb").value, +document.getElementById("lona").value]];
         testImage = L.imageOverlay(imageUrl, imageBounds).addTo(map);
     }

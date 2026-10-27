@@ -4,7 +4,7 @@
 
 Gives the router a real outdoor path network. The campus basemap is a Protomaps
 extract of OpenStreetMap served as a single **PMTiles** archive
-(`navigator.cheeseverse.net/scak.pmtiles`). Rather than add another map source,
+(`https://uaa-campus-map.net/scak.pmtiles`). Rather than add another map source,
 this module reads that archive's `roads` layer for the tiles covering a lon/lat
 bounding box, keeps the walkable ways, and translates them into the **same shape
 format as the DXF files** — a `PATHS` layer of

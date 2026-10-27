@@ -4,7 +4,7 @@
                     "protomaps": {
                         "type": "vector",
                         "attribution": "<a href=\"https://github.com/protomaps/basemaps\">Protomaps</a> © <a href=\"https://openstreetmap.org\">OpenStreetMap</a>",
-                        "url": "pmtiles://https://navigator.cheeseverse.net/scak.pmtiles"
+                        "url": "pmtiles://https://uaa-campus-map.net/scak.pmtiles"
                     }
                 },
                 "layers": [

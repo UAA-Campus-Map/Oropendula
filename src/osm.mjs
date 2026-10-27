@@ -2,7 +2,7 @@
  * osm.mjs - OpenStreetMap roads as a translated layer.
  *
  * The campus basemap is a Protomaps extract of OpenStreetMap served as a
- * single PMTiles archive (navigator.cheeseverse.net/scak.pmtiles, covering
+ * single PMTiles archive (uaa-campus-map.net/scak.pmtiles, covering
  * South Central Alaska at max zoom 15). Instead of adding a new data source,
  * this module reads that archive's `roads` layer for the tiles covering a
  * lon/lat bounding box, keeps the walkable ways, and translates them into the

@@ -30,7 +30,7 @@
               container: "map",
               zoom: 16,
               center: [-149.832240,61.189856],
-              style: "https://navigator.cheeseverse.net/style.json",
+              style: "https://uaa-campus-map.net/style.json",
             });
             map.showTileBoundaries = false;
             for(room of bmhrooms) {
@@ -43,7 +43,7 @@
             map.on("style.load", () => {
                 map.addSource('bmh', {
                 type: 'image',
-                url: 'https://navigator.cheeseverse.net/bmh.png',
+                url: 'https://uaa-campus-map.net/bmh.png',
                 coordinates: [
                     [-149.834033, 61.190137], //top left
                     [-149.833406, 61.190137], //top right

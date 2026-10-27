@@ -4,6 +4,10 @@ Tiered indoor/outdoor wayfinding over five UAA buildings (Anchorage, AK) from
 DXF floor plans plus OpenStreetMap data. Plain static site: ES modules, no
 build step, no npm dependencies in the app itself.
 
+**Canonical production site:** `https://uaa-campus-map.net` (served from
+`/usr/share/nginx/html`). The previous hostname is retired; use the new domain
+in code, docs, deployment, and import-tool settings.
+
 > **After any task that changes a site file, run `node smoke.mjs` and deploy the
 > changed files** (see [Deployment](#deployment)). The live site must always
 > match the working tree.
@@ -336,9 +340,9 @@ startup.
 
 ## The OSM layer (osm.mjs)
 
-The basemap at `https://navigator.cheeseverse.net/style.json` is a Protomaps
+The basemap at `https://uaa-campus-map.net/style.json` is a Protomaps
 extract of OpenStreetMap served as one PMTiles archive
-(`https://navigator.cheeseverse.net/scak.pmtiles`, South Central Alaska,
+(`https://uaa-campus-map.net/scak.pmtiles`, South Central Alaska,
 max zoom 15, CORS `*`). **No Overpass** — the app already downloads this
 archive for the basemap.
 
@@ -830,11 +834,11 @@ site should always reflect the working tree. Workflow for every task:
 1. Run the gate: `node smoke.mjs` must be all green.
 2. Deploy **only the files you changed** (see below), then verify.
 
-The site is served from `root@navigator.cheeseverse.net:/usr/share/nginx/html`.
+The site is served from `root@uaa-campus-map.net:/usr/share/nginx/html`.
 `deploy.sh` (git-ignored) shows how - the host, the destination path and the
 `scp` usage; read it before deploying:
 
-    scp -r *.html root@navigator.cheeseverse.net:/usr/share/nginx/html
+    scp -r *.html root@uaa-campus-map.net:/usr/share/nginx/html
     # ...and *.png, *.json, *.mjs
 
 **Do not run `deploy.sh` for a normal change** - its globs re-upload the whole
@@ -845,7 +849,7 @@ every time. After a major change:
 2. Upload **only the files you changed**, naming them explicitly, e.g.:
 
        scp index.html motion.mjs locate.mjs arbiter.mjs \
-         root@navigator.cheeseverse.net:/usr/share/nginx/html/
+         root@uaa-campus-map.net:/usr/share/nginx/html/
 
 List the changed paths with `git status --short` first so nothing is missed and
 nothing extra is sent. The large static assets (floor JSONs, PMTiles, MapLibre

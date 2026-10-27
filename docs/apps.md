@@ -5,6 +5,9 @@ HTML file with inline CSS, markup and a `<script type="module">` that imports th
 `src/*.mjs` modules. Serve the `src/` folder statically (e.g.
 `python3 -m http.server 8765`) and open a page.
 
+Production entry point: **https://uaa-campus-map.net** (the previous hostname
+is retired). Basemap/style and PMTiles assets are served from the same domain.
+
 ## `app.html` — the modern "Navigator" frontend
 
 A single-page, mobile-first reskin of the demo using the **same modules and
@@ -57,12 +60,15 @@ ground floor even when a building has a basement.
 ### Room pin
 
 The right-edge **Locate by room** button places a manual PDR anchor in the
-hallway outside a room in the current building. It uses exact room-label
-matching, clusters DOOR-layer leaves into doorways, and only accepts a door
-that opens onto a hallway. If the room has multiple hallway doors, multiple
-hallways, no hallway door, or an open exterior gap, it refuses to place the
-pin. A successful placement stops GPS, binds PDR to that building/floor, and
-seeds the particle cloud at the centre of the hallway outside the door.
+hallway outside a room in the current building. It accepts either a bare room
+number (`211`, defaulting to the current building) or a building code plus room
+(`AS124 211` / `LIB 211`), using the same longest-code matching as the search
+bar. It requires an exact, unique room match, clusters DOOR-layer leaves into
+doorways, and only accepts a door that opens onto a hallway. If the room has
+multiple hallway doors, multiple hallways, no hallway door, or an open exterior
+gap, it refuses to place the pin. A successful placement stops GPS, binds PDR
+to that building/floor, and seeds the particle cloud at the centre of the
+hallway outside the door.
 
 ### Blocked doors/staircases
 

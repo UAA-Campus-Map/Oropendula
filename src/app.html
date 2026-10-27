@@ -1209,7 +1209,7 @@
       zoom: 17,
       center: [-149.832240, 61.189856],
       pitch: 0,
-      style: 'https://navigator.cheeseverse.net/style.json',
+      style: 'https://uaa-campus-map.net/style.json',
       touchZoomRotate: true,
       dragPan: true,
       dragRotate: false,
@@ -3207,6 +3207,27 @@
       return campusRouter.buildingAt([c.lng, c.lat], floorOfView())?.building ?? null;
     }
 
+    /**
+     * Split "BMH 114A" / "BMH114A" / "AS103114" into building + room. The
+     * longest known building code at the start wins, exactly like the search
+     * bar. With no code, the caller supplies the current building.
+     */
+    function splitRoomQuery(q) {
+      const ql = q.toLowerCase();
+      const candidates = [];
+      for (const b of buildings) {
+        if (b.sourceId) candidates.push({b, key: b.sourceId.toLowerCase()});
+        candidates.push({b, key: b.id.toLowerCase()});
+      }
+      candidates.sort((a, c) => c.key.length - a.key.length);
+      const hit = candidates.find((c) => ql.startsWith(c.key));
+      if (!hit) return {building: null, roomText: q.trim()};
+      return {
+        building: hit.b,
+        roomText: q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim(),
+      };
+    }
+
     function setRoomPinError(msg) {
       roomPinError.textContent = msg;
       roomPinError.hidden = !msg;
@@ -3214,11 +3235,11 @@
 
     function openRoomPin() {
       const b = currentRoomPinBuilding();
-      if (!b) {
-        statusText.textContent = 'Open a building floor before locating by room';
-        return;
-      }
-      roomPinContext.textContent = `Building: ${buildingLabel(b.id)}`;
+      const code = b ? (b.sourceId ?? b.id) : null;
+      roomPinContext.textContent = b
+        ? `Current building: ${buildingLabel(b.id)}. Type a room, or ${code} + room.`
+        : 'Type a building code and room, e.g. AS124 211.';
+      roomPinInput.placeholder = b ? `e.g. 211 or ${code} 211` : 'e.g. AS124 211';
       setRoomPinError('');
       roomPinInput.value = '';
       roomPinModal.hidden = false;
@@ -3231,11 +3252,16 @@
     }
 
     function submitRoomPin() {
-      const b = currentRoomPinBuilding();
-      if (!b) { setRoomPinError('No current building.'); return; }
       const q = roomPinInput.value.trim();
       if (!q) { setRoomPinError('Type a room number first.'); return; }
-      const resolved = resolveRoomPin(b, q);
+      const split = splitRoomQuery(q);
+      const b = split.building ?? currentRoomPinBuilding();
+      if (!b) { setRoomPinError('No current building.'); return; }
+      if (!split.roomText) {
+        setRoomPinError(`Include a room number, e.g. ${b.sourceId ?? b.id} 211.`);
+        return;
+      }
+      const resolved = resolveRoomPin(b, split.roomText);
       if (resolved.error) { setRoomPinError(resolved.error); return; }
       if (!manualPdrAnchor(resolved.building, resolved.floor, resolved.ll)) return;
       closeRoomPin();
@@ -3273,24 +3299,15 @@
       const q = searchInput.value.trim();
       if (!campusRouter) { statusText.textContent = 'Buildings still loading'; return; }
       if (!q) { statusText.textContent = 'Type a building and room, e.g. BMH 114A'; return; }
-      // The longest known building code at the start of the query wins, so
-      // "BMH 114A", "BMH114A" and "AS103114" all split correctly. Codes are
-      // the UAA `ID` (BMH) or the registration id (AS103).
-      const ql = q.toLowerCase();
-      const candidates = [];
-      for (const b of buildings) {
-        if (b.sourceId) candidates.push({b, key: b.sourceId.toLowerCase()});
-        candidates.push({b, key: b.id.toLowerCase()});
-      }
-      candidates.sort((a, c) => c.key.length - a.key.length);
-      const hit = candidates.find((c) => ql.startsWith(c.key));
-      if (!hit) {
+      // Optional building code, exactly like the Locate by room dialog.
+      const split = splitRoomQuery(q);
+      if (!split.building) {
         const codes = buildings.map((b) => b.sourceId ?? b.id).join(', ');
         statusText.textContent = `Unknown building in "${q}" - try ${codes}`;
         return;
       }
-      const building = hit.b;
-      const roomText = q.slice(hit.key.length).replace(/^[\s,:;-]+/, '').trim();
+      const building = split.building;
+      const roomText = split.roomText;
       const room = roomText ? findRoom(building, roomText) : null;
       if (!room) {
         statusText.textContent = roomText
@@ -4328,7 +4345,7 @@
     // single-floor today - more floors can be added without other changes).
     // Protomaps (OpenStreetMap) archive the basemap style points at; osm.mjs
     // reads its `roads` layer for walkway geometry around the buildings.
-    const OSM_ARCHIVE_URL = 'https://navigator.cheeseverse.net/scak.pmtiles';
+    const OSM_ARCHIVE_URL = 'https://uaa-campus-map.net/scak.pmtiles';
     // Extra metres of road network fetched past the outermost building portal.
     const OSM_BBOX_PAD_M = 200;
 
