@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 8,
-  "shape_count": 1238,
+  "shape_count": 1230,
   "shapes_filtered": 0,
+  "shapes_dashed_dropped": 8,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -7832,74 +7833,6 @@
       ]
     },
     {
-      "bbox": [3100.66, 274.73, 3221.2, 395.28],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3221.2, 274.73],
-            [3100.66, 395.28]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3093.59, 267.66, 3214.13, 388.2],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3214.13, 267.66],
-            [3093.59, 388.2]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3279.33, 267.66, 3405.53, 393.86],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3279.33, 267.66],
-            [3405.53, 393.86]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3272.26, 274.73, 3392.8, 395.28],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3272.26, 274.73],
-            [3392.8, 395.28]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [3405.53, 393.86, 3422.31, 410.64],
       "stroke": [1.0, 0.498, 0.0],
       "fill": null,
@@ -14091,74 +14024,6 @@
           "points": [
             [352.25, 2298.6],
             [352.25, 1184.1]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [420.44, 974.93, 450.27, 1005.03],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "m-hvac-hide",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [420.44, 974.93],
-            [450.27, 1005.03]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [377.27, 1005.03, 450.27, 1077.35],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "m-hvac-hide",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [450.27, 1005.03],
-            [377.27, 1077.35]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [347.45, 1047.25, 377.27, 1077.35],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "m-hvac-hide",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [377.27, 1077.35],
-            [347.45, 1047.25]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [347.45, 974.93, 420.44, 1047.25],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "m-hvac-hide",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [347.45, 1047.25],
-            [420.44, 974.93]
           ]
         }
       ]

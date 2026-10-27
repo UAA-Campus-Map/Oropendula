@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 85,
-  "shape_count": 2105,
+  "shape_count": 2086,
   "shapes_filtered": 3,
+  "shapes_dashed_dropped": 19,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -16626,30 +16627,6 @@
       ]
     },
     {
-      "bbox": [39.7, 1772.78, 725.7, 2432.78],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": true,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "polyline",
-          "points": [
-            [327.7, 2432.78],
-            [327.69, 2156.72],
-            [725.7, 2156.7],
-            [725.7, 1796.64],
-            [327.7, 1796.64],
-            [327.7, 1772.78],
-            [39.7, 1772.78],
-            [39.7, 2432.78]
-          ],
-          "closed": true
-        }
-      ]
-    },
-    {
       "bbox": [1920.51, 952.0, 1920.51, 1156.0],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -19207,29 +19184,6 @@
       ]
     },
     {
-      "bbox": [2511.19, 773.09, 2726.17, 1805.5],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "polyline",
-          "points": [
-            [2585.4, 1805.5],
-            [2590.87, 1805.5],
-            [2590.8, 1064.82],
-            [2516.49, 990.5],
-            [2515.08, 991.92],
-            [2511.19, 988.03],
-            [2726.17, 773.09]
-          ],
-          "closed": false
-        }
-      ]
-    },
-    {
       "bbox": [2318.59, 1707.1, 2330.59, 1707.1],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -19311,36 +19265,6 @@
             [2416.19, 1707.1],
             [2416.19, 1787.1]
           ]
-        }
-      ]
-    },
-    {
-      "bbox": [2230.87, 2166.95, 4780.37, 3976.7],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "polyline",
-          "points": [
-            [2585.4, 2166.95],
-            [2590.87, 2166.95],
-            [2590.87, 2177.95],
-            [2667.62, 2177.95],
-            [2667.62, 2233.95],
-            [2683.62, 2233.95],
-            [2683.62, 2329.95],
-            [2667.62, 2329.95],
-            [2667.62, 2507.2],
-            [2230.87, 2507.2],
-            [2230.87, 3616.7],
-            [3670.87, 3616.7],
-            [3670.87, 3976.7],
-            [4780.37, 3976.7]
-          ],
-          "closed": false
         }
       ]
     },
@@ -38528,176 +38452,6 @@
       ]
     },
     {
-      "bbox": [2501.94, 1526.05, 2594.18, 1618.29],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2501.94, 1618.29],
-            [2594.18, 1526.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2474.18, 1406.05, 2594.18, 1526.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2474.18, 1406.05],
-            [2594.18, 1526.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2534.18, 1346.05, 2594.18, 1406.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2534.18, 1346.05],
-            [2594.18, 1406.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2474.18, 1286.05, 2594.18, 1406.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2474.18, 1406.05],
-            [2594.18, 1286.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2474.18, 1166.05, 2594.18, 1286.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2474.18, 1166.05],
-            [2594.18, 1286.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2534.18, 1166.05, 2594.18, 1226.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2534.18, 1226.05],
-            [2594.18, 1166.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2534.18, 1106.05, 2594.18, 1166.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2534.18, 1106.05],
-            [2594.18, 1166.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2474.18, 1057.13, 2583.11, 1166.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2474.18, 1166.05],
-            [2583.11, 1057.13]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2534.18, 1406.05, 2594.18, 1466.05],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2534.18, 1466.05],
-            [2594.18, 1406.05]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2501.94, 1618.29, 2501.94, 1783.0],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2501.94, 1618.29],
-            [2501.94, 1783.0]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [2520.14, 2070.41, 2585.4, 2070.41],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -38728,108 +38482,6 @@
             [2525.91, 2076.41],
             [2585.4, 2076.41]
           ]
-        }
-      ]
-    },
-    {
-      "bbox": [917.2, 523.3, 917.2, 769.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [917.2, 523.3],
-            [917.2, 769.3]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [1127.2, 523.3, 1127.2, 769.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [1127.2, 523.3],
-            [1127.2, 769.3]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [917.2, 470.8, 1008.13, 523.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [917.2, 523.3],
-            [1008.13, 470.8]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [1036.27, 470.8, 1127.2, 523.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [1036.27, 470.8],
-            [1127.2, 523.3]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [1022.2, 418.3, 1232.2, 628.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "arc",
-          "center": [1127.2, 523.3],
-          "radius": 105.0,
-          "start_angle": 180.0,
-          "end_angle": 210.0
-        }
-      ]
-    },
-    {
-      "bbox": [812.2, 418.3, 1022.2, 628.3],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "FENCE",
-      "items": [
-        {
-          "op": "arc",
-          "center": [917.2, 523.3],
-          "radius": 105.0,
-          "start_angle": 330.0,
-          "end_angle": 0.0
         }
       ]
     },

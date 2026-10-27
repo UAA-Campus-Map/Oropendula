@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 40,
-  "shape_count": 1914,
+  "shape_count": 1871,
   "shapes_filtered": 2,
+  "shapes_dashed_dropped": 43,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -2376,57 +2377,6 @@
       ]
     },
     {
-      "bbox": [2865.11, 1281.96, 3074.26, 1281.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2865.11, 1281.96],
-            [3074.26, 1281.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2865.11, 1281.96, 3739.99, 1894.56],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2865.11, 1281.96],
-            [3739.99, 1894.56]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2865.11, 669.37, 3739.99, 1281.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2865.11, 1281.96],
-            [3739.99, 669.37]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [3586.3, 2094.59, 3762.49, 2217.96],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -2473,176 +2423,6 @@
           "points": [
             [4350.11, 1715.93],
             [4352.16, 1717.36]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2641.15, 669.96, 2641.15, 671.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 669.96],
-            [2641.15, 671.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2641.15, 647.96, 2641.15, 649.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 647.96],
-            [2641.15, 649.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2637.61, 649.96, 2641.15, 649.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 649.96],
-            [2637.61, 649.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2637.61, 669.96, 2641.15, 669.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 669.96],
-            [2637.61, 669.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2631.61, 671.96, 2641.15, 671.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 671.96],
-            [2631.61, 671.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2631.61, 647.96, 2641.15, 647.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2641.15, 647.96],
-            [2631.61, 647.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2637.61, 649.96, 2637.61, 669.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2637.61, 669.96],
-            [2637.61, 649.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2631.61, 649.96, 2635.61, 649.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2635.61, 649.96],
-            [2631.61, 649.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2635.61, 649.96, 2635.61, 669.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2635.61, 669.96],
-            [2635.61, 649.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2631.61, 669.96, 2635.61, 669.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2635.61, 669.96],
-            [2631.61, 669.96]
           ]
         }
       ]
@@ -3000,142 +2780,6 @@
           "points": [
             [3096.61, 1971.96],
             [3096.61, 1865.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2305.72, 1641.96, 5255.35, 1641.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2305.72, 1641.96],
-            [5255.35, 1641.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2305.72, 1281.96, 5255.35, 1281.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2305.72, 1281.96],
-            [5255.35, 1281.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2305.72, 1641.96, 5255.35, 1641.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2305.72, 1641.96],
-            [5255.35, 1641.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2305.72, 921.96, 5255.35, 921.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2305.72, 921.96],
-            [5255.35, 921.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2745.11, 322.21, 2745.11, 2179.51],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2745.11, 2179.51],
-            [2745.11, 322.21]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2865.11, 322.21, 2865.11, 2179.51],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2865.11, 2179.51],
-            [2865.11, 322.21]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2985.11, 322.21, 2985.11, 2179.51],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2985.11, 2179.51],
-            [2985.11, 322.21]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3104.61, 322.21, 3104.61, 2179.51],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3104.61, 2179.51],
-            [3104.61, 322.21]
           ]
         }
       ]
@@ -4700,176 +4344,6 @@
           "points": [
             [3063.25, 1865.96],
             [3063.11, 1735.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2774.86, 1874.96, 2774.86, 1878.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2774.86, 1874.96],
-            [2774.86, 1878.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2754.86, 1874.96, 2754.86, 1878.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2754.86, 1874.96],
-            [2754.86, 1878.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2774.86, 1869.43, 2776.86, 1869.43],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2774.86, 1869.43],
-            [2776.86, 1869.43]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2752.86, 1869.43, 2754.86, 1869.43],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2752.86, 1869.43],
-            [2754.86, 1869.43]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2754.86, 1869.43, 2754.86, 1872.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2754.86, 1869.43],
-            [2754.86, 1872.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2774.86, 1869.43, 2774.86, 1872.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2774.86, 1869.43],
-            [2774.86, 1872.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2776.86, 1869.43, 2776.86, 1878.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2776.86, 1869.43],
-            [2776.86, 1878.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2752.86, 1869.43, 2752.86, 1878.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2752.86, 1869.43],
-            [2752.86, 1878.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2754.86, 1872.96, 2774.86, 1872.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2774.86, 1872.96],
-            [2754.86, 1872.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2754.86, 1874.96, 2774.86, 1874.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2774.86, 1874.96],
-            [2754.86, 1874.96]
           ]
         }
       ]
@@ -9057,23 +8531,6 @@
       ]
     },
     {
-      "bbox": [3989.98, 1997.5, 4099.34, 2074.07],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3989.98, 1997.5],
-            [4099.34, 2074.07]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [3779.87, 1894.56, 3798.33, 1922.06],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -10701,23 +10158,6 @@
           "points": [
             [3709.39, 1917.92],
             [3596.21, 2079.56]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3605.73, 1922.39, 3720.45, 2086.23],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3720.45, 1922.39],
-            [3605.73, 2086.23]
           ]
         }
       ]
@@ -23303,23 +22743,6 @@
       ]
     },
     {
-      "bbox": [3990.56, 489.85, 4099.34, 567.24],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3990.56, 567.24],
-            [4099.34, 489.85]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [3779.87, 641.87, 3798.33, 669.37],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -29593,25 +29016,6 @@
       ]
     },
     {
-      "bbox": [2631.61, 644.96, 2649.39, 672.96],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "WALL_FOUNDAT",
-      "items": [
-        {
-          "op": "polyline",
-          "points": [
-            [2649.39, 672.96],
-            [2646.24, 644.96],
-            [2631.61, 644.96]
-          ],
-          "closed": false
-        }
-      ]
-    },
-    {
       "bbox": [2625.61, 903.96, 2649.61, 903.96],
       "stroke": [0.0, 0.0, 1.0],
       "fill": null,
@@ -29709,23 +29113,6 @@
           "points": [
             [2631.61, 1752.96],
             [2631.61, 1650.96]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [3110.26, 1281.96, 4848.72, 1281.96],
-      "stroke": [1.0, 1.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "G_STRUC",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3110.26, 1281.96],
-            [4848.72, 1281.96]
           ]
         }
       ]
@@ -31618,23 +31005,6 @@
       ]
     },
     {
-      "bbox": [3609.23, 479.2, 3722.09, 640.38],
-      "stroke": [1.0, 0.0, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "HIDDEN",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [3722.09, 640.38],
-            [3609.23, 479.2]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [3693.64, 1866.67, 3700.17, 1875.94],
       "stroke": [1.0, 0.0, 1.0],
       "fill": null,
@@ -31869,108 +31239,6 @@
           "radius": 646.2,
           "start_angle": 326.21,
           "end_angle": 0.81
-        }
-      ]
-    },
-    {
-      "bbox": [2248.89, 692.53, 3451.17, 1894.81],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2850.03, 1293.67],
-          "radius": 601.14,
-          "start_angle": 358.88,
-          "end_angle": 13.2
-        }
-      ]
-    },
-    {
-      "bbox": [2294.69, 741.26, 3404.19, 1850.76],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2849.44, 1296.01],
-          "radius": 554.75,
-          "start_angle": 358.55,
-          "end_angle": 14.08
-        }
-      ]
-    },
-    {
-      "bbox": [2339.31, 790.1, 3357.11, 1807.9],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2848.21, 1299.0],
-          "radius": 508.9,
-          "start_angle": 358.08,
-          "end_angle": 15.03
-        }
-      ]
-    },
-    {
-      "bbox": [2248.89, 669.11, 3451.17, 1871.39],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2850.03, 1270.25],
-          "radius": 601.14,
-          "start_angle": 346.8,
-          "end_angle": 1.12
-        }
-      ]
-    },
-    {
-      "bbox": [2294.69, 713.17, 3404.19, 1822.67],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2849.44, 1267.92],
-          "radius": 554.75,
-          "start_angle": 345.92,
-          "end_angle": 1.45
-        }
-      ]
-    },
-    {
-      "bbox": [2339.31, 756.02, 3357.11, 1773.82],
-      "stroke": [1.0, 0.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "SEATING",
-      "items": [
-        {
-          "op": "arc",
-          "center": [2848.21, 1264.92],
-          "radius": 508.9,
-          "start_angle": 344.97,
-          "end_angle": 1.92
         }
       ]
     },

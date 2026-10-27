@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 107,
-  "shape_count": 1401,
+  "shape_count": 1399,
   "shapes_filtered": 2,
+  "shapes_dashed_dropped": 2,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -26095,40 +26096,6 @@
             [4775.0, 1646.9]
           ],
           "closed": true
-        }
-      ]
-    },
-    {
-      "bbox": [4764.0, 1054.21, 5297.6, 1054.21],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [5297.6, 1054.21],
-            [4764.0, 1054.21]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [4764.0, 1620.16, 5297.6, 1620.16],
-      "stroke": [1.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "OTHER-BLDG",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [5297.6, 1620.16],
-            [4764.0, 1620.16]
-          ]
         }
       ]
     },

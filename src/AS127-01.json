@@ -9,8 +9,9 @@
   "likely_scanned": false,
   "likely_vector_text": false,
   "text_line_count": 280,
-  "shape_count": 5605,
+  "shape_count": 5595,
   "shapes_filtered": 120,
+  "shapes_dashed_dropped": 10,
   "unsupported_entity_types": [],
   "text_lines": [
     {
@@ -17571,40 +17572,6 @@
       ]
     },
     {
-      "bbox": [2620.65, 5141.9, 2688.53, 5209.78],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2620.65, 5141.9],
-            [2688.53, 5209.78]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2642.19, 5121.02, 2709.75, 5188.57],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2642.19, 5121.02],
-            [2709.75, 5188.57]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [1957.38, 5805.17, 2034.46, 5882.24],
       "stroke": [0.0, 1.0, 1.0],
       "fill": null,
@@ -18426,40 +18393,6 @@
       ]
     },
     {
-      "bbox": [2071.23, 5020.99, 2139.11, 5088.87],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2139.11, 5088.87],
-            [2071.23, 5020.99]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2279.12, 5228.88, 2347.0, 5296.76],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2347.0, 5296.76],
-            [2279.12, 5228.88]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [2211.94, 5228.88, 2279.12, 5303.48],
       "stroke": [0.0, 1.0, 1.0],
       "fill": null,
@@ -18780,23 +18713,6 @@
           "points": [
             [2573.27, 5189.28],
             [2174.11, 5588.44]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2573.27, 5176.55, 2586.0, 5189.28],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2573.27, 5189.28],
-            [2586.0, 5176.55]
           ]
         }
       ]
@@ -20797,23 +20713,6 @@
       ]
     },
     {
-      "bbox": [1975.06, 5948.71, 1997.69, 5971.34],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [1975.06, 5948.71],
-            [1997.69, 5971.34]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [2069.81, 5917.6, 2362.56, 6210.34],
       "stroke": [0.0, 1.0, 1.0],
       "fill": null,
@@ -20826,23 +20725,6 @@
           "points": [
             [2069.81, 5917.6],
             [2362.56, 6210.34]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2034.46, 5882.24, 2069.81, 5917.6],
-      "stroke": [0.0, 1.0, 1.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "Foundation",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2069.81, 5917.6],
-            [2034.46, 5882.24]
           ]
         }
       ]
@@ -96365,40 +96247,6 @@
       ]
     },
     {
-      "bbox": [2015.46, 2348.18, 2130.61, 2348.18],
-      "stroke": [1.0, 0.498, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "GAS_INFRASTRUCTURE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2130.61, 2348.18],
-            [2015.46, 2348.18]
-          ]
-        }
-      ]
-    },
-    {
-      "bbox": [2130.61, 1830.43, 2130.61, 2348.18],
-      "stroke": [1.0, 0.498, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "GAS_INFRASTRUCTURE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2130.61, 2348.18],
-            [2130.61, 1830.43]
-          ]
-        }
-      ]
-    },
-    {
       "bbox": [2129.11, 1828.93, 2132.11, 1831.93],
       "stroke": [1.0, 0.498, 0.0],
       "fill": null,
@@ -96410,23 +96258,6 @@
           "op": "circle",
           "center": [2130.61, 1830.43],
           "radius": 1.5
-        }
-      ]
-    },
-    {
-      "bbox": [2044.84, 2293.16, 2044.84, 2348.18],
-      "stroke": [1.0, 0.498, 0.0],
-      "fill": null,
-      "width": null,
-      "closed": false,
-      "layer": "GAS_INFRASTRUCTURE",
-      "items": [
-        {
-          "op": "line",
-          "points": [
-            [2044.84, 2293.16],
-            [2044.84, 2348.18]
-          ]
         }
       ]
     },
