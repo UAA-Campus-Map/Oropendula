@@ -752,7 +752,79 @@
     @media (prefers-reduced-motion: reduce) {
       * { transition-duration: 0.01ms !important; }
     }
+    /* First-load interface tour */
+    #interface-tour {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      pointer-events: auto;
+    }
+    #interface-tour[hidden] { display: none !important; }
+    #tour-spotlight {
+      position: fixed;
+      pointer-events: none;
+      border: 2px solid #60a5fa;
+      border-radius: 10px;
+      box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.62);
+      transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease;
+    }
+    #tour-tip {
+      position: fixed;
+      width: min(300px, calc(100vw - 24px));
+      box-sizing: border-box;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: #ffffff;
+      color: #111827;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, .28);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #tour-count {
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    #tour-text {
+      margin: 0 0 14px;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    #tour-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    #tour-skip {
+      border: 0;
+      background: transparent;
+      color: #64748b;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 6px 0;
+    }
+    #tour-next {
+      border: 0;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #fff;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 9px 16px;
+      cursor: pointer;
+    }
+    #tour-next:focus-visible, #tour-skip:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, .35);
+      outline-offset: 2px;
+    }
   </style>
+
   <meta name="theme-color" content="#2563eb" />
 </head>
 
@@ -1128,6 +1200,19 @@
     </div>
   </div>
 
+  <!-- First-load guided interface tour -->
+  <div id="interface-tour" hidden>
+    <div id="tour-spotlight"></div>
+    <div id="tour-tip" role="dialog" aria-modal="true" aria-labelledby="tour-text">
+      <div id="tour-count"></div>
+      <p id="tour-text"></p>
+      <div id="tour-actions">
+        <button id="tour-skip" type="button">Skip</button>
+        <button id="tour-next" type="button">Next →</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Hide the splash once the app reports it is ready (or gives up), mirroring
     // the live status line so the loading screen says what is happening.
@@ -1283,6 +1368,13 @@
     const blockDoorModal = document.getElementById('block-door-modal');
     const blockDoorContext = document.getElementById('block-door-context');
     const blockDoorError = document.getElementById('block-door-error');
+    const interfaceTour = document.getElementById('interface-tour');
+    const tourSpotlight = document.getElementById('tour-spotlight');
+    const tourTip = document.getElementById('tour-tip');
+    const tourText = document.getElementById('tour-text');
+    const tourCount = document.getElementById('tour-count');
+    const tourNext = document.getElementById('tour-next');
+    const tourSkip = document.getElementById('tour-skip');
     const viewBtn = document.getElementById('view-btn');
     const followBtn = document.getElementById('follow-btn');
     const floorDown = document.getElementById('floor-down');
@@ -1588,7 +1680,113 @@
       calWizard.armed = false;
       calWizard.gpsWatching = false;
       try { sessionStorage.setItem('cal-modal-dismissed', '1'); } catch (e) { /* ignore */ }
+      // The first-load tour follows calibration, not the calibration modal.
+      setTimeout(maybeStartTour, 350);
     }
+
+    // --- first-load interface tour -----------------------------------------
+    const TOUR_KEY = 'interface-tour';
+    const TOUR_STEPS = [
+      {target: '.search-control', text: 'Search for a building or room.'},
+      {target: '.floor-control', text: 'Change the floor you’re viewing.'},
+      {target: '#view-btn', text: 'Switch between flat and 3D map.'},
+      {target: '#follow-btn', text: 'Keep the map centered on you.'},
+      {target: '#location-btn', text: 'Use GPS to find yourself.'},
+      {target: '#anchor-btn', text: 'Place your location manually.'},
+      {target: '#room-pin-btn', text: 'Place yourself outside a room.'},
+      {target: '#block-door-btn', text: 'Block a closed exit and reroute.'},
+      {target: '#menu-btn', text: 'Adjust your walking model.'},
+    ];
+    let tourIndex = 0;
+    let tourActive = false;
+
+    function tourTargetFor(step) {
+      const el = document.querySelector(step.target);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return null;
+      if (getComputedStyle(el).visibility === 'hidden') return null;
+      return {el, rect};
+    }
+
+    function positionTour() {
+      if (!tourActive) return;
+      const target = tourTargetFor(TOUR_STEPS[tourIndex]);
+      if (!target) return;
+      const pad = 6;
+      const r = target.rect;
+      tourSpotlight.style.left = `${r.left - pad}px`;
+      tourSpotlight.style.top = `${r.top - pad}px`;
+      tourSpotlight.style.width = `${r.width + pad * 2}px`;
+      tourSpotlight.style.height = `${r.height + pad * 2}px`;
+
+      const vw = window.innerWidth, vh = window.innerHeight, margin = 12;
+      const tw = tourTip.offsetWidth, th = tourTip.offsetHeight;
+      let left = r.left + r.width / 2 - tw / 2;
+      if (r.left > vw * 0.58) left = r.left - tw - 12;
+      else if (r.right < vw * 0.42) left = r.right + 12;
+      left = Math.max(margin, Math.min(vw - tw - margin, left));
+      let top = r.bottom + 12;
+      if (top + th > vh - margin) top = r.top - th - 12;
+      top = Math.max(margin, Math.min(vh - th - margin, top));
+      tourTip.style.left = `${left}px`;
+      tourTip.style.top = `${top}px`;
+    }
+
+    function hasNextTourStep() {
+      for (let i = tourIndex + 1; i < TOUR_STEPS.length; i++) {
+        if (tourTargetFor(TOUR_STEPS[i])) return true;
+      }
+      return false;
+    }
+
+    function renderTourStep() {
+      if (!tourActive) return;
+      while (tourIndex < TOUR_STEPS.length && !tourTargetFor(TOUR_STEPS[tourIndex])) tourIndex++;
+      if (tourIndex >= TOUR_STEPS.length) { finishTour(); return; }
+      const step = TOUR_STEPS[tourIndex];
+      const visible = TOUR_STEPS.filter((s) => tourTargetFor(s));
+      tourCount.textContent = `${visible.indexOf(step) + 1} of ${visible.length}`;
+      tourText.textContent = step.text;
+      tourNext.textContent = hasNextTourStep() ? 'Next →' : "Let's go";
+      interfaceTour.hidden = false;
+      tourTip.style.visibility = 'hidden';
+      positionTour();
+      tourTip.style.visibility = 'visible';
+      tourNext.focus({preventScroll: true});
+    }
+
+    function finishTour() {
+      if (!tourActive) return;
+      tourActive = false;
+      interfaceTour.hidden = true;
+      try { localStorage.setItem(TOUR_KEY, '1'); } catch (e) { /* ignore */ }
+    }
+
+    function maybeStartTour() {
+      if (tourActive) return;
+      try { if (localStorage.getItem(TOUR_KEY) === '1') return; } catch (e) { /* ignore */ }
+      if (!calModal.hidden) return;
+      for (const id of ['room-pin-modal', 'block-door-modal']) {
+        const el = document.getElementById(id);
+        if (el && !el.hidden) return;
+      }
+      tourIndex = 0;
+      tourActive = true;
+      renderTourStep();
+    }
+
+    tourNext.addEventListener('click', () => {
+      if (!tourActive) return;
+      if (!hasNextTourStep()) { finishTour(); return; }
+      tourIndex++;
+      renderTourStep();
+    });
+    tourSkip.addEventListener('click', finishTour);
+    window.addEventListener('resize', () => { if (tourActive) positionTour(); });
+    document.addEventListener('keydown', (e) => {
+      if (tourActive && e.key === 'Escape') finishTour();
+    });
 
     function showCalScreen(name) {
       calWizard.screen = name;
@@ -4989,6 +5187,7 @@
           `${s.outdoor.nodes} path nodes, ${s.buildMs}ms`;
         statusText.textContent = 'Ready';
         autoOpenCalibrationModal();
+        setTimeout(maybeStartTour, 900);
       } catch (err) {
         console.error('Failed to build navigation graph:', err);
         statusText.textContent = `Graph build failed: ${err?.message || err}`;

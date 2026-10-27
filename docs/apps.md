@@ -77,6 +77,15 @@ the next door or staircase on the current route for this session and re-plans
 from the same origin/destination. Blocked portals are passed to
 `campusRouter.route(..., {avoidPortals})`; no other route is affected.
 
+### First-load interface tour
+
+The first visit shows a short spotlight tour after the calibration modal closes
+(or after boot when calibration is already complete). It points at the search
+bar, floor control, 2D/3D, Follow, GPS, “I’m Here”, Room Pin, blocked-door, and
+calibration controls with 3–10 word descriptions. The final button says
+**“Let’s go”**. Completion or **Skip** stores `interface-tour` in
+`localStorage`, so the tour does not reappear.
+
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
