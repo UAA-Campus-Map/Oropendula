@@ -2295,6 +2295,24 @@ function runSteps(det, samples) {
   check('plain deviceorientation is ignored even if it claims absolute',
     last && last.absolute === true && Math.abs(wrapAngle(last.heading - absHeading)) < 1e-9);
 
+  // Epoch-based sensor timestamps (some Safari/WebView versions) must be
+  // replaced with performance.now(), or step/GPS calibration windows never
+  // overlap.
+  {
+    const epochListeners = {};
+    const epochWin = {
+      addEventListener: (type, fn) => { (epochListeners[type] ||= []).push(fn); },
+      removeEventListener: () => {},
+      performance: { now: () => 5000 },
+    };
+    let t = null;
+    const epochMotion = createMotion({ win: epochWin, onHeading: (h) => { t = h.t; } });
+    epochMotion.start();
+    (epochListeners.deviceorientationabsolute || []).forEach((fn) =>
+      fn({ type: 'deviceorientationabsolute', absolute: true, alpha: 0, timeStamp: Date.now() }));
+    check('epoch sensor timestamps fall back to performance.now()', t === 5000, String(t));
+  }
+
   // Only deviceorientationabsolute and (iOS) webkitCompassHeading are trusted
   // by default; the plain event is tagged relative.
   check('headingFromOrientation marks a plain event relative',

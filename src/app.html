@@ -1094,7 +1094,7 @@
             </div>
             <div id="cal-height-ftin" style="display:flex;align-items:center;gap:8px">
               <input id="cal-height-ft" class="cal-input" type="number" inputmode="numeric"
-                     min="3" max="7" step="1" value="5" />
+                     min="3" max="8" step="1" value="5" />
               <span>ft</span>
               <input id="cal-height-in" class="cal-input" type="number" inputmode="numeric"
                      min="0" max="11" step="1" value="9" />
@@ -1406,16 +1406,12 @@
     let ignorePortals = 'both';     // advanced-panel portal preference
     let destinationMarker = null;
     let destinationFloor = null;   // floor the destination lands on (null = outdoors)
-    let isDefiningPath = false;
-    let findPathMode = false;    // "Find Path" armed: show a black plan + numbers
     let is3D = false;            // starts in 2D; toggled by the view button
     // Building labels appear at/above this zoom; collision handling hides any
     // label that would squish into another. Adjust this single constant.
     const BUILDING_LABEL_MIN_ZOOM = 15.5;
     let followMode = false;      // camera follows the live position
     let followPaused = false;    // a manual gesture paused it; tap Follow to resume
-    let firstPathPoint = null;
-    let firstPathFloor = null;   // floor shown when the start was tapped
 
     // --- units ---------------------------------------------------------------
     // The UI shows Imperial measurements. All internal math stays metric
@@ -1438,10 +1434,7 @@
     // GPS, or a guided indoor walk between two known room doors.
     const calWizard = {
       method: null,        // 'height' | 'gps' | 'indoor'
-      screen: 'choose',
       heightUnit: 'ftin',  // Imperial is the default where both exist
-      startRoom: null,     // { building, floor, room } for the indoor walk
-      startDoor: null,     // [lon, lat] the walker stands beside
       target: null,        // { text, door, meters, route, floorId }
       armed: false,        // step counting on during the indoor walk
       steps: 0,
@@ -1766,6 +1759,10 @@
     document.getElementById('cal-height-unit').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-unit]');
       if (!b) return;
+      // Read the value in the CURRENT unit before switching, then write it in
+      // the new unit. Otherwise a ft/in edit is silently replaced by the stale
+      // hidden cm value.
+      const cm = currentHeightCm() || 175;
       calWizard.heightUnit = b.dataset.unit;
       calModal.querySelectorAll('#cal-height-unit button')
         .forEach((x) => x.classList.toggle('active', x === b));
@@ -1773,12 +1770,13 @@
       document.getElementById('cal-height-ftin').hidden = !ftin;
       document.getElementById('cal-height-value').hidden = ftin;
       if (ftin) {
-        const cm = parseFloat(document.getElementById('cal-height-value').value) || 175;
         // Round to whole inches first, then split, so the inches field can
         // never read "12" (e.g. 5 ft 12 in instead of 6 ft 0 in).
         const totalIn = Math.round(cm / 2.54);
         document.getElementById('cal-height-ft').value = String(Math.floor(totalIn / 12));
         document.getElementById('cal-height-in').value = String(totalIn % 12);
+      } else {
+        document.getElementById('cal-height-value').value = String(Math.round(cm));
       }
       updateHeightPreview();
     });
@@ -1921,7 +1919,6 @@
     });
 
     function showCalScreen(name) {
-      calWizard.screen = name;
       for (const s of calScreens) s.hidden = s.dataset.screen !== name;
       calLeadEl.hidden = name !== 'choose';
       const [frac, label] = CAL_PROGRESS[name] ?? [0, ''];
@@ -1966,8 +1963,6 @@
         showCalScreen('gps');
         if (gpsCal.stats().calibrated) showCalDone();
       } else if (method === 'indoor') {
-        calWizard.startRoom = null;
-        calWizard.startDoor = null;
         calWizard.target = null;
         calWizard.armed = false;
         calWizard.steps = 0;
@@ -2222,8 +2217,6 @@
         errEl.textContent = 'No nearby room on this floor — stand at another doorway and try again.';
         errEl.hidden = false; return;
       }
-      calWizard.startRoom = hit;
-      calWizard.startDoor = startDoor;
       calWizard.target = target;
       calWizard.armed = false;
       calWizard.steps = 0;
@@ -2332,6 +2325,9 @@
         return;
       }
       applyStride(base, 'indoors');
+      // The walker just stood at a known door: that is a real indoor fix, not
+      // only a step-length calibration.
+      seedFromCalibrationTarget();
       setCalProgress(1, 'Step 3 of 3 · Recorded');
       showCalDone(`Step length set to ${stepLenText(base)} (${distanceText(meters)} over ${steps} steps)`);
     }
@@ -2394,17 +2390,12 @@
       setTimeout(() => openCalModal(), 600);
     }
 
-    // --- transient notice (the #corridor-badge pill) ------------------------
-    // The badge doubles as the app's transient notice: it shows the corridor
-    // lock while active, or a short message that takes precedence until it
-    // expires.
+    // --- corridor-lock pill (#corridor-badge) -------------------------------
     const CORRIDOR_BADGE_TEXT = 'Heading locked to hallway';
     let corridorLocked = false;
-    let noticeText = null;
-    let noticeTimer = null;
     function renderCorridorBadge() {
       if (!corridorBadgeEl) return;
-      const text = noticeText ?? (corridorLocked ? CORRIDOR_BADGE_TEXT : null);
+      const text = corridorLocked ? CORRIDOR_BADGE_TEXT : null;
       corridorBadgeEl.hidden = text == null;
       if (text != null && corridorBadgeEl.textContent !== text) corridorBadgeEl.textContent = text;
     }
@@ -2412,12 +2403,7 @@
       corridorLocked = !!on;
       renderCorridorBadge();
     }
-    function showNotice(msg, ms = 2600) {
-      noticeText = msg;
-      renderCorridorBadge();
-      clearTimeout(noticeTimer);
-      noticeTimer = setTimeout(() => { noticeText = null; renderCorridorBadge(); }, ms);
-    }
+
 
     // --- compass snapping ---------------------------------------------------
     /**
@@ -2861,12 +2847,7 @@
       applyStructureStyle();
     }
 
-    /**
-     * Style the structure for the current floor and mode. In "Find Path" mode
-     * the selected floor's walls are drawn SOLID BLACK (opaque) with the floor
-     * plates hidden, so the room layout reads clearly while picking taps;
-     * afterwards everything returns to the translucent x-ray stack.
-     */
+    /** Style the translucent 3D structure for the current floor. */
     function applyStructureStyle() {
       const n = floorLevelOf(currentFloorId());
       for (const level of structureLevels) {
@@ -2874,30 +2855,20 @@
         if (!map.getLayer(id)) continue;
         map.setLayoutProperty(id, 'visibility', (is3D && level <= n) ? 'visible' : 'none');
         const sel = level === n;
-        if (findPathMode) {
-          // Walls only (plates hidden), selected level solid black, full
-          // height (the outline band is hidden in this mode).
-          map.setFilter(id, ['all', ['==', ['get', 'level'], level], ['==', ['get', 'kind'], 'wall']]);
-          map.setPaintProperty(id, 'fill-extrusion-base', ['get', 'base']);
-          map.setPaintProperty(id, 'fill-extrusion-color', sel ? '#000000' : '#2b3036');
-          map.setPaintProperty(id, 'fill-extrusion-opacity', sel ? 1 : STRUCTURE_OPACITY);
-        } else {
-          map.setFilter(id, ['==', ['get', 'level'], level]);
-          // The top level's translucent walls start ABOVE the opaque outline
-          // band (two stacked extrusions, no overlap).
-          map.setPaintProperty(id, 'fill-extrusion-base',
-            sel ? ['+', ['get', 'base'], TOP_OUTLINE_M] : ['get', 'base']);
-          map.setPaintProperty(id, 'fill-extrusion-color', structureColorFor(level));
-          map.setPaintProperty(id, 'fill-extrusion-opacity', STRUCTURE_OPACITY);
-        }
+        map.setFilter(id, ['==', ['get', 'level'], level]);
+        // The top level's translucent walls start ABOVE the opaque outline
+        // band (two stacked extrusions, no overlap).
+        map.setPaintProperty(id, 'fill-extrusion-base',
+          sel ? ['+', ['get', 'base'], TOP_OUTLINE_M] : ['get', 'base']);
+        map.setPaintProperty(id, 'fill-extrusion-color', structureColorFor(level));
+        map.setPaintProperty(id, 'fill-extrusion-opacity', STRUCTURE_OPACITY);
       }
       if (map.getLayer('campus-3d-top-outline')) {
-        // The black base band follows the selected level; hidden while picking
-        // a route (that mode draws the walls solid black already).
+        // The black base band follows the selected level.
         map.setFilter('campus-3d-top-outline', ['all',
           ['==', ['get', 'level'], n], ['==', ['get', 'kind'], 'wall']]);
         map.setLayoutProperty('campus-3d-top-outline', 'visibility',
-          (is3D && !findPathMode) ? 'visible' : 'none');
+          is3D ? 'visible' : 'none');
       }
       if (map.getLayer('campus-3d-route')) {
         map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
@@ -2931,7 +2902,9 @@
       if (s.tier === 'skybridge') {
         return s.floor === floorId || s.fromFloor === floorId || s.toFloor === floorId;
       }
-      if (s.tier === 'outdoor') return buildings.some((b) => b.groundFloor === floorId);
+      // Outdoor legs run on the campus ground plane (level 1), not on a
+      // building whose configured ground floor happens to be 03 (AS164).
+      if (s.tier === 'outdoor') return floorLevelOf(floorId) === 1;
       return false;
     }
 
@@ -3072,7 +3045,7 @@
       // to is the one displayed (outdoor destinations show on a ground floor).
       if (destinationMarker) {
         const onView = destinationFloor === null
-          ? buildings.some((b) => b.groundFloor === sel)
+          ? floorLevelOf(sel) === 1
           : destinationFloor === sel;
         destinationMarker.getElement().style.display = (is3D || !onView) ? 'none' : '';
       }
@@ -3429,14 +3402,11 @@
       const startFloor = (currentEstimate && locator) ? locator.floor.floorId : currentFloorId();
       const route = planRoute(startLL, room.ll,
         {startFloor, endFloor: room.floorId});
-      searchDest = dest;
+      searchDest = route ? dest : null;
       // The room becomes the destination: marker + 3D pin on its floor.
       destinationFloor = room.floorId;
       if (destinationMarker) destinationMarker.setLngLat(room.ll);
       else destinationMarker = new maplibregl.Marker().setLngLat(room.ll).addTo(map);
-      // A search supersedes any path tap-picking.
-      isDefiningPath = false;
-      findPathMode = false;
       const level = floorLevels.indexOf(room.floorId) + 1;
       if (level > 0) setFloor(level);
       showRoute(route);
@@ -3445,9 +3415,9 @@
     }
 
     // --- suggestions dropdown ---------------------------------------------
-    /** "SU Subway" for a room, "Floor 2" for a point. */
+    /** "SU Subway" for a room, "Floor 2"/"Basement 1" for a point. */
     function placeSubtitle(place) {
-      if (place.ll) return `Floor ${floorLevelOf(place.floor)}`;
+      if (place.ll) return floorLabelOf(place.floor);
       return `${place.building} ${place.room}`;
     }
 
@@ -3591,55 +3561,17 @@
       updateFavUI();
     }
 
-    // Map click handler
+    // Map click handler: the only map-tap action is placing "I'm Here".
     map.on('click', (e) => {
-      const coords = e.lngLat;
-      const coordArray = [coords.lng, coords.lat];
-
-      if (placingAnchor) {
-        placingAnchor = false;
-        anchorBtn.classList.remove('active');
-        anchorAt(coordArray);
-        return;
-      }
-
-      if (isDefiningPath && campusRouter) {
-        if (firstPathPoint === null) {
-          firstPathPoint = coordArray;
-          // Freeze the floor for the start here: the user may switch floors
-          // before tapping the destination (e.g. start on 01, end on 02).
-          firstPathFloor = floorOfView();
-          statusText.textContent = 'Tap the destination point';
-        } else {
-          statusText.textContent = 'Calculating route...';
-          // Each tap is read on the floor that was displayed when it was made,
-          // so a single route can start and end on different floors.
-          const endFloor = floorOfView();
-          const route = planRoute(firstPathPoint, coordArray,
-            {startFloor: firstPathFloor, endFloor});
-          // Mark the destination on the floor it actually lands on (null when
-          // outdoors), before rendering so the 3D pin is placed correctly.
-          const destHit = campusRouter.buildingAt(coordArray, endFloor);
-          destinationFloor = destHit ? destHit.floor.floorId : null;
-          searchDest = null;
-          if (destinationMarker) destinationMarker.setLngLat(coords);
-          else destinationMarker = new maplibregl.Marker().setLngLat(coords).addTo(map);
-          showRoute(route);
-          firstPathPoint = null;
-          firstPathFloor = null;
-          isDefiningPath = false;
-          findPathMode = false;      // route computed: black plan + numbers go away
-          applyFloorFilter(currentFloorId());
-        }
-      }
-      // A plain tap does nothing - it used to silently move a destination
-      // marker, which was confusing.
+      if (!placingAnchor) return;
+      placingAnchor = false;
+      anchorBtn.classList.remove('active');
+      anchorAt([e.lngLat.lng, e.lngLat.lat]);
     });
 
     // Live location
     let livePosMarker = null;
     let headingIndicator = null;
-    let lastAccuracyMeters = 0;
     let geoWatchId = null;
     let lastCalFixStamp = null;   // de-dupe cached fixes for the auto-calibrator
     let didAutoCenter = false;   // fly to the first fix after "My Location"
@@ -3703,8 +3635,15 @@
       if (savedMode === 'relative') savedHeadingMode = 'relative';
       const savedTrim = parseFloat(localStorage.getItem('pdr-heading-trim'));
       if (Number.isFinite(savedTrim)) headingTrimDeg = Math.max(-45, Math.min(45, savedTrim));
-      storedAutoCal = JSON.parse(localStorage.getItem('pdr-step-auto') || 'null');
-      if (!(storedAutoCal && storedAutoCal.confidencePct >= 90)) storedAutoCal = null;
+      const cachedAutoCal = JSON.parse(localStorage.getItem('pdr-step-auto') || 'null');
+      // A partial/old object must not reach updateAutocalUI().toFixed() during
+      // boot; only a complete, certified record is usable.
+      storedAutoCal = cachedAutoCal
+        && Number.isFinite(cachedAutoCal.baseM) && cachedAutoCal.baseM > 0
+        && Number.isFinite(cachedAutoCal.ci90RelPct) && cachedAutoCal.ci90RelPct > 0
+        && Number.isFinite(cachedAutoCal.confidencePct)
+        && cachedAutoCal.confidencePct >= 90
+        ? cachedAutoCal : null;
       manualCalApplied = localStorage.getItem('pdr-step-manual') === '1'
         || (savedBase > 0 && !storedAutoCal);
       anchorCalOn = localStorage.getItem('pdr-anchor-cal') === '1';
@@ -3905,7 +3844,7 @@
     // both GPS and PDR updates (PDR used to leave the line stale indoors) and
     // passes the locator's bound floor as the start-floor hint. Throttled:
     // one route costs ~70 ms, so recompute only after REROUTE_MIN_M metres or
-    // REROUTE_MIN_S seconds. Skipped while "Find Path" taps are being picked.
+    // REROUTE_MIN_S seconds.
     const REROUTE_MIN_M = 3;
     const REROUTE_MIN_S = 5;
     let lastReroute = null;   // {ll, t}
@@ -3919,7 +3858,7 @@
     function rerouteFromEstimate() {
       if (!campusRouter || !destinationMarker || !lastRoute) return;
       if (!positionSeeded || calWizard.armed) return;   // no hijacking an unseeded/calibrating route
-      if (!currentEstimate || isDefiningPath) return;
+      if (!currentEstimate) return;
       const ll = [currentEstimate.lon, currentEstimate.lat];
       const now = performance.now();
       if (lastReroute) {
@@ -3934,15 +3873,26 @@
       const run = () => {
         reroutePending = false;
         if (!campusRouter || !destinationMarker || !lastRoute
-            || !currentEstimate || isDefiningPath) return;
+            || !currentEstimate) return;
         const from = [currentEstimate.lon, currentEstimate.lat];
         const dest = destinationMarker.getLngLat();
         const startFloor = locator?.floor?.floorId ?? currentFloorId();
         const route = planRoute(from, [dest.lng, dest.lat],
           { startFloor, endFloor: destinationFloor });
         if (route) {
-          lastRoute = route;
+          lastRoute = applyPersonalWalkTime(route);
           renderRoute();
+          const meta = document.getElementById('route-meta');
+          if (meta) {
+            const mins = Math.floor(lastRoute.totalSeconds / 60);
+            const secs = Math.round(lastRoute.totalSeconds % 60);
+            const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            meta.textContent = `${distanceText(lastRoute.totalMeters)} · ${time} walk`;
+          }
+        } else if (lastRoute) {
+          // Do not leave a stale line pointing down a route that no longer
+          // exists from the walker's new position.
+          showRoute(null);
         }
       };
       if (typeof window.requestIdleCallback === 'function') {
@@ -4026,7 +3976,6 @@
       followCenter = ll;
       if (followActive() && !followFraming) startFollowLoop();
       if (livePosMarker) livePosMarker.setLngLat(ll);
-      lastAccuracyMeters = est.accuracyM;
       updateParticles();
       updateHeadingLine();   // keep the 4 m heading line attached to the marker
       // 3D: the same estimate as a blocky avatar extrusion on the selected
@@ -4287,7 +4236,6 @@
       if (livePosMarker) {
         livePosMarker.setLngLat([longitude, latitude]);
       }
-      lastAccuracyMeters = accuracy;
 
       // No compass (desktop, denied motion permission): use the GPS course of
       // travel while moving and hold the last bearing when stopped. A real
@@ -4596,8 +4544,7 @@
       el.addEventListener('mouseleave', onUp);
     }
 
-    // One entry per building; floors listed underneath (all buildings are
-    // single-floor today - more floors can be added without other changes).
+    // One entry per building; floors are listed underneath.
     // Protomaps (OpenStreetMap) archive the basemap style points at; osm.mjs
     // reads its `roads` layer for walkway geometry around the buildings.
     const OSM_ARCHIVE_URL = 'https://uaa-campus-map.net/scak.pmtiles';
@@ -4738,7 +4685,7 @@
 
     // --- off-main-thread navGraph builds ------------------------------------
     // `buildGraphState` is ~0.1-1.2 s per floor on desktop (3-4x on mobile),
-    // and the old boot ran it synchronously for all ~18 floors, freezing the UI
+    // and the old boot ran it synchronously for every floor, freezing the UI
     // in ~1 s chunks for ~7 s (desktop). A single worker moves that work off the
     // main thread; the thread only runs the cheap `graphFromState`. Any worker
     // failure (unsupported, not deployed, crash, or hang) falls back to a
@@ -5111,27 +5058,24 @@
     // Last applied floor/mode. A floor change only needs to touch the layers
     // that actually change; re-setting layout/paint on every floor's layers
     // (and rebuilding the hidden 3D avatar) on every tap was the delay.
-    let floorFilterState = { floorId: null, is3D: null, findPathMode: null };
+    let floorFilterState = { floorId: null, is3D: null };
     function applyFloorFilter(floorId) {
       if (!floorId) return;
       // Create the selected floor's plan layers on first display (a no-op once
       // added).
       for (const b of buildings) {
         for (const f of b.floors) {
-          if (f.floorId === floorId && (!is3D || findPathMode)) ensureFloorLayers(f);
+          if (f.floorId === floorId && !is3D) ensureFloorLayers(f);
         }
       }
       if (floorFilterState.floorId === floorId
-          && floorFilterState.is3D === is3D
-          && floorFilterState.findPathMode === findPathMode) {
+          && floorFilterState.is3D === is3D) {
         return;   // nothing changed - do not churn the style
       }
-      floorFilterState = { floorId, is3D, findPathMode };
-      // 2D: show the selected floor's flat walls + labels + connector dots
-      // (the original plan view). 3D: those are hidden; the extruded structure
-      // carries the geometry, and room labels appear only while picking a
-      // route (they cannot be elevated in this build). Only the selected
-      // floor's layers are ever visible.
+      floorFilterState = { floorId, is3D };
+      // 2D: show the selected floor's flat walls + labels + connector dots.
+      // 3D: those are hidden; the extruded structure carries the geometry.
+      // Only the selected floor's layers are ever visible.
       for (const b of buildings) {
         for (const f of b.floors) {
           if (!f._layersAdded) continue;
@@ -5139,11 +5083,9 @@
           const wallsVisible = !is3D && selected;
           map.setLayoutProperty(f.wallLayerId, 'visibility', wallsVisible ? 'visible' : 'none');
           if (map.getLayer(f.roomLayerId)) {
-            const labelsVisible = is3D ? (findPathMode && selected) : selected;
-            map.setLayoutProperty(f.roomLayerId, 'visibility', labelsVisible ? 'visible' : 'none');
-            const hot = is3D && findPathMode;
-            map.setPaintProperty(f.roomLayerId, 'text-color', hot ? '#ffe14a' : '#2c3e50');
-            map.setPaintProperty(f.roomLayerId, 'text-halo-color', hot ? '#000000' : '#ffffff');
+            map.setLayoutProperty(f.roomLayerId, 'visibility', selected && !is3D ? 'visible' : 'none');
+            map.setPaintProperty(f.roomLayerId, 'text-color', '#2c3e50');
+            map.setPaintProperty(f.roomLayerId, 'text-halo-color', '#ffffff');
           }
         }
       }

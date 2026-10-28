@@ -16,15 +16,15 @@ Pause after each phase so the changes can be committed.
 
 ## Phase 2 — App and calibration
 
-- [ ] Seed the live position after indoor calibration.
-- [ ] Use one timestamp clock for steps, GPS fixes, and anchors.
-- [ ] Validate stored auto-calibration before painting it.
-- [ ] Fix ft/in ↔ cm conversion.
-- [ ] Show outdoor routes on campus level 1 only (AS164 floor 03).
-- [ ] Clear stale routes on failed live reroute; keep favorites in sync.
-- [ ] Fix places regressions: basement “Floor 0”, failed-search favorite row, floor-level semantics.
-- [ ] Remove dead tap-to-route/path-mode code and stale comments.
-- [ ] Verify app behavior and targeted smoke groups.
+- [x] Seed the live position after indoor calibration.
+- [x] Use one timestamp clock for steps, GPS fixes, and anchors.
+- [x] Validate stored auto-calibration before painting it.
+- [x] Fix ft/in ↔ cm conversion.
+- [x] Show outdoor routes on campus level 1 only (AS164 floor 03).
+- [x] Clear stale routes on failed live reroute; keep favorites in sync.
+- [x] Fix places regressions: basement “Floor 0”, failed-search favorite row, floor-level semantics.
+- [x] Remove dead tap-to-route/path-mode code and stale comments.
+- [x] Verify app syntax and targeted smoke groups.
 
 ## Phase 3 — Data freshness
 

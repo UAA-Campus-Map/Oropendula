@@ -451,8 +451,20 @@ export function createMotion(opts = {}) {
   // is unreliable. The two are never mixed.
   let headingMode = initialHeadingMode;
 
-  const now = (e) => (e && typeof e.timeStamp === 'number') ? e.timeStamp
-    : (win.performance ? win.performance.now() : Date.now());
+  // Sensor timestamps must share the clock the app uses for GPS fixes and
+  // anchors (performance.now). Chrome's event.timeStamp does; some Safari /
+  // WebView versions report epoch milliseconds instead, which cannot be
+  // compared with performance.now().
+  const perfNow = () => (win.performance ? win.performance.now() : Date.now());
+  const now = (e) => {
+    const perf = perfNow();
+    const ts = e?.timeStamp;
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) return perf;
+    // Epoch seconds/milliseconds are far ahead of the page's performance clock.
+    if (ts > perf + 1e6) return perf;
+    return ts;
+
+  };
 
   function handleMotion(e) {
     const a = e.accelerationIncludingGravity || e.acceleration;
