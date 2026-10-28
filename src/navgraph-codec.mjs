@@ -81,9 +81,10 @@ function stateScale(state) {
  * Encode one `buildGraphState()` result into a floor block.
  *
  * @param {object} state
+ * @param {{sourceHash?: string}} [opts]
  * @returns {{block: Uint8Array, meta: object}}
  */
-export function encodeFloorBlock(state) {
+export function encodeFloorBlock(state, { sourceHash = null } = {}) {
   assertLittleEndian();
   if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.adj)) {
     throw new Error('navgraph-codec: state must contain nodes[] and adj[]');
@@ -189,10 +190,14 @@ export function encodeFloorBlock(state) {
 
   const origin = stateOrigin(state);
   const scale = stateScale(state);
+  if (sourceHash != null && typeof sourceHash !== 'string') {
+    throw new Error('navgraph-codec: sourceHash must be a string');
+  }
   const meta = {
     nodes: n,
     edges: edgeCount,
     runs,
+    ...(sourceHash != null ? { sourceHash } : {}),
     origin: [origin.lon, origin.lat],
     scale: [scale.lon, scale.lat],
     OX: state.OX,
@@ -338,6 +343,9 @@ export function decodeFloor(meta, block) {
   if (!Number.isFinite(meta?.OX) || !Number.isFinite(meta?.OY)) {
     throw new Error('navgraph-codec: invalid raster origin');
   }
+  if (meta?.sourceHash != null && typeof meta.sourceHash !== 'string') {
+    throw new Error('navgraph-codec: invalid sourceHash');
+  }
   const nodesBytes = n * 16;
   const offsetsBytes = (n + 1) * 4;
   const neighboursBytes = edgeCount * 4;
@@ -386,6 +394,7 @@ export function decodeFloor(meta, block) {
   const scale = { lon: meta.scale[0], lat: meta.scale[1] };
   return {
     floorId: meta.floorId,
+    sourceHash: meta.sourceHash ?? null,
     origin,
     scale,
     OX: meta.OX,

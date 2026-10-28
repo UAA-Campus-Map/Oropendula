@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { buildGraphState } from './navgraph.mjs';
 import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
 import { gzipBytes } from './navgraph-codec-io.mjs';
-import { navGraphInputs } from './navgraph-source.mjs';
+import { navGraphInputs, graphInputHash, graphFingerprint, linesBBox } from './navgraph-source.mjs';
 import { makeToLL } from './geo.mjs';
 
 const args = process.argv.slice(2);
@@ -41,14 +41,18 @@ for (const building of CONFIG) {
       const toLL = makeToLL(building, floor);
       const { lines, doors } = navGraphInputs(building, floor, data, toLL);
       process.stderr.write(`  ${building.id} ${floor.floorId}...\n`);
+      const sourceHash = graphInputHash({ lines, doors });
       const state = buildGraphState(lines, doors, { passages: false });
-      const { block, meta } = encodeFloorBlock(state);
-      floors.push({ floorId: floor.floorId, state, block, meta });
+      const { block, meta } = encodeFloorBlock(state, { sourceHash });
+      floor.graphHash = sourceHash;
+      floor.wallBBox = linesBBox(lines);
+      floors.push({ floorId: floor.floorId, state, block, meta, hash: sourceHash });
       totalNodes += meta.nodes;
       totalEdges += meta.edges;
     }
     const bytes = encodeBundleFromBlocks({ buildingId: building.id, floors });
     const gz = await gzipBytes(bytes);
+    building.graphFingerprint = graphFingerprint(floors);
     totalRaw += bytes.length;
     totalGz += gz.length;
     totalFloors += floors.length;

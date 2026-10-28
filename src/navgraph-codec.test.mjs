@@ -91,8 +91,10 @@ function compareRoutes(source, decoded, points) {
 
 test('synthetic floor block round-trip', () => {
   const state = syntheticState();
-  const { block, meta } = encodeFloorBlock(state);
+  const { block, meta } = encodeFloorBlock(state, { sourceHash: 'abc123' });
+  assert.equal(meta.sourceHash, 'abc123');
   const decoded = decodeFloor({ ...meta, floorId: '01' }, block);
+  assert.equal(decoded.sourceHash, 'abc123');
   compareState(state, decoded);
 });
 

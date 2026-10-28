@@ -212,7 +212,7 @@
     import { buildGraphState } from './navgraph.mjs';
     import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
     import { gzipBytes } from './navgraph-codec-io.mjs';
-    import { navGraphInputs } from './navgraph-source.mjs';
+    import { navGraphInputs, graphInputHash, graphFingerprint, linesBBox } from './navgraph-source.mjs';
     import { makeZip } from './zip.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { hullSamples, bestFitTranslation } from './align.mjs';
@@ -337,13 +337,18 @@
             bump(q[0], q[1]);
           }
           if (includeWalls) {
-            const data = floorData.get(floorKey(b, f));
-            if (data) {
-              const bb = floorBBox(data);
-              if (bb) {
-                for (const [x, y] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
-                  const ll = toLL(x, y);
-                  bump(ll[0], ll[1]);
+            if (Array.isArray(f.wallBBox) && f.wallBBox.length === 4) {
+              bump(f.wallBBox[0], f.wallBBox[1]);
+              bump(f.wallBBox[2], f.wallBBox[3]);
+            } else {
+              const data = floorData.get(floorKey(b, f));
+              if (data) {
+                const bb = floorBBox(data);
+                if (bb) {
+                  for (const [x, y] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
+                    const ll = toLL(x, y);
+                    bump(ll[0], ll[1]);
+                  }
                 }
               }
             }
@@ -1191,7 +1196,13 @@
     // --- persistence -------------------------------------------------------
     /** A bundle is stale as soon as its geometry or placement changes. */
     function invalidateGraph(b) {
-      if (b && b.graphUrl) delete b.graphUrl;
+      if (!b) return;
+      delete b.graphUrl;
+      delete b.graphFingerprint;
+      for (const f of b.floors ?? []) {
+        delete f.graphHash;
+        delete f.wallBBox;
+      }
     }
 
     function persist() {
@@ -1295,7 +1306,10 @@
         entry.url = url;
         entry.showRoomLabels = true;
         delete entry.portals;         // fresh JSON: recompute the portal cache
-        delete b.graphUrl;            // the floor geometry changed
+        delete entry.graphHash;       // the floor geometry changed
+        delete entry.wallBBox;
+        delete b.graphUrl;
+        delete b.graphFingerprint;
         b.groundFloor = b.groundFloor ?? floorId;
         if (!existing) b.floors.push(entry);
         floorData.set(floorKey(b, entry), data);
@@ -1479,7 +1493,7 @@
     }
 
     /** Ask the bundle worker for one encoded floor block. */
-    function requestGraphBlock(worker, floorId, walls, doors) {
+    function requestGraphBlock(worker, floorId, walls, doors, sourceHash) {
       return new Promise((resolve, reject) => {
         const id = ++graphSeq;
         const timer = setTimeout(() => {
@@ -1504,7 +1518,7 @@
         };
         worker.addEventListener('message', onMessage);
         worker.addEventListener('error', onError, { once: true });
-        worker.postMessage({ id, floorId, walls, doors });
+        worker.postMessage({ id, floorId, walls, doors, sourceHash });
       });
     }
 
@@ -1521,11 +1535,14 @@
           if (!data) throw new Error(`could not load floor JSON for ${b.id} ${f.floorId}`);
           const toLL = makeToLL(b, f);
           const { lines, doors } = navGraphInputs(b, f, data, toLL);
+          const sourceHash = graphInputHash({ lines, doors });
+          f.graphHash = sourceHash;
+          f.wallBBox = linesBBox(lines);
 
           let encoded = null;
           if (worker) {
             try {
-              encoded = await requestGraphBlock(worker, f.floorId, lines, doors);
+              encoded = await requestGraphBlock(worker, f.floorId, lines, doors, sourceHash);
             } catch (err) {
               console.warn('bundle worker failed; building synchronously:', err);
               worker.terminate();
@@ -1536,7 +1553,7 @@
             // Yield first so the status line can paint before a synchronous build.
             await new Promise((r) => setTimeout(r));
             const state = buildGraphState(lines, doors, { passages: false });
-            const { block, meta } = encodeFloorBlock(state);
+            const { block, meta } = encodeFloorBlock(state, { sourceHash });
             encoded = { floorId: f.floorId, meta, block };
           }
           blocks.push(encoded);
@@ -1547,6 +1564,7 @@
 
       const raw = encodeBundleFromBlocks({ buildingId: b.id, floors: blocks });
       const gz = await gzipBytes(raw);
+      b.graphFingerprint = graphFingerprint(b.floors.map((f) => ({ floorId: f.floorId, hash: f.graphHash })));
       return { filename: graphFileName(b), raw, gz, floors: blocks.length };
     }
 
@@ -1580,6 +1598,7 @@
       // caches first so a cache-only difference is not reported as a changed
       // building (and so the full config in the ZIP is complete).
       await ensureAllPortals();
+      await refreshGraphFingerprints();
       const deployed = await fetchDeployedConfig();
       if (!deployed) {
         diffState = null;
@@ -1616,6 +1635,28 @@
       } finally {
         setDiffBusy(false);
       }
+    }
+
+    /** Recompute each building's graph fingerprint from the local floor data. */
+    async function refreshGraphFingerprints() {
+      for (const b of config) {
+        const hashes = [];
+        let ok = true;
+        for (const f of b.floors ?? []) {
+          if (!f.url) { ok = false; break; }
+          const data = await loadFloorData(b, f);
+          if (!data) { ok = false; break; }
+          const toLL = makeToLL(b, f);
+          const { lines, doors } = navGraphInputs(b, f, data, toLL);
+          const hash = graphInputHash({ lines, doors });
+          f.graphHash = hash;
+          f.wallBBox = linesBBox(lines);
+          hashes.push({ floorId: f.floorId, hash });
+        }
+        if (ok && hashes.length) b.graphFingerprint = graphFingerprint(hashes);
+        else delete b.graphFingerprint;
+      }
+      persist();
     }
 
     async function ensureAllPortals() {

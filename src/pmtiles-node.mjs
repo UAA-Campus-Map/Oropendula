@@ -4,9 +4,10 @@
  * the v3 spec (the same code the pmtiles library runs). Browser code uses the
  * pmtiles UMD bundle instead; see osm.mjs.
  */
-import {gunzipSync} from 'node:zlib';
+import {gunzipSync, brotliDecompressSync, zstdDecompressSync} from 'node:zlib';
 
 function rangeFetch(url, start, end) {
+  if (!(end > start)) throw new Error(`PMTiles: invalid byte range [${start},${end})`);
   return fetch(url, {
     headers: {Range: `bytes=${start}-${end - 1}`},
   }).then(r => {
@@ -18,12 +19,26 @@ function rangeFetch(url, start, end) {
 function readVarint(buf, state) {
   let result = 0, shift = 0;
   for (;;) {
+    if (state.pos >= buf.length || shift > 49) {
+      throw new Error('PMTiles: truncated or oversized varint');
+    }
     const b = buf[state.pos++];
     result += (b & 0x7f) * 2 ** shift;
-    if (!(b & 0x80)) break;
+    if (!(b & 0x80)) return result;
     shift += 7;
   }
-  return result;
+}
+
+/** PMTiles v3 compression enum: 1 none, 2 gzip, 3 brotli, 4 zstd. */
+function decompress(raw, kind) {
+  const bytes = Buffer.from(raw);
+  switch (kind) {
+    case 1: return raw;
+    case 2: return gunzipSync(bytes);
+    case 3: return brotliDecompressSync(bytes);
+    case 4: return zstdDecompressSync(bytes);
+    default: throw new Error(`PMTiles: unsupported compression ${kind}`);
+  }
 }
 
 function rotate(a, x, y, rx, ry) {
@@ -91,6 +106,7 @@ function findTile(entries, tileId) {
  */
 export async function pmtilesGetZxy(url, z, x, y) {
   const headerBytes = await rangeFetch(url, 0, 16384);
+  if (headerBytes.byteLength < 127) throw new Error('PMTiles: truncated header');
   const hv = new DataView(headerBytes);
   const u64 = (off) => hv.getUint32(off + 4, true) * 2 ** 32 + hv.getUint32(off, true);
   const header = {
@@ -108,8 +124,7 @@ export async function pmtilesGetZxy(url, z, x, y) {
 
   const getDir = async (offset, length) => {
     const raw = new Uint8Array(await rangeFetch(url, offset, offset + length));
-    const bytes = header.internalCompression === 2 ? gunzipSync(raw) : raw;
-    return deserializeDirectory(bytes);
+    return deserializeDirectory(decompress(raw, header.internalCompression));
   };
 
   // root dir first, then leaf directories (deep zooms live in leaves):
@@ -121,10 +136,9 @@ export async function pmtilesGetZxy(url, z, x, y) {
     const entry = findTile(entries, tileId);
     if (!entry) return null;
     if (entry.runLength > 0) {
-      const raw = await rangeFetch(
-        url, header.tileDataOffset + entry.offset, header.tileDataOffset + entry.offset + entry.length);
-      if (header.tileCompression !== 2) return raw;
-      return new Uint8Array(gunzipSync(new Uint8Array(raw))).buffer;
+      const raw = new Uint8Array(await rangeFetch(
+        url, header.tileDataOffset + entry.offset, header.tileDataOffset + entry.offset + entry.length));
+      return new Uint8Array(decompress(raw, header.tileCompression)).buffer;
     }
     offset = header.leafDirectoryOffset + entry.offset;
     length = entry.length;

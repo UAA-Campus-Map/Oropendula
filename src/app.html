@@ -1364,7 +1364,7 @@
     import { gunzipBytes } from './navgraph-codec-io.mjs';
     import { makeBundleGraph } from './navgraph-bundle-runtime.mjs';
     import { extractPortals, portalsFromCache, buildCampusRouter } from './campus.mjs';
-    import { navGraphInputs } from './navgraph-source.mjs';
+    import { navGraphInputs, graphInputHash } from './navgraph-source.mjs';
     import { doorwaysFromShapes } from './doorways.mjs';
     import { floorRank, floorLabelOf, floorLevelOf } from './floors.mjs';
     import { loadOsmShapes } from './osm.mjs';
@@ -4625,6 +4625,11 @@
           for (const q of [...p.elevators.map((e) => e.ll), ...p.stairs.map((e) => e.ll), ...exits]) {
             bump(q);
           }
+          // Wall extents cover buildings with sparse portal caches.
+          if (Array.isArray(f.wallBBox) && f.wallBBox.length === 4) {
+            const [x0, y0, x1, y1] = f.wallBBox;
+            bump([x0, y0]); bump([x1, y1]);
+          }
         }
       }
       if (!isFinite(minLon)) return null;
@@ -4762,7 +4767,12 @@
       // leaf line; its midpoint is the doorway. A room search targets the
       // room's DOOR, not its number label, so the route stops at the opening.
       // Cached bundles already contain the graph; only the fallback builds it.
-      const navGraph = bundleFloor
+      const sourceHash = graphInputHash({ lines, doors: doorPoints });
+      const bundleOk = !!bundleFloor && bundleFloor.sourceHash === sourceHash;
+      if (bundleFloor && !bundleOk) {
+        console.warn(`navGraph bundle for ${buildingConfig.id} ${floor.floorId} does not match the floor JSON; rebuilding`);
+      }
+      const navGraph = bundleOk
         ? makeBundleGraph(bundleFloor, { lines, doorPoints })
         : await buildGraphAsync(wallFeatureCollection, doorPoints);
       // Portals (elevators/stairs) and doors are expensive to extract (doorway
@@ -4790,6 +4800,7 @@
       }));
       return {
         floorId: floor.floorId,
+        fromBundle: bundleOk,
         // Map-layer inputs. The plan's map layers are created the first time
         // the floor is displayed (ensureFloorLayers), so loading stays eager
         // but unselected floors are never added to the map, let alone shown.
@@ -5154,7 +5165,7 @@
               const cachedFloor = bundleFloors?.get(floor.floorId) ?? null;
               if (cachedFloor) bundleFloors.delete(floor.floorId);
               const loaded = await loadFloor(config, floor, data, cachedFloor);
-              if (cachedFloor) cachedFloors++; else fallbackFloors++;
+              if (loaded.fromBundle) cachedFloors++; else fallbackFloors++;
               building.sourceId ??= loaded.sourceId;
               building.sourceName ??= loaded.sourceName;
               building.floors.push(loaded);

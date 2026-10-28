@@ -13,10 +13,10 @@ import { buildGraphState } from './navgraph.mjs';
 import { encodeFloorBlock } from './navgraph-codec.mjs';
 
 self.onmessage = (e) => {
-  const { id, floorId, walls, doors } = e.data || {};
+  const { id, floorId, walls, doors, sourceHash } = e.data || {};
   try {
     const state = buildGraphState(walls, doors, { passages: false });
-    const { block, meta } = encodeFloorBlock(state);
+    const { block, meta } = encodeFloorBlock(state, { sourceHash });
     const buffer = block.byteOffset === 0 && block.byteLength === block.buffer.byteLength
       ? block.buffer
       : block.slice().buffer;

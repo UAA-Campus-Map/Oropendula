@@ -17,7 +17,7 @@ import { availableParallelism } from 'node:os';
 import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
 import { navGraphInputs } from './navgraph-source.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache, isWallLayer, isDoorLayer } from './campus.mjs';
-import { loadOsmShapes } from './osm.mjs';
+import { loadOsmShapes, tilesToShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
 import { convexHull, hullSamples, bestFitRigid, bestFitTranslation, meanPoint } from './align.mjs';
 
@@ -1480,7 +1480,12 @@ console.log('\nOSM paths cache:');
     // The cached shapes must build the same outdoor graph as a live decode.
     const graph = buildOutdoorGraph(cache.shapes, 61.19,
       buildings.flatMap(b => b.floors[0]?.obstacleLines ?? []));
-    check('cached shapes build an outdoor graph', !!graph && graph.nodeCount > 0,
+    // A malformed tile is skipped, not fatal for the whole cache/load.
+  const bad = tilesToShapes([{ z: 15, x: 0, y: 0, data: new Uint8Array([0xff, 0xff, 0x01]) }]);
+  check('a malformed MVT tile is skipped', bad.stats.badTiles === 1 && bad.shapes.length === 0,
+    JSON.stringify(bad.stats));
+
+  check('cached shapes build an outdoor graph', !!graph && graph.nodeCount > 0,
       `${graph?.nodeCount} nodes`);
   }
 }

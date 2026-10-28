@@ -28,12 +28,12 @@ Pause after each phase so the changes can be committed.
 
 ## Phase 3 — Data freshness
 
-- [ ] Add a graph-input hash to bundle metadata; fall back on mismatch.
-- [ ] Compare the same hash in the deploy diff and include regenerated bundles.
-- [ ] Include wall extents in the app/`gen-osm` bbox.
-- [ ] Harden PMTiles/MVT decoding (compression, bounds checks, malformed tiles).
-- [ ] Regenerate all bundles, config, and `osm-paths.json` as needed.
-- [ ] Verify bundle/deploy/OSM tests.
+- [x] Add a graph-input hash to bundle metadata; fall back on mismatch.
+- [x] Compare the same hash in the deploy diff and include regenerated bundles.
+- [x] Include wall extents in the app/`gen-osm` bbox.
+- [x] Harden PMTiles/MVT decoding (compression, bounds checks, malformed tiles).
+- [x] Regenerate all bundles, config, and `osm-paths.json` as needed.
+- [x] Verify bundle/deploy/OSM tests.
 
 ## Phase 4 — Tests and docs
 

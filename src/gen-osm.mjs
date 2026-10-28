@@ -33,6 +33,15 @@ function outdoorBBox(buildings, padM) {
         if (lat < minLat) minLat = lat;
         if (lat > maxLat) maxLat = lat;
       }
+      const bb = f.wallBBox;
+      if (Array.isArray(bb) && bb.length === 4) {
+        for (const [lon, lat] of [[bb[0], bb[1]], [bb[2], bb[3]]]) {
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+      }
     }
   }
   const m = metresPerDegree((minLat + maxLat) / 2);
@@ -51,7 +60,8 @@ const buildings = CONFIG.map(cfg => ({
     const exits = f.exits?.length
       ? f.exits.map((e, i) => ({id: e.id ?? `exits-${i}`, ll: toLL(e.dxf[0], e.dxf[1])}))
       : p.exits;
-    return {floorId: f.floorId, elevators: p.elevators, stairs: p.stairs, exits};
+    return {floorId: f.floorId, elevators: p.elevators, stairs: p.stairs, exits,
+      wallBBox: f.wallBBox ?? null};
   }),
 }));
 

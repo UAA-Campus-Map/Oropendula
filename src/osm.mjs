@@ -88,12 +88,12 @@ class Reader {
   varint() {
     let v = 0, shift = 0;
     for (;;) {
+      if (this.p >= this.e || shift > 49) throw new Error('MVT: truncated varint');
       const byte = this.b[this.p++];
       v += (byte & 0x7f) * 2 ** shift;
-      if (!(byte & 0x80)) break;
+      if (!(byte & 0x80)) return v;
       shift += 7;
     }
-    return v;
   }
   skip(wire) {
     if (wire === 0) this.varint();
@@ -101,16 +101,19 @@ class Reader {
     else if (wire === 2) this.p += this.varint();
     else if (wire === 5) this.p += 4;
     else throw new Error(`MVT: unsupported wire type ${wire}`);
+    if (this.p > this.e) throw new Error('MVT: field exceeds message');
   }
   /** Consume a length-delimited field, returning a reader over its bytes. */
   sub() {
     const len = this.varint();
+    if (len < 0 || this.p + len > this.e) throw new Error('MVT: field length exceeds message');
     const r = new Reader(this.b, this.p, this.p + len);
     this.p += len;
     return r;
   }
   string() {
     const len = this.varint();
+    if (len < 0 || this.p + len > this.e) throw new Error('MVT: string length exceeds message');
     const s = new TextDecoder().decode(this.b.subarray(this.p, this.p + len));
     this.p += len;
     return s;
@@ -134,14 +137,22 @@ function decodeGeometry(geom) {
   while (i < geom.length) {
     const cmd = geom[i++];
     const op = cmd & 7, count = cmd >> 3;
+    if (count < 0 || (op === 1 || op === 2) && i + count * 2 > geom.length) {
+      throw new Error('MVT: truncated geometry');
+    }
     if (op === 1) {
-      for (let k = 0; k < count; k++) {
-        x += zigzag(geom[i++]); y += zigzag(geom[i++]);
-        part = [[x, y]]; parts.push(part);
+      for (let k = 0; i + 1 < geom.length && k < count; k++) {
+        const dx = geom[i++], dy = geom[i++];
+        x += (dx >> 1) ^ -(dx & 1);
+        y += (dy >> 1) ^ -(dy & 1);
+        if (!part || k === 0) { part = [[x, y]]; parts.push(part); }
+        else part.push([x, y]);
       }
     } else if (op === 2) {
-      for (let k = 0; k < count; k++) {
-        x += zigzag(geom[i++]); y += zigzag(geom[i++]);
+      for (let k = 0; i + 1 < geom.length && k < count; k++) {
+        const dx = geom[i++], dy = geom[i++];
+        x += (dx >> 1) ^ -(dx & 1);
+        y += (dy >> 1) ^ -(dy & 1);
         if (part) part.push([x, y]);
       }
     } else if (op === 7) {
@@ -236,7 +247,7 @@ export function decodeMvtRoads(bytes) {
 
 /** Gzip magic bytes; PMTiles stores every tile gzipped, but stay defensive. */
 export function isGzip(bytes) {
-  return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
 /**
@@ -280,9 +291,13 @@ export function tilesToShapes(tiles, opts = {}) {
   const seen = new Set();
   let ways = 0, duplicateWays = 0, blockedAccessWays = 0;
 
+  let badTiles = 0;
   for (const tile of tiles) {
     const data = tile.data instanceof Uint8Array ? tile.data : new Uint8Array(tile.data);
-    for (const f of decodeMvtRoads(data)) {
+    let features;
+    try { features = decodeMvtRoads(data); }
+    catch { badTiles++; continue; }
+    for (const f of features) {
       if (!walkable.has(f.kind)) continue;
       if (BLOCKED_ACCESS.has(f.access)) { blockedAccessWays++; continue; }
       for (const line of f.polylines) {
@@ -318,7 +333,7 @@ export function tilesToShapes(tiles, opts = {}) {
   }
   return {
     shapes,
-    stats: {tiles: tiles.length, ways, duplicateWays, blockedAccessWays},
+    stats: {tiles: tiles.length, ways, duplicateWays, blockedAccessWays, badTiles},
   };
 }
 
@@ -344,7 +359,8 @@ export async function loadOsmShapes({url, bbox, zoom = 15, fetchTile}) {
         raw = null;   // tiles off the coast / outside the extract are fine
       }
       if (!raw) continue;
-      tiles.push({z: zoom, x, y, data: await maybeGunzip(raw)});
+      try { tiles.push({z: zoom, x, y, data: await maybeGunzip(raw)}); }
+      catch { /* malformed/unsupported tile compression: skip it */ }
     }
   }
   const {shapes, stats} = tilesToShapes(tiles);

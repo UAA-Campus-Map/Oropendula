@@ -8,6 +8,57 @@
  */
 import { shapeSegments, isWallLayer, isDoorLayer } from './campus.mjs';
 
+function fnv(text, seed = 2166136261) {
+  let h = seed;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+const num = (v) => (Math.round(Number(v) * 1e9) / 1e9).toFixed(9);
+
+/**
+ * Deterministic hash of the geometry that feeds `buildGraphState()`.
+ * Placement changes already change `lines`/`doors` (they are lon/lat), so
+ * this catches floor JSON, wall and door changes without hashing the raw
+ * file (dashed-linetype refreshes must not force a rebuild).
+ */
+export function graphInputHash({ lines = [], doors = [] } = {}) {
+  const parts = ['L', String(lines.length)];
+  for (const line of lines) {
+    parts.push(String(line.length));
+    for (const [lon, lat] of line) parts.push(num(lon), num(lat));
+  }
+  parts.push('D', String(doors.length));
+  for (const [lon, lat] of doors) parts.push(num(lon), num(lat));
+  return fnv(parts.join(';')).toString(36);
+}
+
+/** Hash of one building's per-floor hashes, in floor order. */
+export function graphFingerprint(floors) {
+  const parts = [...(floors ?? [])]
+    .sort((a, b) => String(a.floorId).localeCompare(String(b.floorId)))
+    .map((f) => `${f.floorId}:${f.hash ?? ''}`);
+  return fnv(parts.join('|')).toString(36);
+}
+
+/** Lon/lat bbox of wall lines, or null. */
+export function linesBBox(lines) {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+  for (const line of lines ?? []) {
+    for (const [lon, lat] of line) {
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+  }
+  return Number.isFinite(minLon) ? [minLon, minLat, maxLon, maxLat] : null;
+}
+
 /**
  * @param {object} buildingConfig - buildings-config.json building entry
  * @param {object} floorConfig - that building's floor entry
