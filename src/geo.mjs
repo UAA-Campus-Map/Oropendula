@@ -68,6 +68,30 @@ export function makeToLL(building, floor) {
     dxfCoordsToLonLat(origin, x - offset.x, y - offset.y, offset.rot);
 }
 
+/**
+ * True when two 2-D segments properly intersect (including endpoints).
+ * Points must be in the same coordinate system; callers convert lon/lat to
+ * a local metre frame first when accuracy matters.
+ */
+export function segmentsIntersect(a, b, c, d) {
+  const rx = b[0] - a[0], ry = b[1] - a[1];
+  const sx = d[0] - c[0], sy = d[1] - c[1];
+  const denom = rx * sy - ry * sx;
+  if (Math.abs(denom) < 1e-12) return false;   // parallel/collinear: no crossing
+  const qpx = c[0] - a[0], qpy = c[1] - a[1];
+  const t = (qpx * sy - qpy * sx) / denom;
+  const u = (qpx * ry - qpy * rx) / denom;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
+/** True when any segment of a polyline crosses the segment a->b. */
+export function polylineCrossesSegment(polyline, a, b) {
+  for (let i = 1; i < polyline.length; i++) {
+    if (segmentsIntersect(polyline[i - 1], polyline[i], a, b)) return true;
+  }
+  return false;
+}
+
 /** One registry entry, normalised: {origin, offset} with defaults applied. */
 export function placementOf(building, floor) {
   const origin = floor.origin ?? building.origin ?? {lon: 0, lat: 0};

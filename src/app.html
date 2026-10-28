@@ -1365,6 +1365,7 @@
     import { makeBundleGraph } from './navgraph-bundle-runtime.mjs';
     import { extractPortals, portalsFromCache, buildCampusRouter } from './campus.mjs';
     import { navGraphInputs } from './navgraph-source.mjs';
+    import { doorwaysFromShapes } from './doorways.mjs';
     import { floorRank, floorLabelOf, floorLevelOf } from './floors.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
@@ -1374,8 +1375,9 @@
     import { ParticleFilter } from './locate.mjs';
     import { CompassSnapper } from './headingfield.mjs';
     import { PositionArbiter } from './arbiter.mjs';
-    import { splitRoomQuery, findRoom, doorwayFor, normName, placeTarget, buildPlaceIndex,
-             searchPlaces, resolvePlace } from './places.mjs';
+    import { splitRoomQuery, findRoom, findRoomExact, doorwayFor, normName, placeTarget,
+             buildPlaceIndex, searchPlaces, resolvePlace } from './places.mjs';
+    import { resolveRoomPin } from './roompin.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
     // Protocol registration
@@ -3260,6 +3262,7 @@
       if (p.kind === 'connector') {
         return `${p.id ?? 'connector'} at ${p.building} ${p.floor}`;
       }
+      if (p.interior) return `interior door at ${p.building} ${p.floor}`;
       return `door at ${p.building} ${p.floor}`;
     }
 
@@ -3311,185 +3314,8 @@
     }
 
     // --- Room pin: strict hallway-door resolution -------------------------
-    // A raw DOOR layer contains one point per leaf; cluster them into physical
-    // doorways before doing any room analysis.
-    const ROOM_DOOR_CLUSTER_M = 1.4;
-    const ROOM_DOOR_MAX_M = 15;
-    const ROOM_HALL_SCAN_M = 4;
-
-    function clusterFloorDoorways(floor) {
-      const pts = floor.doorPoints ?? [];
-      if (!pts.length) return [];
-      const m = metresPerDegree(pts[0][1]);
-      const clusters = [];
-      for (const p of pts) {
-        let best = null, bestD = ROOM_DOOR_CLUSTER_M;
-        for (const c of clusters) {
-          const d = Math.hypot((p[0] - c.ll[0]) * m.lon, (p[1] - c.ll[1]) * m.lat);
-          if (d <= bestD) { bestD = d; best = c; }
-        }
-        if (best) {
-          best.sumLon += p[0];
-          best.sumLat += p[1];
-          best.n++;
-          best.ll = [best.sumLon / best.n, best.sumLat / best.n];
-        } else {
-          clusters.push({sumLon: p[0], sumLat: p[1], n: 1, ll: p});
-        }
-      }
-      return clusters.map((c) => ({ll: c.ll, leaves: c.n}));
-    }
-
-    function findRoomLabelExact(building, roomText) {
-      const norm = (s) => String(s).toLowerCase().replace(/[\s\-]+/g, '');
-      const want = norm(roomText);
-      if (!want) return {error: 'Type a room number first.'};
-      const exact = [];
-      for (const f of building.floors) {
-        for (const label of f.roomLabels ?? []) {
-          const text = String(label.properties.text ?? '').trim();
-          if (norm(text) !== want) continue;
-          exact.push({floor: f, text, labelLL: label.geometry.coordinates});
-        }
-      }
-      if (!exact.length) {
-        return {error: `Room "${roomText}" was not found in ${building.sourceId ?? building.id}.`};
-      }
-      if (exact.length > 1) {
-        return {error: `Room "${roomText}" is ambiguous (${exact.length} matches).`};
-      }
-      return exact[0];
-    }
-
-    function roomDoorCandidates(floor, labelLL) {
-      const g = floor.navGraph;
-      if (!g) return [];
-      const from = g.isWalkable(labelLL) ? labelLL : g.nearestWalkable(labelLL);
-      if (!from) return [];
-      const m = metresPerDegree(from[1]);
-      const out = [];
-      for (const c of clusterFloorDoorways(floor)) {
-        const door = g.isWalkable(c.ll) ? c.ll : g.nearestWalkable(c.ll);
-        if (!door) continue;
-        const dist = Math.hypot((door[0] - from[0]) * m.lon, (door[1] - from[1]) * m.lat);
-        if (dist > ROOM_DOOR_MAX_M) continue;
-        let clear = true;
-        const steps = Math.max(1, Math.ceil(dist / 0.2));
-        for (let s = 1; s <= steps; s++) {
-          const t = s / steps;
-          if (!g.isWalkable([from[0] + (door[0] - from[0]) * t,
-                              from[1] + (door[1] - from[1]) * t])) { clear = false; break; }
-        }
-        if (clear) out.push({...c, ll: door, dist});
-      }
-      return out;
-    }
-
-    function corridorPoint(floor, labelLL, doorLL, distance) {
-      const g = floor.navGraph;
-      const from = g.toM(labelLL), door = g.toM(doorLL);
-      let ux = door[0] - from[0], uy = door[1] - from[1];
-      const len = Math.hypot(ux, uy);
-      if (!(len > 0)) return null;
-      ux /= len; uy /= len;
-      const x = door[0] + ux * distance, y = door[1] + uy * distance;
-      const ll = g.toLL([x, y]);
-      if (!g.isWalkable(ll)) return null;
-      // Centre the point across the corridor, perpendicular to the room->door
-      // direction, so we do not drop the user against a hallway wall.
-      const px = -uy, py = ux;
-      let neg = 0, pos = 0;
-      for (let d = 0.25; d <= ROOM_HALL_SCAN_M; d += 0.25) {
-        const q = g.toLL([x + px * d, y + py * d]);
-        if (!g.isWalkable(q)) break;
-        pos = d;
-      }
-      for (let d = 0.25; d <= ROOM_HALL_SCAN_M; d += 0.25) {
-        const q = g.toLL([x - px * d, y - py * d]);
-        if (!g.isWalkable(q)) break;
-        neg = d;
-      }
-      const mid = (pos - neg) / 2;
-      const centre = g.toLL([x + px * mid, y + py * mid]);
-      return g.isWalkable(centre) ? centre : ll;
-    }
-
-    function routeDoorHits(route, floor, exceptDoorLL) {
-      const poly = [];
-      for (const s of route?.segments ?? []) {
-        if (s.tier === 'indoor' && s.polyline?.length) poly.push(s.polyline);
-      }
-      if (!poly.length) return Infinity;
-      let hits = 0;
-      for (const c of clusterFloorDoorways(floor)) {
-        if (distM(c.ll, exceptDoorLL) <= 1.5) continue;
-        let hit = false;
-        for (const line of poly) {
-          for (let i = 1; i < line.length; i++) {
-            if (distToSegment(c.ll, line[i - 1], line[i]) <= 0.6) { hit = true; break; }
-          }
-          if (hit) break;
-        }
-        if (hit) hits++;
-      }
-      return hits;
-    }
-
-    function probeDoor(floor, fromLL, targetDoorLL) {
-      let best = null, bestD = Infinity;
-      for (const c of clusterFloorDoorways(floor)) {
-        const d = distM(c.ll, targetDoorLL);
-        if (d < 8) continue;
-        const dd = distM(c.ll, fromLL);
-        if (dd < bestD) { bestD = dd; best = c; }
-      }
-      return best;
-    }
-
-    /** The hallway point just outside one door, or null if this door cannot be
-     *  shown to open onto a corridor. */
-    function hallwayPointForDoor(floor, labelLL, doorLL) {
-      if (!campusRouter) return null;
-      const probe = probeDoor(floor, labelLL, doorLL);
-      if (!probe) return null;
-      const g = floor.navGraph;
-      const probeLL = g.isWalkable(probe.ll) ? probe.ll : g.nearestWalkable(probe.ll);
-      if (!probeLL) return null;
-      for (const distance of [1.0, 1.4, 1.8, 2.2, 2.6, 3.0]) {
-        const ll = corridorPoint(floor, labelLL, doorLL, distance);
-        if (!ll) continue;
-        const route = campusRouter.route(ll, probeLL, {
-          startFloor: floor.floorId, endFloor: floor.floorId,
-        });
-        if (!route) continue;
-        if ((route.segments ?? []).some((s) => s.tier !== 'indoor')) continue;
-        // If this point is still inside the room, the route crosses the target
-        // door; routeDoorHits then sees an extra door. If it is a real
-        // corridor, only the probe endpoint is crossed.
-        if (routeDoorHits(route, floor, probeLL) === 0) return ll;
-      }
-      return null;
-    }
-
-    function resolveRoomPin(building, roomText) {
-      const hit = findRoomLabelExact(building, roomText);
-      if (hit.error) return hit;
-      const doors = roomDoorCandidates(hit.floor, hit.labelLL);
-      if (!doors.length) return {error: `Room ${hit.text} has no door connected to its space.`};
-      const hallway = [];
-      for (const d of doors) {
-        const ll = hallwayPointForDoor(hit.floor, hit.labelLL, d.ll);
-        if (ll) hallway.push({...d, hallwayLL: ll});
-      }
-      if (!hallway.length) {
-        return {error: `Room ${hit.text} has no door that opens onto a hallway.`};
-      }
-      if (hallway.length > 1) {
-        return {error: `Room ${hit.text} has multiple doors that open onto a hallway.`};
-      }
-      return {building, floor: hit.floor, room: hit.text,
-              doorLL: hallway[0].ll, ll: hallway[0].hallwayLL};
-    }
+    // Geometry (doorway barriers, hallway test) lives in roompin.mjs so it can
+    // be tested against real floors without a browser.
 
     function currentRoomPinBuilding() {
       if (locator?.building) return locator.building;
@@ -3540,7 +3366,7 @@
         setRoomPinError(`Include a room number, e.g. ${b.sourceId ?? b.id} 211.`);
         return;
       }
-      const resolved = resolveRoomPin(b, split.roomText);
+      const resolved = resolveRoomPin(b, findRoomExact(b, split.roomText), campusRouter);
       if (resolved.error) { setRoomPinError(resolved.error); return; }
       if (!manualPdrAnchor(resolved.building, resolved.floor, resolved.ll)) return;
       closeRoomPin();
@@ -4968,6 +4794,9 @@
       // feeds the import tool's bundle generator, so the cached graph and the
       // fallback build can never disagree about which shapes count.
       const { lines, doors: doorPoints } = navGraphInputs(buildingConfig, floor, data, toLL);
+      // Physical doorways for Room Pin and interior-door blocking. This is
+      // separate from `doorPoints` (leaf midpoints) used by the navGraph.
+      const doorways = doorwaysFromShapes(data.shapes, toLL);
       const wallFeatureCollection = turf.lineStrings(lines);
 
       // Room-number labels: ONE array feeds both the displayed symbol layer
@@ -5038,6 +4867,8 @@
         // Doorway midpoints (DOORS layer): a room search routes to the nearest
         // door connected to the label, not to the label itself.
         doorPoints,
+        // Physical doorways (barrier geometry) used by Room Pin and blocking.
+        doorways,
         // Extractor metadata: UAA short code (BMH) + full building name.
         sourceId: data.ID ?? null,
         sourceName: data.building_name ?? null,

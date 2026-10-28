@@ -15,6 +15,7 @@ import { readFileSync } from 'fs';
 import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
+import { navGraphInputs } from './navgraph-source.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache, isWallLayer, isDoorLayer } from './campus.mjs';
 import { loadOsmShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
@@ -27,7 +28,9 @@ import { AnchorStepCalibrator } from './anchorcal.mjs';
 import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
 import { buildPassages, makeHeadingField, CompassSnapper, distPi } from './headingfield.mjs';
 import { PositionArbiter } from './arbiter.mjs';
-import { normName, placeTarget, parseTarget, buildPlaceIndex, searchPlaces, splitRoomQuery, findRoom, resolvePlace, validatePlaces } from './places.mjs';
+import { normName, placeTarget, parseTarget, buildPlaceIndex, searchPlaces, splitRoomQuery, findRoom, findRoomExact, resolvePlace, validatePlaces } from './places.mjs';
+import { doorwaysFromShapes, barrierCrossesPolyline } from './doorways.mjs';
+import { resolveRoomPin } from './roompin.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
 // import.html); smoke reads the same file index.html fetches.
@@ -89,6 +92,8 @@ const ALL_CATEGORIES = [
   'autocal',     // GPS step-length auto-calibration
   'anchorcal',   // step-length refinement from manual anchors
   'headingfield', // allowed compass directions + compass snapping
+  'doorways',    // DOOR-layer clustering and wall-aligned barriers
+  'roompin',     // strict hallway-door resolution (real AS121-02)
   'places',      // place nicknames, places.json, favorites
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -1827,6 +1832,42 @@ console.log('\nConnector anchors without a ground-floor stop (synthetic):');
 }
 
 if (want('multifloor')) {
+console.log('\nConnector keys stay unique within a floor:');
+  // Two elevator cars on both floors. Blocking one car must not remove the
+  // other; the old key was kind+floor, so both shared one key.
+  const latC = 61.155, lonC = -149.875;
+  const mpdC = metresPerDegree(latC);
+  const halfC = 8;
+  const dxC = halfC / mpdC.lon, dyC = halfC / mpdC.lat;
+  const squareC = (cx, cy) => {
+    const c = [[cx - dxC, cy - dyC], [cx + dxC, cy - dyC], [cx + dxC, cy + dyC], [cx - dxC, cy + dyC]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const carA = [lonC - 1.5 / mpdC.lon, latC];
+  const carB = [lonC + 1.5 / mpdC.lon, latC];
+  const carFloor = (floorId) => ({
+    floorId, ...squareC(lonC, latC), elevators: [
+      { id: 'car-a-' + floorId, ll: carA }, { id: 'car-b-' + floorId, ll: carB },
+    ], stairs: [], exits: [],
+  });
+  const carRouter = buildCampusRouter([{ id: 'CARS', groundFloor: '01',
+    floors: [carFloor('01'), carFloor('02')] }]);
+  const carRoute = carRouter.route([lonC, latC], [lonC, latC],
+    { startFloor: '01', endFloor: '02' });
+  const carPortals = (carRoute?.portals ?? []).filter((p) => p.kind === 'connector');
+  check('two elevator cars on a floor have distinct portal keys',
+    carPortals.length >= 2 && new Set(carPortals.map((p) => p.key)).size === carPortals.length,
+    carPortals.map((p) => p.key).join(', '));
+  const blockedCar = carPortals[0];
+  const carAlt = blockedCar && carRouter.route([lonC, latC], [lonC, latC],
+    { startFloor: '01', endFloor: '02', avoidPortals: [blockedCar.key] });
+  check('blocking one car leaves the other usable',
+    !!carAlt && carAlt.segments.some((s) => s.tier === 'elevator') &&
+    !(carAlt.portals ?? []).some((p) => p.key === blockedCar.key));
+}
+
+if (want('multifloor')) {
 console.log('\nPortal preference (force stairs / elevators):');
   const lat0 = 61.16, lon0 = -149.87;
   const mpd = metresPerDegree(lat0);
@@ -1875,6 +1916,42 @@ console.log('\nPortal preference (force stairs / elevators):');
   check('ignoring elevators forces stairs',
     !!rS && rS.segments.some(s => s.tier === 'stairs') &&
     !rS.segments.some(s => s.tier === 'elevator'));
+}
+
+if (want('multifloor')) {
+console.log('\nBasement vertical travel and explicit bridge conflicts:');
+  const latB = 61.15, lonB = -149.88;
+  const mpdB = metresPerDegree(latB);
+  const halfB = 5;
+  const dxB = halfB / mpdB.lon, dyB = halfB / mpdB.lat;
+  const sqB = (cx, cy) => {
+    const c = [[cx - dxB, cy - dyB], [cx + dxB, cy - dyB], [cx + dxB, cy + dyB], [cx - dxB, cy + dyB]];
+    const lines = c.map((p, i) => [p, c[(i + 1) % 4]]);
+    return { navGraph: buildGraph(lines), obstacleLines: lines };
+  };
+  const stairB = [lonB, latB];
+  const baseFloors = ['B2', 'B1', '01'].map((floorId) => ({
+    floorId, ...sqB(lonB, latB), elevators: [],
+    stairs: [{ id: 'st-' + floorId, ll: stairB }], exits: [],
+  }));
+  const baseRouter = buildCampusRouter([{ id: 'BASE', groundFloor: '01', floors: baseFloors }]);
+  const baseRoute = baseRouter.route(stairB, stairB, { startFloor: 'B2', endFloor: '01' });
+  const baseStairs = (baseRoute?.segments ?? []).find((s) => s.tier === 'stairs');
+  check('B2 -> ground counts two floors of stairs', !!baseStairs && baseStairs.seconds === 12,
+    baseStairs ? `${baseStairs.seconds}s` : 'no route');
+
+  // A says B, B says C: A-B must not pair just because A wants B.
+  const edge = (id, to, x) => ([{
+    floorId: '01', ...sqB(x, latB), elevators: [], stairs: [], exits: [],
+    skybridges: [{ id: 'br-' + id, ll: [x, latB + dyB], to }],
+  }]);
+  const brRouter = buildCampusRouter([
+    { id: 'A', groundFloor: '01', floors: edge('A', 'B', lonB - 0.002) },
+    { id: 'B', groundFloor: '01', floors: edge('B', 'C', lonB) },
+    { id: 'C', groundFloor: '01', floors: edge('C', null, lonB + 0.002) },
+  ]);
+  check('conflicting explicit bridge destinations do not pair',
+    brRouter.stats.skybridgeEdges === 1, `${brRouter.stats.skybridgeEdges} bridge edge(s)`);
 }
 
 if (want('multifloor')) {
@@ -2881,6 +2958,119 @@ if (want('headingfield')) {
     check('with no field the snapper does nothing', !r.locked && r.correctionRad === 0);
   }
 }
+// ---------------------------------------------------------------------------
+// Doorways: DOOR-layer clustering and wall-aligned barriers.
+// ---------------------------------------------------------------------------
+if (want('doorways')) {
+console.log('\nDoorways (doorways.mjs):');
+
+// A closed leaf inside a wall gap is its own barrier; an open leaf with a
+// swing arc must use the closed direction, not the drawn leaf.
+const wallShapes = [
+  { layer: 'WALL', items: [{ op: 'line', points: [[0, 0], [40, 0]] }] },
+  { layer: 'WALL', items: [{ op: 'line', points: [[60, 0], [100, 0]] }] },
+  { layer: 'WALL', items: [{ op: 'line', points: [[0, 0], [0, 40]] }] },
+  { layer: 'WALL', items: [{ op: 'line', points: [[0, 40], [100, 40]] }] },
+];
+const closedLeaf = { layer: 'DOORS', items: [{ op: 'polyline', closed: true,
+  points: [[40, -1], [60, -1], [60, 1], [40, 1]] }] };
+const openLeaf = { layer: 'DOORS', items: [
+  { op: 'polyline', closed: true, points: [[60, 0], [60, 20], [62, 20], [62, 0]] },
+  { op: 'arc', center: [60, 0], radius: 20, start_angle: 0, end_angle: 90 },
+] };
+const ds = doorwaysFromShapes([...wallShapes, closedLeaf, openLeaf], (x, y) => [x, y]);
+check('closed and open leaves of one opening produce one doorway', ds.length === 1, `${ds.length} doorways`);
+const synthetic = ds[0];
+check('doorway width is the 20-unit opening', !!synthetic && Math.abs(synthetic.width - 20 * 0.0254) < 0.02,
+  synthetic ? `${synthetic.width.toFixed(3)} m` : 'none');
+check('barrier follows the wall, not the open leaf', !!synthetic &&
+  Math.abs(synthetic.dxfBarrier[0][0] - synthetic.dxfBarrier[1][0]) > 15 &&
+  Math.abs(synthetic.dxfBarrier[0][1]) < 2,
+  synthetic ? JSON.stringify(synthetic.dxfBarrier) : 'none');
+
+// A route through a barrier crosses it; a nearby parallel run does not.
+const door = { barrier: [[0, 0], [2, 0]] };
+check('barrier crossing is detected', barrierCrossesPolyline(door, [[1, -1], [1, 1]]));
+check('a near miss does not cross the barrier', !barrierCrossesPolyline(door, [[1, 0.5], [3, 0.5]]));
+
+// Real floor: the target doorway must be a wall opening, not an open leaf.
+const cfg = CONFIG.find((b) => b.id === 'AS121');
+const fl = cfg.floors.find((f) => f.floorId === '02');
+const data = JSON.parse(readFileSync(new URL('.' + fl.url, import.meta.url), 'utf8'));
+const toLL = makeToLL(cfg, fl);
+const real = doorwaysFromShapes(data.shapes, toLL);
+const room = (data.text_lines ?? []).find((t) => String(t.text ?? '').trim() === '208');
+const labelLL = toLL(room.x, room.y);
+const labelM = metresPerDegree(labelLL[1]);
+const near = real
+  .map((d) => ({ d, m: Math.hypot((d.ll[0] - labelLL[0]) * labelM.lon, (d.ll[1] - labelLL[1]) * labelM.lat) }))
+  .filter((x) => x.m < 2)
+  .sort((a, b) => a.m - b.m)[0];
+check('ECB 208 has a nearby doorway', !!near, `${real.length} doorways`);
+check('ECB 208 doorway barrier is a sane opening', !!near && near.d.width > 0.5 && near.d.width < 1.5,
+  near ? `${near.d.width.toFixed(2)} m` : 'none');
+check('ECB 208 barrier is the wall opening, not the 0.9 m leaf', !!near &&
+  Math.abs(near.d.dxfBarrier[0][0] - near.d.dxfBarrier[1][0]) > 15 ||
+  !!near && Math.abs(near.d.dxfBarrier[0][1] - near.d.dxfBarrier[1][1]) > 15,
+  near ? JSON.stringify(near.d.dxfBarrier) : 'none');
+}
+
+// ---------------------------------------------------------------------------
+// Room Pin: an exact room's one hallway door on the real ECB plan.
+// ---------------------------------------------------------------------------
+if (want('roompin')) {
+console.log('\nRoom Pin (roompin.mjs, real AS121-02):');
+const cfg = CONFIG.find((b) => b.id === 'AS121');
+const fl = cfg.floors.find((f) => f.floorId === '02');
+const data = JSON.parse(readFileSync(new URL('.' + fl.url, import.meta.url), 'utf8'));
+const toLL = makeToLL(cfg, fl);
+const { lines, doors: doorPoints } = navGraphInputs(cfg, fl, data, toLL);
+const graph = graphFromState(buildGraphState(lines, doorPoints, { passages: false }));
+const portals = portalsFromCache(fl.portals, toLL);
+const exits = (fl.exits?.length ? fl.exits : portals.exits)
+  .map((e, i) => ({ id: e.id ?? `exits-${i}`, ll: toLL(e.dxf[0], e.dxf[1]) }));
+const doorways = doorwaysFromShapes(data.shapes, toLL);
+const roomLabels = (data.text_lines ?? []).map((t) => ({
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: toLL(t.x, t.y) },
+  properties: { text: String(t.text ?? '').trim() },
+})).filter((f) => f.properties.text);
+const floor = { floorId: fl.floorId, navGraph: graph, obstacleLines: lines,
+  elevators: portals.elevators, stairs: portals.stairs, exits, skybridges: [],
+  roomLabels, doorways, doorPoints };
+const building = { id: cfg.id, sourceId: data.ID, groundFloor: cfg.groundFloor, floors: [floor] };
+const router = buildCampusRouter([building]);
+const hit = findRoomExact(building, '208');
+check('exact room lookup finds ECB 208', !hit.error && hit.floor.floorId === '02', hit.error ?? '');
+const pin = hit.error ? hit : resolveRoomPin(building, hit, router);
+check('ECB 208 resolves to one hallway door', !pin.error, pin.error ?? '');
+check('pin point is outside the doorway', !pin.error &&
+  Math.hypot((pin.ll[0] - pin.doorLL[0]) * metresPerDegree(pin.ll[1]).lon,
+             (pin.ll[1] - pin.doorLL[1]) * metresPerDegree(pin.ll[1]).lat) > 0.8,
+  pin.error ?? '');
+check('unknown exact room is rejected', !!findRoomExact(building, 'ZZZ').error);
+
+// A route crossing an interior door lists it and can avoid it.
+const room209 = findRoomExact(building, '209');
+const cross = room209.error ? null : router.route(hit.labelLL, room209.labelLL,
+  { startFloor: '02', endFloor: '02' });
+const crossDoor = (cross?.portals ?? []).find((p) => p.interior);
+check('a route through an interior door lists a blockable portal', !!crossDoor,
+  crossDoor ? crossDoor.key : 'none');
+if (crossDoor) {
+  const alt = router.route(hit.labelLL, room209.labelLL,
+    { startFloor: '02', endFloor: '02', avoidPortals: [crossDoor.key] });
+  check('blocked interior door is not used again',
+    !alt || !(alt.portals ?? []).some((p) => p.key === crossDoor.key));
+  const blockedDoor = doorways.find((d) => crossDoor.id === `interior-${d.id}`);
+  const crossesBlocked = !!alt && !!blockedDoor && (alt.segments ?? []).some((s) =>
+    s.tier === 'indoor' && s.polyline &&
+    barrierCrossesPolyline(blockedDoor, s.polyline, (p) => graph.toM(p)));
+  check('alternate route avoids the blocked barrier', !crossesBlocked,
+    blockedDoor ? blockedDoor.id : 'none');
+}
+}
+
 // ---------------------------------------------------------------------------
 // Places of interest (places.mjs + places.json). Fast: reads floor JSON
 // labels only, no navGraph build.

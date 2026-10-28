@@ -19,6 +19,7 @@
  */
 
 import { buildPassages, makeHeadingField } from './headingfield.mjs';
+import { segmentsIntersect } from './geo.mjs';
 
 /** Body clearance from walls, metres. */
 const CLEARANCE = 0.30;
@@ -86,8 +87,17 @@ function metresPerDeg(lat) {
  * crosses no blocked cell. Sampling is at half-cell intervals. Shared by
  * buildGraphState (node linking) and graphFromState (clicks, visibility).
  */
+function crossesBarrier(a, b, barriers) {
+  if (!barriers || !barriers.length) return false;
+  for (const [c, d] of barriers) {
+    if (segmentsIntersect(a, b, c, d)) return true;
+  }
+  return false;
+}
+
 function makeClearLine(blocked, W, H, OX, OY) {
-  return function clearLine(a, b) {
+  return function clearLine(a, b, barriers = null) {
+    if (crossesBarrier(a, b, barriers)) return false;
     const dx = b[0] - a[0], dy = b[1] - a[1];
     const dist = Math.sqrt(dx * dx + dy * dy);
     const steps = Math.ceil(dist / (CELL * 0.5)); // sample interval = half cell
@@ -113,7 +123,9 @@ export function buildGraphState(walls, doors = [], { passages: buildPassagesEnab
   // otherwise fails deep inside with an unhelpful "not iterable".
   // Handles: GeoJSON FeatureCollection, array of Features, or bare line arrays
   const list = walls.features ? walls.features : walls;   // FC -> features
-  const linesLL = list.map(f => (f && f.geometry ? f.geometry.coordinates : f));
+  const linesLL = list.map(f => (f && f.geometry ? f.geometry.coordinates : f))
+    .filter((line) => Array.isArray(line) && line.length >= 2);
+  if (!linesLL.length) throw new Error('navgraph: floor has no wall segments');
 
   // --- pick an origin and convert everything to metres -------------------
   // Find the bounding box in degrees to establish a local coordinate system
@@ -303,6 +315,7 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
   const toM = ([lon, lat]) => [(lon - origin.lon) * mLon, (lat - origin.lat) * mLat];
   const toLL = ([x, y]) => [origin.lon + x / mLon, origin.lat + y / mLat];
   const clearLine = makeClearLine(blocked, W, H, OX, OY);
+  const toBarriers = (barriers) => (barriers ?? []).map(([a, b]) => [toM(a), toM(b)]);
 
   // --- 4 & 5. attach the clicks, then Dijkstra ----------------------------
   /**
@@ -325,7 +338,9 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
    * @param {number[]} endLL - [lon, lat] of end point
    * @returns {number[][]|null} Path as [[lon,lat],...], or null if unreachable
    */
-  function findPath(startLL, endLL) {
+  function findPath(startLL, endLL, { barriers = [] } = {}) {
+    if (!isWalkable(startLL) || !isWalkable(endLL)) return null;
+    const bsegs = toBarriers(barriers);
     const p0 = toM(startLL); // start in metres
     const p1 = toM(endLL);   // end in metres
     const n = nodes.length;
@@ -341,12 +356,12 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
     for (let i = 0; i < n; i++) {
       // Check if node i is visible from start
       const d0 = Math.hypot(nodes[i][0] - p0[0], nodes[i][1] - p0[1]);
-      if (clearLine(p0, nodes[i])) {
+      if (clearLine(p0, nodes[i], bsegs)) {
         from.push([i, d0]);
       }
       // Check if node i is visible from end (goal)
       const d1 = Math.hypot(nodes[i][0] - p1[0], nodes[i][1] - p1[1]);
-      if (clearLine(p1, nodes[i])) {
+      if (clearLine(p1, nodes[i], bsegs)) {
         seesGoal[i] = 1;
         goalCost[i] = d1;
       }
@@ -382,6 +397,7 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
       if (cost[u] >= bestTotal) break;
       // Relax adjacent edges
       for (const [v, w] of adj[u]) {
+        if (crossesBarrier(nodes[u], nodes[v], bsegs)) continue;
         const nd = cost[u] + w;
         if (nd < cost[v]) {
           cost[v] = nd;
@@ -417,12 +433,14 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
    * @param {number[]} ll - [lon,lat]
    * @returns {{node:number, dist:number}[]}
    */
-  function attach(ll) {
+  function attach(ll, { barriers = [] } = {}) {
+    if (!isWalkable(ll)) return [];
+    const bsegs = toBarriers(barriers);
     const p = toM(ll);
     const out = [];
     for (let i = 0; i < nodes.length; i++) {
       const d = Math.hypot(nodes[i][0] - p[0], nodes[i][1] - p[1]);
-      if (clearLine(p, nodes[i])) out.push({node: i, dist: d});
+      if (clearLine(p, nodes[i], bsegs)) out.push({node: i, dist: d});
     }
     return out;
   }
@@ -433,7 +451,8 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
    * @param {{node:number, dist:number}[]} attached
    * @returns {{dist:Float64Array, prev:Int32Array}}
    */
-  function dijkstraFromAttach(attached) {
+  function dijkstraFromAttach(attached, { barriers = [] } = {}) {
+    const bsegs = toBarriers(barriers);
     const n = nodes.length;
     const dist = new Float64Array(n).fill(Infinity);
     const prev = new Int32Array(n).fill(-1);
@@ -448,6 +467,7 @@ export function graphFromState({origin, scale, OX, OY, W, H, nodes, adj, blocked
       done[u] = 1;
       const du = dist[u];
       for (const [v, w] of adj[u]) {
+        if (crossesBarrier(nodes[u], nodes[v], bsegs)) continue;
         const nd = du + w;
         if (nd < dist[v]) { dist[v] = nd; prev[v] = u; open.push(v, nd); }
       }

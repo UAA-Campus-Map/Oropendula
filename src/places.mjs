@@ -10,8 +10,7 @@
  * Student favorites have the same shape with a single `name`.
  */
 import { metresPerDegree } from './geo.mjs';
-
-const floorLevelOf = (floorId) => parseInt(floorId, 10) || 1;
+import { floorLevelOf } from './floors.mjs';
 
 // --- rooms ------------------------------------------------------------------
 
@@ -52,12 +51,15 @@ export function splitRoomQuery(buildings, q) {
  * to the label when the floor has no such door.
  */
 export function doorwayFor(floor, labelLL) {
-  if (!floor || !floor.navGraph || !floor.doorPoints?.length) return labelLL;
+  const doors = floor?.doorways?.length
+    ? floor.doorways.map((d) => d.ll)
+    : floor?.doorPoints;
+  if (!floor || !floor.navGraph || !doors?.length) return labelLL;
   const g = floor.navGraph;
   const from = g.isWalkable(labelLL) ? labelLL : (g.nearestWalkable?.(labelLL) ?? labelLL);
   const mpd = metresPerDegree(from[1]);
   let best = null, bestD = Infinity;
-  for (const d of floor.doorPoints) {
+  for (const d of doors) {
     const dd = g.isWalkable(d) ? d : (g.nearestWalkable?.(d) ?? d);
     const dist = Math.hypot((dd[0] - from[0]) * mpd.lon, (dd[1] - from[1]) * mpd.lat);
     if (dist >= bestD || dist > 15) continue;
@@ -70,6 +72,30 @@ export function doorwayFor(floor, labelLL) {
     if (clear) { best = dd; bestD = dist; }
   }
   return best ?? labelLL;
+}
+
+/**
+ * Exact-only room lookup for Room Pin: one matching label or an `error`.
+ * Unlike `findRoom`, a prefix/named-room match is not enough here.
+ */
+export function findRoomExact(building, roomText) {
+  const want = normRoom(roomText);
+  if (!want) return {error: 'Type a room number first.'};
+  const exact = [];
+  for (const f of building.floors) {
+    for (const label of f.roomLabels ?? []) {
+      const text = String(label.properties.text ?? '').trim();
+      if (normRoom(text) !== want) continue;
+      exact.push({floor: f, text, labelLL: label.geometry.coordinates});
+    }
+  }
+  if (!exact.length) {
+    return {error: `Room "${roomText}" was not found in ${building.sourceId ?? building.id}.`};
+  }
+  if (exact.length > 1) {
+    return {error: `Room "${roomText}" is ambiguous (${exact.length} matches).`};
+  }
+  return exact[0];
 }
 
 /**

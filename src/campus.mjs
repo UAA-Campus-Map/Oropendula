@@ -41,6 +41,9 @@
  * All routing costs are time in seconds. Distances are metres.
  */
 
+import { floorLevelOf } from './floors.mjs';
+import { polylineCrossesSegment } from './geo.mjs';
+
 /** Walking speeds, metres per second. */
 const INDOOR_SPEED = 1.3;
 const OUTDOOR_SPEED = 1.4;
@@ -1065,8 +1068,11 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   // The same physical elevator/stairwell appears on every floor at (nearly)
   // the same plan position; match stops by proximity.
   for (const b of buildings) {
-    const ground = b.floors.find(f => f.floorId === b.groundFloor);
+    // If the configured ground floor is missing, seed from the first floor
+    // that exists. This keeps upper-floor-only buildings connected vertically.
+    const ground = b.floors.find(f => f.floorId === b.groundFloor) ?? b.floors[0];
     if (!ground) continue;
+    const groundId = ground.floorId;
     const anyLL = ground.elevators[0]?.ll ?? ground.stairs[0]?.ll ?? ground.exits[0]?.ll;
     const scale = metresPerDeg(anyLL?.[1] ?? 61.19);
     const byKind = {elevator: new Map(), stairs: new Map()};
@@ -1084,13 +1090,13 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       for (const p of list ?? []) {
         byKind[kind].set(p.id, {
           kind, building: b.id, anchor: p.ll,
-          stops: new Map([[ground.floorId, p.ll]]),
+          stops: new Map([[groundId, p.ll]]),
         });
       }
     }
     // attach stops from other floors to the nearest anchor of the same kind
     for (const f of b.floors) {
-      if (f.floorId === b.groundFloor) continue;
+      if (f.floorId === groundId) continue;
       for (const kind of activeKinds) {
         const list = f[kind === 'elevator' ? 'elevators' : 'stairs'] ?? [];
         for (const p of list) {
@@ -1107,7 +1113,8 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
         }
       }
     }
-    b._connectors = [...byKind.elevator.values(), ...byKind.stairs.values()];
+    b._connectors = [...byKind.elevator.values(), ...byKind.stairs.values()]
+      .map((c, i) => ({...c, id: `${c.kind}-${b.id}-${i}`}));
   }
 
   // Lon/lat bounding box per floor, so buildingAt can reject a floor without
@@ -1141,29 +1148,40 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id, to: s.to ?? null});
       for (const c of b._connectors ?? []) {
         const stop = c.stops.get(f.floorId);
-        if (stop) nodes.push({building: b, floor: f, ll: stop, kind: 'connector', connector: c, id: `${c.kind}-${f.floorId}`});
+        if (stop) nodes.push({building: b, floor: f, ll: stop, kind: 'connector', connector: c, id: `${c.id}-${f.floorId}`});
       }
     }
   }
   const scale = metresPerDeg(nodes[0]?.ll[1] ?? 61.19);
   const N = nodes.length;
   const portalKey = (n) => `${n.building.id}|${n.floor.floorId}|${n.kind}|${n.id ?? ''}`;
+  const interiorDoorKey = (b, f, d) => `${b.id}|${f.floorId}|door|interior-${d.id}`;
+  const interiorDoorsByFloor = new Map();
+  const interiorDoorByKey = new Map();
+  for (const b of buildings) {
+    for (const f of b.floors) {
+      const doors = f.doorways ?? [];
+      if (!doors.length) continue;
+      interiorDoorsByFloor.set(f, doors);
+      for (const d of doors) interiorDoorByKey.set(interiorDoorKey(b, f, d), {b, f, d});
+    }
+  }
   // Outdoor legs exist at ground level only. Using the building's configured
   // groundFloor was wrong for level-3-only structures: AS164 (Parrish Bridge)
   // is a skybridge landing with groundFloor "03", so its doors became outdoor
   // doors and a route stepped from an outdoor leg straight onto floor 03 with
   // no vertical connector. Floor level 1 is the campus ground plane.
-  const atGround = n => (parseInt(n.floor.floorId, 10) || 0) === 1;
-  const floorNum = id => parseInt(id, 10) || 0;
+  const atGround = n => floorLevelOf(n.floor.floorId) === 1;
+  const sameFloorLevel = (a, b) => floorLevelOf(a) === floorLevelOf(b);
 
   // Attach every node to its floor's graph once. A manually placed portal often
   // sits on (or a hair outside) the wall, where the exact point sees no nodes;
   // fall back to the nearest walkable cell so the floor can still reach it.
-  const attachPortal = (g, ll) => {
-    const a = g.attach(ll);
+  const attachPortal = (g, ll, barriers = []) => {
+    const a = g.attach(ll, { barriers });
     if (a.length) return a;
     const nw = g.nearestWalkable(ll, 120);
-    return nw ? g.attach(nw) : [];
+    return nw ? g.attach(nw, { barriers }) : [];
   };
   const nodeAttach = nodes.map(n => attachPortal(n.floor.navGraph, n.ll));
 
@@ -1193,13 +1211,60 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     }
   }
 
+  // Barrier-aware attachments/matrices for routes with blocked interior doors.
+  // Cache per floor + barrier set; the common no-barrier path keeps using the
+  // precomputed nodeAttach/sameFloorSec above.
+  const barrierKey = (barriers) => barriers
+    .map(([a, b]) => `${a[0].toFixed(6)},${a[1].toFixed(6)}:${b[0].toFixed(6)},${b[1].toFixed(6)}`)
+    .join('|');
+  const attachCache = new Map();      // floor -> Map<key, Map<node, attachment>>
+  const matrixCache = new Map();      // floor -> Map<key, Map<"i:j", seconds>>
+  function nodeAttachFor(floor, barriers) {
+    if (!barriers.length) return null;
+    const key = barrierKey(barriers);
+    let byKey = attachCache.get(floor);
+    if (!byKey) attachCache.set(floor, byKey = new Map());
+    let cached = byKey.get(key);
+    if (cached) return cached;
+    cached = new Map();
+    for (let i = 0; i < N; i++) {
+      if (nodes[i].floor !== floor) continue;
+      const att = attachPortal(floor.navGraph, nodes[i].ll, barriers);
+      if (att.length) cached.set(i, att);
+    }
+    byKey.set(key, cached);
+    return cached;
+  }
+  function sameFloorMatrix(floor, barriers) {
+    if (!barriers.length) return sameFloorSec;
+    const key = barrierKey(barriers);
+    let byKey = matrixCache.get(floor);
+    if (!byKey) matrixCache.set(floor, byKey = new Map());
+    let cached = byKey.get(key);
+    if (cached) return cached;
+    cached = new Map();
+    const att = nodeAttachFor(floor, barriers);
+    const g = floor.navGraph;
+    for (let i = 0; i < N; i++) {
+      if (nodes[i].floor !== floor || !att?.has(i)) continue;
+      const run = g.dijkstraFromAttach(att.get(i), { barriers });
+      for (let j = i + 1; j < N; j++) {
+        if (nodes[j].floor !== floor || !att?.has(j)) continue;
+        const {dist} = g.distToAttach(run, att.get(j));
+        if (isFinite(dist)) cached.set(`${i}:${j}`, dist / INDOOR_SPEED);
+      }
+    }
+    byKey.set(key, cached);
+    return cached;
+  }
+
   // Outdoor network: one snap + one Dijkstra run per ground-floor door. Every
   // cross-building outdoor edge reads its cost off those runs, and the same runs
   // reconstruct the polyline for whichever chain the route picks. Snaps use
   // snapClear so the door -> node stub cannot cut through a building.
   const obstacleSegs = [];
   for (const b of buildings) {
-    const ground = b.floors.find(f => f.floorId === b.groundFloor);
+    const ground = b.floors.find(f => floorLevelOf(f.floorId) === 1);
     for (const seg of ground?.obstacleLines ?? []) obstacleSegs.push(seg);
   }
   const outdoor = outdoorShapes?.length
@@ -1283,15 +1348,18 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       const A = nodes[i], B = nodes[j];
       if (A.building === B.building) continue;
       const aWants = A.to === B.building.id, bWants = B.to === A.building.id;
-      if (!aWants && !bWants) {
+      // An explicit destination that names a different building must never be
+      // paired here, even if the other side wants this building.
+      if (A.to && !aWants) continue;
+      if (B.to && !bWants) continue;
+      if (!A.to && !B.to) {
         // Auto fallback: both unmarked. Prefer same-floor pairs, but allow a
         // cross-floor pair when no same-floor candidate exists (a bridge may
         // land on floor 2 in one building and floor 3 in the other). The
         // one-use `bridgeUsed` set still enforces one connection per end.
-        if (A.to || B.to) continue;
         const d = distLL(A.ll, B.ll, scale);
         if (d > SKYBRIDGE_MAX_M) continue;
-        const sameFloor = floorNum(B.floor.floorId) === floorNum(A.floor.floorId);
+        const sameFloor = sameFloorLevel(B.floor.floorId, A.floor.floorId);
         bridgeCandidates.push({i, j, d, rank: sameFloor ? 2 : 3});
       } else {
         bridgeCandidates.push({i, j, d: distLL(A.ll, B.ll, scale), rank: aWants && bWants ? 0 : 1});
@@ -1333,8 +1401,10 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   // --- helpers -------------------------------------------------------------
 
   /** findPath with deterministic retry ring when a portal sits in a wall. */
-  function indoorPath(graph, a, b) {
-    let p = graph.findPath(a, b);
+  function indoorPath(graph, a, b, barriers = []) {
+    const snap = (p) => graph.isWalkable(p) ? p : (graph.nearestWalkable(p, 30) ?? p);
+    a = snap(a); b = snap(b);
+    let p = graph.findPath(a, b, { barriers });
     if (p) return p;
     const offs = [];
     for (let k = 0; k < 8; k++) {
@@ -1344,11 +1414,11 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     const mpr = metresPerDeg(a[1]);
     const jitter = (pt, fx, fy) => [pt[0] + (fx * RETRY_RADIUS_M) / mpr.lon, pt[1] + (fy * RETRY_RADIUS_M) / mpr.lat];
     for (const [fx, fy] of offs) {
-      p = graph.findPath(jitter(a, fx, fy), b);
+      p = graph.findPath(jitter(a, fx, fy), b, { barriers });
       if (p) return [a, ...p.slice(1)];
     }
     for (const [fx, fy] of offs) {
-      p = graph.findPath(a, jitter(b, fx, fy));
+      p = graph.findPath(a, jitter(b, fx, fy), { barriers });
       if (p) return [...p.slice(0, -1), b];
     }
     return null;
@@ -1356,7 +1426,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
 
   /** Vertical travel time between two floors via one connector, seconds. */
   function verticalSeconds(connector, fromFloor, toFloor) {
-    const df = Math.abs(floorNum(fromFloor) - floorNum(toFloor));
+    const df = Math.abs(floorLevelOf(fromFloor) - floorLevelOf(toFloor));
     if (df === 0) return 0;
     return connector.kind === 'elevator'
       ? ELEVATOR_WAIT_S + ELEVATOR_PER_FLOOR_S * df
@@ -1370,18 +1440,65 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
    * Vertical travel to other floors is then just the connector edges in the
    * macro graph, so the route may ascend or descend anywhere.
    */
-  function attachToFloor(floor, point) {
+  function attachToFloor(floor, point, barriers = []) {
     const g = floor.navGraph;
-    const pAtt = g.attach(point);
+    let pAtt = g.attach(point, { barriers });
+    if (!pAtt.length) {
+      const nw = g.nearestWalkable(point, 30);
+      if (nw) pAtt = g.attach(nw, { barriers });
+    }
     if (!pAtt.length) return null;
-    const run = g.dijkstraFromAttach(pAtt);
+    const run = g.dijkstraFromAttach(pAtt, { barriers });
+    const targets = nodeAttachFor(floor, barriers);
     const res = new Map();
     for (let i = 0; i < N; i++) {
       if (nodes[i].floor !== floor) continue;
-      const {dist} = g.distToAttach(run, nodeAttach[i]);
+      const att = targets ? targets.get(i) : nodeAttach[i];
+      if (!att) continue;
+      const {dist} = g.distToAttach(run, att);
       if (isFinite(dist)) res.set(i, {sec: dist / INDOOR_SPEED});
     }
     return res.size ? res : null;
+  }
+
+  /**
+   * Interior doors crossed by one indoor segment, with the distance along the
+   * segment (metres) at which each is crossed. Used both to list portals and
+   * to order them against the macro door/connector nodes.
+   */
+  function interiorPortalsForSegment(seg) {
+    if (seg.tier !== 'indoor' || !seg.polyline?.length) return [];
+    const b = buildings.find((x) => x.id === seg.building);
+    const f = b?.floors.find((x) => x.floorId === seg.floor);
+    const doors = f ? interiorDoorsByFloor.get(f) : null;
+    if (!doors?.length) return [];
+    const g = f.navGraph;
+    const pts = seg.polyline;
+    const ptsM = pts.map(g.toM);
+    const start = pts[0], end = pts.at(-1);
+    const out = [];
+    for (const d of doors) {
+      // The route's own destination doorway (and the doorway it starts at) is
+      // an endpoint, not a door the walker passes through.
+      if (distLL(d.ll, start, scale) <= 2.5 || distLL(d.ll, end, scale) <= 2.5) continue;
+      const a = g.toM(d.barrier[0]), bb = g.toM(d.barrier[1]);
+      let at = null, walked = 0;
+      for (let i = 1; i < ptsM.length && at == null; i++) {
+        if (polylineCrossesSegment([ptsM[i - 1], ptsM[i]], a, bb)) {
+          at = walked + Math.hypot(ptsM[i][0] - ptsM[i - 1][0], ptsM[i][1] - ptsM[i - 1][1]) / 2;
+        }
+        walked += Math.hypot(ptsM[i][0] - ptsM[i - 1][0], ptsM[i][1] - ptsM[i - 1][1]);
+      }
+      if (at == null) continue;
+      out.push({
+        at,
+        portal: {
+          key: interiorDoorKey(b, f, d), kind: 'door', building: b.id,
+          floor: f.floorId, id: `interior-${d.id}`, ll: d.ll, interior: true,
+        },
+      });
+    }
+    return out.sort((x, y) => x.at - y.at);
   }
 
   /**
@@ -1479,6 +1596,15 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     const avoid = new Set(opts.avoidPortals ?? []);
     const avoidIdx = new Set();
     for (let i = 0; i < N; i++) if (avoid.has(portalKey(nodes[i]))) avoidIdx.add(i);
+    const blockedDoors = new Map();   // floor -> barrier segments
+    for (const key of avoid) {
+      const hit = interiorDoorByKey.get(key);
+      if (!hit) continue;
+      let list = blockedDoors.get(hit.f);
+      if (!list) blockedDoors.set(hit.f, list = []);
+      list.push(hit.d.barrier);
+    }
+    const barriersFor = (floor) => blockedDoors.get(floor) ?? [];
     const startHit = buildingAt(startLL, opts.startFloor);
     const endHit = buildingAt(endLL, opts.endFloor);
 
@@ -1497,18 +1623,20 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     // good as anything routed through exits.
     if (startHit && endHit &&
         startHit.building === endHit.building && startHit.floor === endHit.floor) {
-      const p = indoorPath(startHit.floor.navGraph, startLL, endLL);
+      const barriers = barriersFor(startHit.floor);
+      const p = indoorPath(startHit.floor.navGraph, startLL, endLL, barriers);
       if (p) {
         const meters = polyLength(p, scale);
+        const segment = {
+          tier: 'indoor', building: startHit.building.id, floor: startHit.floor.floorId,
+          polyline: p, meters, seconds: meters / INDOOR_SPEED,
+        };
         return {
-          segments: [{
-            tier: 'indoor', building: startHit.building.id, floor: startHit.floor.floorId,
-            polyline: p, meters, seconds: meters / INDOOR_SPEED,
-          }],
+          segments: [segment],
           totalSeconds: meters / INDOOR_SPEED,
           totalMeters: meters,
           summary: `${startHit.building.id} ${startHit.floor.floorId} (indoor)`,
-          portals: [],
+          portals: interiorPortalsForSegment(segment).map((x) => x.portal),
         };
       }
       // fall through: same floor but no direct line - route via exits
@@ -1520,12 +1648,12 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     let origin = null, dest = null;
     let startSnap = null, endSnap = null, startRun = null, endRun = null;
     if (startHit) {
-      origin = attachToFloor(startHit.floor, startLL);
+      origin = attachToFloor(startHit.floor, startLL, barriersFor(startHit.floor));
     } else {
       startSnap = outdoor ? outdoor.snapClear(startLL) : null;
     }
     if (endHit) {
-      dest = attachToFloor(endHit.floor, endLL);
+      dest = attachToFloor(endHit.floor, endLL, barriersFor(endHit.floor));
     } else {
       endSnap = outdoor ? outdoor.snapClear(endLL) : null;
     }
@@ -1559,6 +1687,25 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     // Node ids 0..N-1 are exits; N = virtual source, N+1 = virtual sink.
     const SRC = N, SNK = N + 1;
     const adj = macroAdj.map(l => l.filter(([v]) => !avoidIdx.has(v)));
+    // Blocked interior doors invalidate the precomputed same-floor matrix for
+    // that floor. Recompute just those edges for this route.
+    if (blockedDoors.size) {
+      for (let i = 0; i < N; i++) {
+        const floor = nodes[i].floor;
+        if (!barriersFor(floor).length) continue;
+        adj[i] = adj[i].filter(([v]) =>
+          !(nodes[v].floor === floor && macroEdge.get(`${i}:${v}`)?.kind === 'indoor'));
+      }
+      for (const floor of blockedDoors.keys()) {
+        for (const [key, sec] of sameFloorMatrix(floor, barriersFor(floor))) {
+          const [i, j] = key.split(':').map(Number);
+          adj[i].push([j, sec]);
+          adj[j].push([i, sec]);
+          macroEdge.set(`${i}:${j}`, { kind: 'indoor' });
+          macroEdge.set(`${j}:${i}`, { kind: 'indoor' });
+        }
+      }
+    }
     adj.push([]); adj.push([]);
     for (const [ei, {sec}] of origin) adj[SRC].push([ei, sec]);
     for (const [ei, {sec}] of dest) adj[ei].push([SNK, sec]);
@@ -1600,32 +1747,37 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
     chain.reverse(); // SRC, exit..., SNK
 
     const segments = [];
+    const segEndNode = [];   // chain node at the end of each segment (null for clicks)
     let totalMeters = 0;
 
     /** One outdoor segment from a full polyline (click -> exit legs). */
-    const addOutdoorPoly = poly => {
+    const addOutdoorPoly = (poly, endNode = null) => {
       const meters = polyLength(poly, scale);
       totalMeters += meters;
       segments.push({tier: 'outdoor', polyline: poly, meters, seconds: meters / OUTDOOR_SPEED});
+      segEndNode.push(endNode);
     };
-    const addPoly = (seg) => {
+    const addPoly = (seg, endNode = null) => {
       const meters = seg.polyline ? polyLength(seg.polyline, scale) : 0;
       totalMeters += meters;
       const speed = seg.tier === 'outdoor' ? OUTDOOR_SPEED : INDOOR_SPEED;
       segments.push({...seg, meters, seconds: meters / speed});
+      segEndNode.push(endNode);
     };
-    const addVertical = (seg) => {
+    const addVertical = (seg, endNode = null) => {
       const seconds = verticalSeconds({kind: seg.tier}, seg.fromFloor, seg.toFloor);
       segments.push({...seg, meters: 0, seconds});
+      segEndNode.push(endNode);
     };
 
     // prefix: start point -> first node
     const firstIdx = chain[1];
     if (startHit) {
-      const p = indoorPath(startHit.floor.navGraph, startLL, nodes[firstIdx].ll);
-      if (p) addPoly({tier: 'indoor', building: startHit.building.id, floor: startHit.floor.floorId, polyline: p});
+      const p = indoorPath(startHit.floor.navGraph, startLL, nodes[firstIdx].ll,
+        barriersFor(startHit.floor));
+      if (p) addPoly({tier: 'indoor', building: startHit.building.id, floor: startHit.floor.floorId, polyline: p}, firstIdx);
     } else {
-      addOutdoorPoly(origin.get(firstIdx).polyline);
+      addOutdoorPoly(origin.get(firstIdx).polyline, firstIdx);
     }
 
     // macro chain legs
@@ -1636,17 +1788,18 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
         addVertical({tier: desc.tier, building: nodes[a].building.id,
                      fromFloor: desc.fromFloor, toFloor: desc.toFloor,
                      // The connector landing, so a 3D view can draw the riser.
-                     ll: nodes[a].ll});
+                     ll: nodes[a].ll}, b);
       } else if (desc?.kind === 'skybridge') {
         addPoly({tier: 'skybridge', building: nodes[b].building.id,
                  floor: nodes[a].floor.floorId,
                  // Explicit bridges may join different floors (a grade
                  // change); carry both ends so the view can place the line.
                  fromFloor: nodes[a].floor.floorId, toFloor: nodes[b].floor.floorId,
-                 polyline: [nodes[a].ll, nodes[b].ll]});
+                 polyline: [nodes[a].ll, nodes[b].ll]}, b);
       } else if (desc?.kind === 'indoor') {
-        const p = indoorPath(nodes[a].floor.navGraph, nodes[a].ll, nodes[b].ll);
-        if (p) addPoly({tier: 'indoor', building: nodes[a].building.id, floor: nodes[a].floor.floorId, polyline: p});
+        const p = indoorPath(nodes[a].floor.navGraph, nodes[a].ll, nodes[b].ll,
+          barriersFor(nodes[a].floor));
+        if (p) addPoly({tier: 'indoor', building: nodes[a].building.id, floor: nodes[a].floor.floorId, polyline: p}, b);
       } else {
         // outdoor: door stub -> path network -> door stub
         const ra = outdoorRuns[a], rb = outdoorRuns[b];
@@ -1655,26 +1808,52 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
           const p = outdoor.pathOf(ra.run, rb.snap.node);
           if (p) poly = [nodes[a].ll, ...p, nodes[b].ll];
         }
-        addOutdoorPoly(poly);
+        addOutdoorPoly(poly, b);
       }
     }
 
     // suffix: last node -> end point
     const lastIdx = chain[chain.length - 2];
     if (endHit) {
-      const p = indoorPath(endHit.floor.navGraph, nodes[lastIdx].ll, endLL);
+      const p = indoorPath(endHit.floor.navGraph, nodes[lastIdx].ll, endLL,
+        barriersFor(endHit.floor));
       if (p) addPoly({tier: 'indoor', building: endHit.building.id, floor: endHit.floor.floorId, polyline: p});
     } else {
       addOutdoorPoly(dest.get(lastIdx).polyline);
     }
 
+    // Portals in route order: macro doors/connectors interleaved with the
+    // interior doors each indoor leg actually crosses.
+    // Portals in route order. Each segment records the macro node at its end;
+    // interior-door crossings carry their distance along the segment. Sorting
+    // those two distance lists gives the walker's real order.
     const portals = [];
-    for (let k = 1; k < chain.length - 1; k++) {
-      const n = nodes[chain[k]];
-      if (n.kind === 'door' || n.kind === 'connector') {
-        portals.push({key: portalKey(n), kind: n.kind, building: n.building.id,
-                      floor: n.floor.floorId, id: n.id ?? null, ll: n.ll});
+    const seenPortals = new Set();
+    const entries = [];
+    let walked = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const s = segments[i];
+      for (const {at, portal} of interiorPortalsForSegment(s)) {
+        entries.push({ at: walked + at, portal });
       }
+      walked += polyLength(s.polyline ?? [], scale);
+      const endIdx = segEndNode[i];
+      if (endIdx != null) {
+        const n = nodes[endIdx];
+        if (n && (n.kind === 'door' || n.kind === 'connector')) {
+          entries.push({
+            at: walked,
+            portal: {key: portalKey(n), kind: n.kind, building: n.building.id,
+                     floor: n.floor.floorId, id: n.id ?? null, ll: n.ll},
+          });
+        }
+      }
+    }
+    entries.sort((a, b) => a.at - b.at);
+    for (const { portal } of entries) {
+      if (!portal || seenPortals.has(portal.key)) continue;
+      seenPortals.add(portal.key);
+      portals.push(portal);
     }
 
     const totalSeconds = segments.reduce((a, s) => a + (s.seconds || 0), 0);
