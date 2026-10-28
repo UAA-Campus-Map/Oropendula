@@ -28,15 +28,20 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 |---|------|--------|-------------|
 | 1 | [geo.md](geo.md) | `geo.mjs` | DXF↔lon/lat registration and metres-per-degree |
 | 2 | [navgraph.md](navgraph.md) | `navgraph.mjs` | per-floor clearance raster + visibility graph + Dijkstra |
-| 2a | [navgraph-bundles.md](navgraph-bundles.md) | `navgraph-codec.mjs` + runtime | cached binary navGraph format, exports and boot path |
+| 2a | [navgraph-bundles.md](navgraph-bundles.md) | `navgraph-codec.mjs` + runtime | cached binary navGraph format, hashes, exports and boot path |
+| 2b | `navgraph-source.mjs` | shared graph inputs | wall/door extraction, input hash, wall bbox |
 | 3 | [campus.md](campus.md) | `campus.mjs` | portals, doors, skybridges, the outdoor graph, and the tiered router |
 | 4 | [osm.md](osm.md) | `osm.mjs` | OpenStreetMap roads → the same shape format, for outdoor legs |
 | 5 | [pmtiles-node.md](pmtiles-node.md) | `pmtiles-node.mjs` | dependency-free PMTiles reader for the tests |
 | 6 | [motion.md](motion.md) | `motion.mjs` | step detection, compass heading, step-length model, sensor wiring |
+| 6a | `doorways.mjs` | doorway geometry | DOOR-leaf clustering, wall-aligned barriers, crossing tests |
+| 6b | `roompin.mjs` | Room Pin | exact room -> one hallway door -> hallway point |
 | 7 | [locate.md](locate.md) | `locate.mjs` | the map-matching **particle filter** (PDR) + corridor heading |
 | 8 | [arbiter.md](arbiter.md) | `arbiter.mjs` | fuses GPS and PDR continuously, picks the more certain one |
 | 9 | [autocal.md](autocal.md) | `autocal.mjs` | online step-length calibration from GPS |
+| 9a | [anchorcal.md](anchorcal.md) | `anchorcal.mjs` | step-length refinement from manual position pairs |
 | 10 | [align.md](align.md) | `align.mjs` | rigid floor alignment for the import tool |
+| 10a | [floors.md](floors.md) | `floors.mjs` | basement ordering, labels and 3D levels |
 | 11 | [tooling.md](tooling.md) | workers + scripts | `gen-osm`, `gen-navgraphs`, `gen-portals`, `navgraph-worker`, `navgraph-bundle-worker`, `zip`, `basis-worker`, `smoke.mjs` |
 | 12 | [apps.md](apps.md) | HTML entry points | `app.html`, `index.html`, `import.html`, `places.html`, `locate-test.html` |
 | 13 | [places.md](places.md) | `places.mjs` | place nicknames in search, student favorites, form voting |

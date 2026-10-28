@@ -27,10 +27,13 @@ Directions are **undirected**: every bearing is folded into `[0, PI)`.
   door normal (perpendicular to the nearest wall). Weight 3 — "through the door"
   is a strong option.
 
-It is built **per floor, client-side, inside the navgraph worker**, and returned
-as part of the graph state. Nothing on the server is precomputed or cached;
-`graphFromState` rehydrates it into a query closure (`graph.headingField`). The
-only cost is the normal per-page-load floor processing.
+It is built **per floor, client-side**. The fallback on-device build creates it
+inside the navgraph worker and returns it in the graph state; cached `.nvg.gz`
+bundles omit passages, so `makeBundleGraph()` installs `ensureHeadingField()`
+and builds the field lazily on the **main thread** the first time the locator
+needs directions near that plan. `graphFromState` rehydrates a supplied field
+into a query closure (`graph.headingField`). Nothing is precomputed on the
+server; boot never pays the full campus passage cost.
 
 ## Querying: `makeHeadingField(passages, { toM })`
 

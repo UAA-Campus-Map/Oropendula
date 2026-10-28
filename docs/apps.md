@@ -10,8 +10,10 @@ is retired). Basemap/style and PMTiles assets are served from the same domain.
 
 ## `app.html` — the modern "Navigator" frontend
 
-A single-page, mobile-first reskin of the demo using the **same modules and
-logic** as `index.html`, with a redesigned presentation layer: glass surfaces,
+A single-page, mobile-first Navigator sharing the core routing, PDR and
+search modules with `index.html`, with production-only additions (cached
+navGraph bundles, place search/favorites, Room Pin, interior-door blocking and
+the calibration modal). Presentation: glass surfaces,
 CSS custom properties, light/dark via `prefers-color-scheme`, safe-area insets, a
 top bar (search + floor stepper + status chip), right-edge icon buttons,
 bottom-left action pills, a branded splash, and subtle haptics.
@@ -63,19 +65,23 @@ The right-edge **Locate by room** button places a manual PDR anchor in the
 hallway outside a room in the current building. It accepts either a bare room
 number (`211`, defaulting to the current building) or a building code plus room
 (`AS124 211` / `LIB 211`), using the same longest-code matching as the search
-bar. It requires an exact, unique room match, clusters DOOR-layer leaves into
-doorways, and only accepts a door that opens onto a hallway. If the room has
-multiple hallway doors, multiple hallways, no hallway door, or an open exterior
-gap, it refuses to place the pin. A successful placement stops GPS, binds PDR
-to that building/floor, and seeds the particle cloud at the centre of the
-hallway outside the door.
+bar. It requires an exact, unique room match and clusters DOOR-layer leaves
+into physical doorways with a wall-aligned barrier. A door is accepted only
+when a point across its wall reaches another doorway without crossing any
+doorway bar (so the point is outside the room and on a hallway, and not a
+wall/vestibule). It refuses ambiguous rooms and rooms with multiple hallway
+doors. A successful placement stops GPS, binds PDR to that building/floor, and
+seeds the particle cloud at the centre of the hallway outside the door.
 
 ### Blocked doors/staircases
 
 The red crossed-circle button opens **Mark door blocked?**. Confirming blocks
-the next door or staircase on the current route for this session and re-plans
-from the same origin/destination. Blocked portals are passed to
-`campusRouter.route(..., {avoidPortals})`; no other route is affected.
+the next exterior door, interior door or staircase on the current route for
+this session and re-plans from the same origin/destination. Interior doors are
+wall-aligned barriers, so blocking one removes that opening without blocking
+other doors. Blocked portals are passed to
+`campusRouter.route(..., {avoidPortals})`; the session-wide block set applies to
+every later route until reload, and there is deliberately no unblock UI.
 
 ### First-load interface tour
 
@@ -90,10 +96,11 @@ calibration controls with 3–10 word descriptions. The final button says
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
 - **Cached graphs:** boot fetches each building's `graphUrl` bundle in parallel,
-  gunzips/decodes it, and rehydrates a `graphFromState` graph. A missing,
-  corrupt, or floor-mismatched bundle falls back to the worker/synchronous
-  on-device build for that floor. Passages/heading fields are built lazily when
-  the locator first needs compass directions near a plan.
+  gunzips/decodes it, and rehydrates a `graphFromState` graph. Each floor block
+  stores a `sourceHash` of the wall/door inputs; a missing, corrupt,
+  building-mismatched, or hash-mismatched bundle falls back to the
+  worker/synchronous on-device build for that floor. Passages/heading fields
+  are built lazily when the locator first needs compass directions near a plan.
 - `positionSeeded` suppresses the live marker and re-routing until an absolute
   source (GPS, "I'm Here", or a finished calibration) has seeded the cloud — the
   boot seed at the map centre is a guess and must not move the map.
@@ -102,15 +109,25 @@ calibration controls with 3–10 word descriptions. The final button says
 
 ## `index.html` — the original demo
 
-The older desktop-friendly UI, same pipeline. It retains the line-walk
-"Calibrate walking model" panel. `?dev=1` reveals the developer "Find Path"
-button and the on-map particle overlay.
+The older desktop-friendly UI, sharing the core routing/PDR modules but **not**
+the app’s cached-bundle boot, place/favorites features, Room Pin, interior-door
+blocking or calibration modal. It retains the line-walk "Calibrate walking
+model" panel. `?dev=1` reveals the developer "Find Path" button and the on-map
+particle overlay.
+
+### Archived demos
+
+`index2.html`, `index3.html`, `index_v1.html` and `index_v2.html` are older
+experiments kept in the tree for reference. They are not part of the production
+path, are not covered by the smoke suite, and some reference historical assets.
+Do not deploy or document them as live entry points.
 
 ## `import.html` — the authoring tool
 
-Loads a DXF floor, places it with `geo.mjs`, aligns stacked floors with
-`align.mjs`, tags portals, and writes the floor JSON + the `buildings-config.json`
-registration (including the cached portal set). **Buildings are added through this
+Loads an already-extracted floor JSON (the DXF extractor is external), places it
+with `geo.mjs`, aligns stacked floors with `align.mjs`, tags portals, and writes
+the `buildings-config.json` registration (including the cached portal set). Floor
+JSONs themselves are uploaded separately. **Buildings are added through this
 tool, never by hand-editing `index.html`.**
 
 The Deploy section also generates per-building navGraph bundles
@@ -119,9 +136,11 @@ The Deploy section also generates per-building navGraph bundles
 building. Use the current-building button for one bundle or "Download all
 navgraph bundles" for a full regeneration.
 
-**Deploy diff:** "Check changes vs deployed" compares the draft config with the
-server's `buildings-config.json` (canonical JSON, by building id) and reports
-added/changed/removed buildings. "Download changed buildings (.zip)" builds a
+**Deploy diff:** "Check changes vs deployed" recomputes each building's
+graph-input fingerprint from the local floor JSONs and compares the draft
+config with the server's `buildings-config.json` (canonical JSON, by building
+id); it reports added/changed/removed buildings. This catches a wall change even
+when no config field was edited. "Download changed buildings (.zip)" builds a
 single ZIP with the full `buildings-config.json`, full `osm-paths.json` (or a
 freshly generated one if the cache is stale), and `.nvg.gz` files only for added
 or changed buildings. Unchanged bundles are not included. Floor JSONs are not

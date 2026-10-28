@@ -11,7 +11,9 @@ omits everything that can be recreated cheaply:
 - each undirected edge is stored once (`j > i`);
 - edge weights are **omitted** and recomputed from node positions;
 - the clearance raster is run-length encoded;
-- passages and heading fields are **omitted** and rebuilt lazily.
+- passages and heading fields are **omitted** and rebuilt lazily;
+- a per-floor `sourceHash` of the wall/door inputs lets boot reject a bundle
+  that no longer matches its floor JSON.
 
 The current campus (24 buildings, 75 floors) is about **32.7 MB raw** and
 **3.2 MB gzip**; the `.nvg.gz` files that cross the wire are comfortably below
@@ -79,6 +81,7 @@ asserts a little-endian platform; all current target browsers/devices are.
       "nodes": 8082,
       "edges": 479303,
       "runs": 4321,
+      "sourceHash": "1p31r8q",
       "origin": [-149.8339, 61.1894],
       "scale": [111412.84, 111132.92],
       "OX": 12.34,
@@ -100,6 +103,8 @@ asserts a little-endian platform; all current target browsers/devices are.
 - `runs`: number of `blocked` RLE runs.
 - `origin`, `scale`: local metre frame from `buildGraphState()`.
 - `OX`, `OY`, `W`, `H`: clearance raster origin and dimensions.
+- `sourceHash`: `graphInputHash()` of the exact wall/door inputs used to build
+  the block. It is stored in the bundle and recomputed on boot.
 
 Floor offsets are 8-byte aligned. The payload may contain padding between floor
 blocks and at the end of a block.
@@ -245,8 +250,8 @@ const { block, meta } = encodeFloorBlock(state);
 - Returns an 8-byte-aligned `Uint8Array` block and its metadata.
 - `meta` contains `nodes`, `edges`, `runs`, `origin`, `scale`, `OX`, `OY`, `W`,
   `H`, and `length`.
-- Throws on malformed state, invalid adjacency, unsupported blocked length, or
-  duplicate/self edges.
+- Throws on malformed state, invalid adjacency, unsupported blocked length,
+  duplicate/self edges, or a non-string `sourceHash`.
 
 This is the method used inside the import-tool bundle worker.
 
@@ -438,8 +443,9 @@ The CLI uses the same codec and source extraction as the import tool. Use
 3. Maps decoded floors by `floorId`.
 4. For each floor, `loadFloor()` calls `makeBundleGraph()` with the floor's
    wall/door inputs.
-5. If a bundle is missing, corrupt, has the wrong building id, or lacks a floor,
-   that floor falls back to the existing worker/synchronous `buildGraph()` path.
+5. If a bundle is missing, corrupt, has the wrong building id, lacks a floor, or
+   its `sourceHash` differs from the current floor JSON, that floor falls back to
+   the existing worker/synchronous `buildGraph()` path.
 6. `buildCampusRouter()` consumes the same graph objects as before.
 7. Heading fields are built lazily when the locator first needs compass
    directions near a plan.
@@ -458,7 +464,8 @@ behaviour, and the boots are expected to download bundles again.
 - non-monotonic offsets, wrong `off[n]`, out-of-range/self/duplicate neighbours;
 - blocked runs that exceed or fail to cover `W * H`;
 - unsupported platform endianness;
-- truncated blocks.
+- truncated blocks;
+- a non-string `sourceHash`.
 
 Gzip corruption is detected by `gunzipBytes()`/the platform decompressor. The
 app treats any decode failure as a signal to fall back to on-device graph
@@ -485,7 +492,7 @@ For a full artifact check:
 node gen-navgraphs.mjs --check
 ```
 
-Current output is 75 floors, 188,857 nodes, 6,748,323 undirected edges, about
+Current output is 75 floors, 188,841 nodes, 6,748,849 undirected edges, about
 **32.7 MB raw** and **3.2 MB gzip** across the 24 per-building files.
 
 ## Versioning

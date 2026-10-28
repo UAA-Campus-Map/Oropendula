@@ -98,9 +98,10 @@ the belief does *not* collapse on its own.)
   weight); empty until seeded.
 - `version` is bumped whenever the cloud changes, so the renderer can skip
   rebuilding the overlay for GPS-only estimates.
-- Fixed particle count (`DEFAULT_COUNT = 1000`); arrays are sized once and the
-  resample is allocation-free (ping-pong buffers). `predict` is ~O(N) at ~1 µs
-  per particle.
+- Fixed particle count (`DEFAULT_COUNT = 1000`, also the constructor default);
+  arrays are sized once and the resample is allocation-free (ping-pong buffers).
+  Per-step defaults: `headingJitterDeg = 35`, `distanceNoise = 0.22`,
+  `lateralNoiseM = 0.20`, `roughenM = 0.20`. `predict` is O(N).
 
 ## See also
 

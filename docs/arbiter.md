@@ -43,8 +43,10 @@ The arbiter's inputs are the raw GPS fix and the raw steps + heading from
 
 ## Implementation notes
 
-- `metresSinceCorrection` grows by `stepLengthM` per step and resets on a fix or
-  an anchor; it drives `pdrAccuracy()`.
+- `metresSinceCorrection` grows by `stepLengthM` per step. It resets only when
+  an outdoor GPS fix actually re-seeds the cloud, or on a manual anchor; a
+  plausible fix that does not re-seed leaves it growing. It drives
+  `pdrAccuracy()`.
 - While committed to GPS, the last good fix is **held** for `gpsHoldS` through a
   switch window so the display neither jumps nor flaps before hysteresis commits
   to PDR.

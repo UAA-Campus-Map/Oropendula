@@ -39,7 +39,10 @@ to charge a heavy routing penalty for crossing named roads.
   converts local pixels to lon/lat.
 - `gen-osm.mjs` precomputes this at build time into `osm-paths.json` so the app
   does not pay the fetch+decode cost per load; the app falls back to live decode
-  when the cache is missing or does not cover the campus bbox.
+  when the cache is missing or does not cover the campus bbox. The bbox includes
+  each floor's `wallBBox` as well as portals/exits, matching the import tool.
+- Malformed MVT tiles are skipped and counted in `stats.badTiles`; one bad tile
+  does not stop the campus decode.
 - `import.html`’s **Download osm-paths.json** builds the bbox from the union of
   the draft config, the **deployed** config (localStorage can lag the server),
   and each floor’s **wall extents** — not just portal points — so a stale draft

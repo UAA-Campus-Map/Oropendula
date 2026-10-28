@@ -21,8 +21,8 @@ in code, docs, deployment, and import-tool settings.
 
 - `navgraph.mjs` — **frozen; only additive changes are permitted.** `buildGraph(
   wallLines)` returns `{findPath(a, b), nodes, stats, isWalkable, nearestWalkable}`;
-  `findPath(p, p) !== null` doubles as a point-inside test (basis of
-  `buildingAt`). Walls are *obstacles*; it routes free space around them on a
+  `attach(ll)` returns the nodes a point can see and is the basis of
+  `buildingAt` and route attachment. Walls are *obstacles*; it routes free space around them on a
   ~0.1 m grid extending ~0.45 m past the wall bbox. `isWalkable(ll)` is an O(1)
   lookup into that same clearance raster (used by the PDR particle filter and
   the GPS-validity gate); `nearestWalkable(ll, radiusCells)` spirals out to the
@@ -34,8 +34,11 @@ in code, docs, deployment, and import-tool settings.
   Existing behaviour is untouched. `navgraph-codec.mjs` packs the serializable
   half into compact per-building `<id>.nvg.gz` bundles: Float64 nodes, undirected
   CSR adjacency, RLE blocked raster, no weights, no passages.
-  `buildings-config.json` points at them with `graphUrl`; `gen-navgraphs.mjs`
-  and the import tool's Deploy section generate them. See
+  `buildings-config.json` points at them with `graphUrl` and stores each floor's
+  `graphHash`, the building `graphFingerprint` and `wallBBox`; each bundle floor
+  also carries `sourceHash`, so boot rejects a bundle that does not match its
+  floor JSON. `gen-navgraphs.mjs` and the import tool's Deploy section generate
+  them. See
   `docs/navgraph-bundles.md` for the byte layout and codec/runtime API.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
@@ -292,7 +295,7 @@ stores the result on each floor entry of `buildings-config.json` as
 
 ## Performance
 
-The campus grew to ~11 floors / 115 exits and load was ~40 s. Fixes so far:
+The campus grew to 24 buildings / 75 floors and load was once ~40 s. Fixes so far:
 
 1. **Portal cache** (above) — skips `extractPortals` (~4 s).
 2. **Exit distance matrix, O(k) not O(k²)** — the macro graph used to call
@@ -345,13 +348,11 @@ The campus grew to ~11 floors / 115 exits and load was ~40 s. Fixes so far:
    during HTML parse. Measured from the live site: floor network 12.6 s serial
    raw → 1.3 s parallel gzipped.
 
-Remaining first-load cost is **CPU on the main thread**: with 8 buildings /
-17 floors, `buildGraph` measures ~6.7 s and `buildCampusRouter` ~2.5 s
-(JSON.parse is only ~100 ms). Rebuilding the navGraph visibility graph is
-inherent; the next levers are a Web Worker build (needs serialising the graph
-data, since the returned object carries closures) or an IndexedDB cache keyed
-by a wall hash. Lazy/background navGraph build would improve perceived
-startup.
+Before cached bundles, the remaining first-load cost was **CPU on the main
+thread**: with the then-current 8 buildings / 17 floors, `buildGraph` measured
+~6.7 s and `buildCampusRouter` ~2.5 s. The per-building `.nvg.gz` bundles now
+avoid the visibility-graph build; the worker/synchronous path remains for a
+missing or stale bundle (and the import tool).
 
 ## The OSM layer (osm.mjs)
 
@@ -442,15 +443,10 @@ showRoomLabels, wallLayerId?, roomLayerId?}]}`.
   refresh changed walls only on AS105-02, AS121-03 and AS150-02; those three
   bundles were regenerated.
 
-Current registrations: AS103 `{0,0,0}`, AS101 `{2880,390,0.005}`,
-AS102 `{1392,1144,0}`, AS105 `{267,0,119.39}`, AS106 `{475,400,0}` (floor-
-level). AS112 exists in the repo but is unregistered — add it with import.html.
-
-Current exit counts after the geometry and seal fixes: AS103 9, AS101 8,
-AS102 7, AS105 14, AS106 12 (50 total). Several still-drawn doorways are
-correctly interior (open-swing inner doors, doors onto walled vestibules);
-known leftovers the user deferred: AS105 has fewer exits than the drawing's
-facade suggests, AS103 lost one.
+Current data: **24 registered buildings, 75 floors** (see
+`buildings-config.json`; AS112 is registered). Effective exterior doors are the
+manual `floor.exits` list, falling back to the algorithm's portal cache; smoke
+checks every floor and every building's exits.
 
 ## Positioning (PDR + GPS)
 
@@ -523,8 +519,9 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   persisted as `pdr-heading-trim`. The calibration walk is authoritative - it
   absorbs the trim into the base and recentres the slider - so the two can
   never double-count.
-- **Hallway heading-drift correction** (`HeadingDriftCalibrator`, wired in
-  `index.html`'s `onStep`). The compass drifts indoors; a person walking a
+- **Hallway heading-drift correction** (`CompassSnapper` in `app.html` and
+  `index.html`; `HeadingDriftCalibrator` remains the older reference class).
+  The compass drifts indoors; a person walking a
   narrow hallway walks parallel to the walls, so the floor plan can correct it.
   Once the walker has gone **6 consecutive near-straight steps** (per-step
   change ≤6°, net over the streak ≤15°) in a clearly elongated space, a small
@@ -717,29 +714,21 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   arbiter also seeds on the first plausible GPS fix. Without this, steps are
   counted and heading is fine but the marker never moves (the "PDR not
   implemented" bug).
-- **Adaptive count, global seeds, and a shape-preserving heading mode** (build
-  toward no-georeference localization). `ParticleFilter` gained:
-  - `adaptive` + `maxCount`/`minCount`: the active `count` is chosen per resample
-    by **KLD-sampling** (Fox 2003) over lat/lon/heading bins, so a big global
-    prior can shed particles as the belief narrows; fixed-count filters are
-    unchanged (`adaptive:false`). Arrays are allocated at `maxCount`; the
-    resample is allocation-free (ping-pong buffers).
-  - `seedUniform(box)`: scatter particles uniformly over a floor's walkable area
-    (no positional prior) - a whole-floor / campus cold start.
+- **Shape-preserving heading mode and allocation-free resampling.**
   - `persistentHeadingDeg`: draw ONE heading offset per particle instead of
     i.i.d. per-step jitter, so a trajectory's SHAPE constrains the belief.
+  - The filter has a fixed particle count (arrays sized once); there is no
+    adaptive/KLD count and no `seedUniform()` in the current class.
   - Perf: one `metresPerDegree` per step (was per particle), a 2-sample fast
     path in `_advance` (a step <= 1 m cannot jump the ~0.6 m clearance band),
     and no per-resample array allocation (fixed-1000 `predict` ~0.73 -> ~0.43 ms).
   - **Measured finding (important):** with PDR ALONE the belief does NOT
-    collapse - over a 24-step square+hallway the occupied 1 m bins stayed at
-    ~4-8k (most of a floor), so KLD pins N at `maxCount`. A straight hallway is
-    translation-invariant; even a square leaves many candidates. "Each step cuts
-    the particles" is therefore NOT true for pure PDR - it only happens once an
-    ABSOLUTE observation lands (a point / a known floor or room entry), or with a
-    hard grid-prune. 40k runs at ~9-13 ms/step (desktop Node); mobile ~3-4x, so
-    run it OFF the render thread or time-slice it, and start from a KNOWN FLOOR
-    (~8k bins) rather than the whole campus.
+    collapse. A straight hallway is translation-invariant; even a square leaves
+    many candidates. "Each step cuts the particles" is therefore NOT true for
+    pure PDR - it only happens once an ABSOLUTE observation lands (a point / a
+    known floor or room entry). The production filter uses a fixed 1000
+    particles; keep it on a known floor rather than treating PDR as a global
+    localiser.
 - **The filter trusts the compass (≤90° off) and the arbiter's accuracy.**
   `ParticleFilter` now enforces, on top of the existing soft wall weighting
   (non-walkable = 0.02) and resampling:
@@ -822,15 +811,14 @@ fallback certifying, cadence normalisation, and split-half inconsistency
 withholding the claim. Debug
 scripts live in `/tmp/opencode/` (`dbg-*.mjs`) and are not part of the repo.
 
-As of the Oct 2026 floor refresh, the suite still reports one pre-existing
-failure in "all 12 building pairs route without cutting walls": the test starts
-at `text_lines[0]`, which is a shaft in AS118 and a doorless room in AS154. The
-same 90 pairs fail on the pre-refresh JSONs, so it is a test-fixture bug, not a
-routing regression. Do not deploy on a red gate; fix or explicitly annotate that
-fixture first.
+The building-pair check now starts at a real exit for each building (the old
+`text_lines[0]` fixture hit a shaft in AS118 and a doorless room in AS154) and
+checks outdoor cuts against level-1 walls only, since a ground path may pass
+under an upper-floor bridge (AS164-03).
 
-Runtime ~24 s wall / ~38 s CPU (8 buildings / 17 floors; varies with machine
-load and the live OSM fetch). The per-floor basis (JSON parse, wall segments,
+The full suite is several hundred checks over 24 buildings / 75 floors; runtime
+varies with machine load and the live OSM fetch. `router` loads the real campus
+and takes minutes; use the focused categories while iterating. The per-floor basis (JSON parse, wall segments,
 `buildGraphState`, fresh `extractPortals`) is independent per floor and runs in
 a small pool of **worker threads** (`basis-worker.mjs`), rehydrated with
 `graphFromState` — verified byte-identical to the inline path (same checks and
@@ -853,8 +841,8 @@ remote debugging) **without asking the user first.** Ask for a screenshot (or
 permission) instead - the user can supply them. UI verification is otherwise
 manual on the deployed page.
 
-`node --cpu-prof` self-time after the cuts: `buildGraph` ~9.5 s of CPU across
-17 floors (down to ~3.7 s wall in the worker pool), `dijkstraFromAttach` ~9 s
+An older `node --cpu-prof` run (17 floors, before cached bundles) showed
+`buildGraph` ~9.5 s of CPU (down to ~3.7 s wall in the worker pool), `dijkstraFromAttach` ~9 s
 (router attachment/matrix + per-route walks), `attach` ~5.5 s (`buildingAt`
 loops, exit reachability), GC ~4 s, live OSM fetch/decode ~3 s.
 
@@ -890,10 +878,12 @@ List the changed paths with `git status --short` first so nothing is missed and
 nothing extra is sent. The large static assets (floor JSONs, PMTiles, MapLibre
 `*.mjs`) only need re-uploading when they themselves change.
 
-A floor-data refresh must be deployed as a pair: every changed floor JSON plus
-the regenerated `.nvg.gz` for each building whose **wall** geometry changed. The
-runtime only checks the bundle's building/floor ids, not its geometry, so a
-mixed JSON/bundle deploy silently draws one plan and routes on another.
+A floor-data refresh should still be deployed as a pair — every changed floor
+JSON plus the regenerated `.nvg.gz` for each building whose wall geometry
+changed. The bundle now stores a `sourceHash` of its inputs and boot falls back
+to an on-device build on a mismatch, so a mixed deploy is detected rather than
+silently routing on the old graph (the first load is slower until the pair is
+uploaded).
 
 ### Deploying building additions (no server-side commands)
 
@@ -1149,8 +1139,10 @@ nicknames, never a failed boot. Details, server setup and invariants:
   text is only written when it changes.
 - **navGraph builds run in a Worker** (`navgraph-worker.mjs`, one module worker
   created at module load). `buildGraphState` is ~0.1-1.2 s per floor on desktop
-  (3-4x mobile) and boot used to run it synchronously for all ~18 floors
-  (**~6.7 s** desktop / ~20 s+ mobile of frozen main thread in ~1 s chunks).
+  (3-4x mobile) and boot once ran it synchronously for every floor (75 today;
+  **~6.7 s** desktop / ~20 s+ mobile of frozen main thread in ~1 s chunks).
+  Cached bundles now avoid the build for most floors; the worker remains the
+  fallback for a missing/stale bundle and for the import tool.
   `loadFloor` now `await`s `buildGraphAsync(wallFeatureCollection)`: the worker
   returns the serializable state (the `blocked` raster is **transferred**, not
   copied) and the main thread only runs the cheap `graphFromState`. The state

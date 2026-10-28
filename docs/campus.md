@@ -9,8 +9,9 @@ each other and to the outdoors, and how to plan a trip across all of it.
 - `buildCampusRouter(buildings, outdoorShapes?)` → `{ route, buildingAt, stats }`.
   - `route(startLL, endLL, { startFloor, endFloor, avoidPortals })` → a route
     object `{ segments, portals, totalSeconds, totalMeters, summary }`, or
-    `null`. `portals` lists the door/connector stops used in order;
-    `avoidPortals` suppresses blocked portal keys for this call.
+    `null`. `portals` lists the exterior doors, connectors and interior doors
+    used, in route order; `avoidPortals` suppresses blocked portal keys for this
+    call.
   - `buildingAt(ll, floorId?)` → `{ building, floor }` or `null`.
 - Portal extraction and caching: `extractPortals`, `cachePortals`,
   `portalsFromCache`.
@@ -81,7 +82,16 @@ same-floor trips short-circuit to a single indoor leg.
   footprint, so centroid-nearest cannot tell "03" from "01").
 - Vertical connector stops are matched by **proximity** across floors, seeded from
   the ground floor where present, and from the first floor that has the kind
-  otherwise (a stairwell that exists only above ground).
+  otherwise (a stairwell that exists only above ground). Each connector gets a
+  building-unique id, so blocking one elevator/stair does not block its
+  neighbours.
+- Outdoor legs exist on **campus level 1**, not on a building whose configured
+  `groundFloor` is `03` (AS164 is a bridge landing). Outdoor obstacles use
+  level-1 walls only, so a path may pass under an upper-floor bridge.
+- `avoidPortals` accepts exterior door keys, connector keys, and interior-door
+  keys (`building|floor|door|interior-<id>`). Interior doors are wall-aligned
+  barriers supplied by the app; blocking one forces a different indoor path and
+  does not become a macro node.
 - Skybridge pairing: explicit `to` marks win and may join different floor
   numbers. Unmarked bridges auto-pair by proximity within `SKYBRIDGE_MAX_M`,
   preferring the same floor but allowing a cross-floor pair when no same-floor

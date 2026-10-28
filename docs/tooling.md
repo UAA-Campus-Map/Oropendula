@@ -8,8 +8,8 @@ or verify behaviour.
 
 ### `navgraph-worker.mjs`
 Runs the expensive, serializable half of `navgraph.mjs` off the render thread.
-Message protocol: `{ id, walls }` in → `{ id, state }` out (the blocked raster is
-**transferred**, not copied), or `{ id, error }`. The main thread rehydrates the
+Message protocol: `{ id, walls, doors }` in → `{ id, state }` out (the blocked
+raster is **transferred**, not copied), or `{ id, error }`. The main thread rehydrates the
 query closures with `graphFromState(state)`. This is what keeps boot responsive
 while floors are rasterised (~0.1–1.2 s each on desktop).
 
@@ -46,10 +46,12 @@ node gen-navgraphs.mjs AS127 AS154  # selected buildings only
 
 The import tool's Deploy section can also generate the selected building or all
 buildings. Regenerate after changing floor JSON, placement, or any graph input;
-the import tool removes the `graphUrl` when it detects such an edit. A data-only
-refresh still needs a regeneration for every building whose `wall`/`walls`/
-`window` geometry changed — the JSON and its `.nvg.gz` must be deployed as a
-pair, because the runtime only checks the bundle's building/floor ids.
+the import tool removes `graphUrl`, floor hashes and the building fingerprint
+when it detects such an edit. Each bundle floor stores a `sourceHash` of its
+wall/door inputs, and boot falls back to an on-device build when that hash no
+longer matches the floor JSON. A data-only refresh still needs regeneration for
+every building whose wall/window geometry changed, and the JSON and `.nvg.gz`
+should be deployed together.
 
 ### `zip.mjs`
 Tiny dependency-free ZIP writer used by the import tool's deploy diff. JSON
@@ -88,17 +90,17 @@ tool) and deploy the JSON and bundle together.
 
 ```
 align, walkability, pdr, corridor, arbiter, portals, router, osm, multifloor,
-motion, autocal, anchorcal, headingfield, places
+motion, autocal, anchorcal, headingfield, doorways, roompin, places
 ```
 
 The fast subset that needs **no real-floor navGraph build**:
 
 ```
-node smoke.mjs motion pdr arbiter autocal anchorcal headingfield places
+node smoke.mjs motion pdr arbiter autocal anchorcal headingfield doorways places
 ```
 
 (`places` reads the floor JSONs' room labels but builds no navGraph; see
-`places.md`.)
+`places.md`. `roompin` builds one real floor, AS121-02.)
 
 Everything else builds real floors (shared across groups via `basis-worker`).
 
@@ -111,13 +113,6 @@ GPS walks; `router`/`multifloor` route the real campus, checking invariants like
 
 When you add a feature, add a synthetic test that would fail without it (the
 step-length mixture tests are a good template), and keep the fast subset fast.
-
-Known pre-existing failure (Oct 2026): the "all 12 building pairs route without
-cutting walls" check starts at `text_lines[0]`, a shaft in AS118 and a doorless
-room in AS154; the same 90 pairs fail on the pre-refresh JSONs. It is a
-test-fixture bug, not a routing regression, but the gate is still red until the
-fixture is fixed or the check is explicitly annotated. Do not deploy on a red
-gate.
 
 ## See also
 

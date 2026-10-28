@@ -61,8 +61,9 @@ bundle (`<buildingId>.nvg.gz`) with:
 - **no passages/heading field** (rebuilt lazily).
 
 The container is `NGB1` + a JSON directory + 8-byte-aligned floor blocks; the
-whole file is gzipped. `buildings-config.json` points at it with a building-level
-`graphUrl`. `decodeBundle()` returns compact adjacency; `expandAdjacency()`
+whole file is gzipped. Each floor block records a `sourceHash` of the wall/door
+inputs, and `buildings-config.json` points at the bundle with a building-level
+`graphUrl` plus per-floor hashes and a building fingerprint. `decodeBundle()` returns compact adjacency; `expandAdjacency()`
 reconstructs exactly the same adjacency order and weights as
 `buildGraphState()` for `graphFromState()`.
 
@@ -70,8 +71,8 @@ reconstructs exactly the same adjacency order and weights as
 generating a bundle. The default remains `true`.
 
 At boot `app.html` fetches each building's `graphUrl`, gunzips/decodes it, and
-uses `makeBundleGraph()` to produce the same query graph. Missing or invalid
-bundles fall back to the existing worker/synchronous build. Heading fields are
+uses `makeBundleGraph()` to produce the same query graph. Missing, invalid or
+hash-mismatched bundles fall back to the existing worker/synchronous build. Heading fields are
 created lazily from the floor's wall/door inputs on first locator use.
 
 See [`navgraph-bundles.md`](navgraph-bundles.md) for the complete byte layout,

@@ -29,9 +29,10 @@ that genuinely need the full pose.
 **Seed, then refine.** A rigid fit from scratch can fall into a local minimum.
 So `bestFitRigid` first finds a good seed, then refines:
 
-1. **Seed.** If both floors have two elevator anchors, use them — the shaft is
-   vertically true, so it is the most trustworthy reference. Otherwise do a
-   coarse rotation scan.
+1. **Seed.** Callers may supply a rotation and anchor pair (the historical
+   two-elevator seed idea). `bestFitRigid` always also runs a coarse 5° scan;
+   `import.html` uses the translation-only fit with the parent rotation, so it
+   does not discover elevator anchors itself.
 2. **Refine.** A few trimmed nearest-neighbour / Procrustes passes, rejecting the
    worst outliers each round.
 

@@ -21,8 +21,10 @@ the browser library serves.
 
 ## Implementation notes
 
-- Fetches use HTTP `Range` and `node:zlib` for gzip — no streaming, no cache; a
-  test fetches a handful of tiles.
+- Fetches use HTTP `Range` — no streaming, no cache; a test fetches a handful of
+  tiles.
+- Directory and tile compression support the v3 enum: none, gzip, brotli and
+  zstd. Unknown compression and truncated varints/headers throw a clear error.
 - The app never imports this file; it is **Node-only tooling**.
 - The browser equivalent lives behind `osm.mjs`'s injected fetcher.
 

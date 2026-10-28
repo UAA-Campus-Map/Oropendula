@@ -37,11 +37,11 @@ Pause after each phase so the changes can be committed.
 
 ## Phase 4 — Tests and docs
 
-- [ ] Fix the router fixture (`text_lines[0]` shaft/doorless room).
-- [ ] Update stale docs: Room Pin, blocked portals, calibration, headingfield, align, arbiter, tooling, locate, places, README, agents.
-- [ ] Add `docs/anchorcal.md`; document `floors.mjs`.
-- [ ] Archive legacy pages in docs without deleting them.
-- [ ] Run the targeted suites and the router group.
+- [x] Fix the router fixture (`text_lines[0]` shaft/doorless room).
+- [x] Update stale docs: Room Pin, blocked portals, calibration, headingfield, align, arbiter, tooling, locate, places, README, agents.
+- [x] Add `docs/anchorcal.md`; document `floors.mjs`.
+- [x] Archive legacy pages in docs without deleting them.
+- [x] Run the targeted suites and the router group.
 
 ## Phase 5 — Deploy
 

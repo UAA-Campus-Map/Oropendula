@@ -16,6 +16,7 @@ import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
 import { navGraphInputs } from './navgraph-source.mjs';
+import { floorLevelOf } from './floors.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache, isWallLayer, isDoorLayer } from './campus.mjs';
 import { loadOsmShapes, tilesToShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
@@ -51,6 +52,14 @@ const BUILDING_CONFIGS = CONFIG.map((b) => {
     building: b,
   };
 });
+
+function floorCentroidForSmoke(floor) {
+  let x = 0, y = 0, n = 0;
+  for (const [a, b] of floor.obstacleLines ?? []) {
+    x += a[0] + b[0]; y += a[1] + b[1]; n += 2;
+  }
+  return n ? [x / n, y / n] : null;
+}
 
 function makeTransform(cfg) {
   return makeToLL(cfg.building, cfg.floor);
@@ -1177,7 +1186,11 @@ console.log('\nTest 7: outdoor path network (synthetic grid)');
     shapes.push({bbox: [pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]], stroke: null, fill: null, width: null, closed: false, layer: 'PATHS', items: [{op: 'line', points: pts}]});
   }
 
-  const obstacleSegs = buildings.flatMap(bld => bld.floors.flatMap(f => f.obstacleLines ?? []));
+  // Outdoor legs run on campus level 1; upper floors (AS164-03 is a bridge)
+  // can legitimately sit above a ground path.
+  const obstacleSegs = buildings.flatMap(bld => bld.floors
+    .filter(f => floorLevelOf(f.floorId) === 1)
+    .flatMap(f => f.obstacleLines ?? []));
   const graph = buildOutdoorGraph(shapes, lat, obstacleSegs);
   check('grid graph built', !!graph && graph.nodeCount > 100, `${graph?.nodeCount} nodes`);
   // Every exit must reach the network without cutting through a building;
@@ -1249,7 +1262,11 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
   const OSM_URL = 'https://uaa-campus-map.net/scak.pmtiles';
   const lat8 = as103.floors[0].exits[0].ll[1];
   const mPerDeg8 = metresPerDegree(lat8);
-  const obstacleSegs = buildings.flatMap(bld => bld.floors.flatMap(f => f.obstacleLines ?? []));
+  // Outdoor legs run on campus level 1; upper floors (AS164-03 is a bridge)
+  // can legitimately sit above a ground path.
+  const obstacleSegs = buildings.flatMap(bld => bld.floors
+    .filter(f => floorLevelOf(f.floorId) === 1)
+    .flatMap(f => f.obstacleLines ?? []));
   let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
   for (const bld of buildings) for (const f of bld.floors) for (const p of f.exits) {
     minLon = Math.min(minLon, p.ll[0]); maxLon = Math.max(maxLon, p.ll[0]);
@@ -1362,21 +1379,25 @@ console.log('\nTest 8: live OpenStreetMap network (scak.pmtiles roads layer)');
     check('outdoor legs never cross a wall', c8.cuts === 0, `${c8.segs} outdoor segments checked`);
 
     // every building pair must route, with no outdoor segment crossing a wall
-    const rooms = BUILDING_CONFIGS.map(cfg => {
-      const data = JSON.parse(readFileSync(new URL(cfg.file, import.meta.url), 'utf8'));
-      return makeTransform(cfg)(data.text_lines[0].x, data.text_lines[0].y);
+    // Every building pair must route, with no outdoor segment crossing a
+    // wall. Start at a real exit: text_lines[0] is a shaft in AS118 and a
+    // doorless room in AS154, which made this look like a routing failure.
+    const doors = buildings.map((b) => {
+      const floor = b.floors.find((f) => f.exits.length) ?? b.floors[0];
+      return floor.exits[0]?.ll ?? floorCentroidForSmoke(floor);
     });
     const badPairs = [];
-    for (let i = 0; i < BUILDING_CONFIGS.length; i++) {
-      for (let j = 0; j < BUILDING_CONFIGS.length; j++) {
+    for (let i = 0; i < doors.length; i++) {
+      for (let j = 0; j < doors.length; j++) {
         if (i === j) continue;
-        const rp = routerOsm.route(rooms[i], rooms[j]);
-        if (!rp) { badPairs.push(`${BUILDING_CONFIGS[i].id}->${BUILDING_CONFIGS[j].id} no route`); continue; }
+        const rp = routerOsm.route(doors[i], doors[j]);
+        if (!rp) { badPairs.push(`${buildings[i].id}->${buildings[j].id} no route`); continue; }
         const c = wallCuts(rp);
-        if (c.cuts > 0) badPairs.push(`${BUILDING_CONFIGS[i].id}->${BUILDING_CONFIGS[j].id} ${c.cuts} cuts`);
+        if (c.cuts > 0) badPairs.push(`${buildings[i].id}->${buildings[j].id} ${c.cuts} cuts`);
       }
     }
-    check('all 12 building pairs route without cutting walls', badPairs.length === 0, badPairs.join('; '));
+    check(`all ${doors.length} building pairs route without cutting walls`,
+      badPairs.length === 0, badPairs.join('; '));
   }
 }
 

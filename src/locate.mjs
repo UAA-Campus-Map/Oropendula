@@ -259,11 +259,12 @@ export class HeadingDriftCalibrator {
  * @param {Function} [opts.seedWalkable]   (lonLat) -> bool, STRICT walkability used
  *        only when seeding (no off-plan margin), so a manual anchor never
  *        spawns particles outside the building. Defaults to `isWalkable`.
- * @param {number}   [opts.count=200]
- * @param {number}   [opts.headingNoiseDeg=8]   per-step heading jitter
- * @param {number}   [opts.distanceNoise=0.12]  per-step distance jitter, fraction of step
- * @param {number}   [opts.lateralNoiseM=0.05]  per-step lateral jitter, metres
- * @param {number}   [opts.roughenM=0.05]       post-resample roughening
+ * @param {number}   [opts.count=1000]
+ * @param {number}   [opts.headingNoiseDeg=8]   heading noise at resampling
+ * @param {number}   [opts.headingJitterDeg=35] uniform per-step heading jitter
+ * @param {number}   [opts.distanceNoise=0.22]  per-step distance jitter, fraction of step
+ * @param {number}   [opts.lateralNoiseM=0.20]  per-step lateral jitter, metres
+ * @param {number}   [opts.roughenM=0.20]       post-resample roughening
  */
 export class ParticleFilter {
   constructor({ isWalkable, nearestWalkable, count = DEFAULT_COUNT, headingNoiseDeg = 8,
