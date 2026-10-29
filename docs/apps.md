@@ -26,8 +26,13 @@ bottom-left action pills, a branded splash, and subtle haptics.
   reveals the destination pin even when the destination is on another floor
   (`destinationRevealed`, cleared on the next manual floor change). Tapping a
   route step still flies to that step and switches floor.
-- **Advanced Settings** is a **modal** (opened by the menu button, which is hidden
-  on desktop) that holds calibration and the compass/graph controls. Calibration
+- **Crossing a skybridge automatically changes the displayed floor.** When the
+  live estimate enters a floor joined to the current one by a skybridge portal,
+  the locator rebinds to that building/floor and the floor picker follows. This
+  includes bridges whose two ends are on different floor numbers.
+- **Advanced Settings** is a **modal** (opened by the calibration/menu button,
+  available on desktop and mobile) that holds calibration and the compass/graph
+  controls. Calibration
   offers three ways to set the step length: *estimate from height*, *calibrate
   from GPS (outside)* — the `autocal.mjs` flow — and a *guided indoor walk*.
   The heading bias is applied live but decays by **×0.95 per step whenever the
@@ -139,15 +144,17 @@ calibration flow handing back to the correction page).
 
 Every tour screen — the large modals, the calibration modal header, the
 spotlight, and the summary — shows **“Step n of m”** in the same sequence.
-Completion or **Skip** stores `interface-tour` in `localStorage`, so the tour
-does not reappear. Returning users who skipped calibration are still prompted
-separately by `autoOpenCalibrationModal()`.
+Completion stores `interface-tour` in `localStorage`, so the tour does not
+reappear. Returning users who skipped calibration are still prompted separately
+by `autoOpenCalibrationModal()`.
 
 ### Notable internals
 - **Debug region overlay:** Advanced Settings → **Compass & graph** → *Debug* →
   **Show regions (debug)** paints the watershed room/corridor territories in 4
-  colours over the selected floor (`watershed.mjs`). Visual aid only — no labels
-  or boundaries, off by default, hidden in 3D.
+  colours over the selected floor (`watershed.mjs`). Only cells the navGraph can
+  actually walk are coloured — walls, clearance, courtyards and outside bands
+  stay transparent. Visual aid only — no labels or boundaries, off by default,
+  hidden in 3D.
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
 - **Cached graphs:** boot fetches each building's `graphUrl` bundle in parallel,
@@ -208,8 +215,36 @@ id); it reports added/changed/removed buildings. This catches a wall change even
 when no config field was edited. "Download changed buildings (.zip)" builds a
 single ZIP with the full `buildings-config.json`, full `osm-paths.json` (or a
 freshly generated one if the cache is stale), and `.nvg.gz` files only for added
-or changed buildings. Unchanged bundles are not included. Floor JSONs are not
-put in this ZIP; upload those separately when a building's floor data is new.
+or changed buildings. Unchanged bundles are not included. In `import.html` v1,
+floor JSONs are not put in this ZIP; upload those separately.
+
+### `import-v2.html` — the step-based wizard
+
+A six-step redesign of the authoring tool:
+
+1. **Building** — select or create a building.
+2. **Floors** — import/attach floor JSONs and pick the working floor.
+3. **Placement** — drag/rotate, align to ground, fit/centre.
+4. **Connections** — exterior doors, skybridges, portal cache; connection edits
+   re-run the walkable preview.
+5. **Walkable** — auto-runs the flood; seeds (multiple outdoor seeds for
+   disconnected outside areas), seals, outdoor-distance gradient and a blue
+   leak path with its wall-entry point.
+6. **Artifacts** — preflight all affected floors, generate bundles, and download
+   one ZIP with `buildings-config.json`, `osm-paths.json`, changed `.nvg.gz`
+   bundles, **all floor JSONs for the affected buildings**, a manifest, and
+   apply instructions.
+
+Every step has an **Advanced** `<details>` block, so all v1 controls remain
+available. Navigation is soft-gated: steps can be inspected in any order, but
+artifact generation is blocked by specific issues (missing floor JSON, no walls,
+no placement, walkable leak, duplicate id, name collision). A missing exterior
+door is a warning on the **ground floor only**; upper floors do not need one.
+Warnings and errors can be ignored; “Go to step” also selects the affected
+building and floor before switching steps. Ignoring an error dismisses the
+preflight blocker, but hard generation failures (walkable leaks, missing walls)
+still stop the bundle. The tool shares the
+same `localStorage` config key as v1, so edits carry over.
 
 ## `import-progress.html` — import dashboard
 

@@ -25,7 +25,10 @@ wins.
 a free anchor and the two sources correct each other. Outdoors the cloud is put
 into free roam (`setFreeRoam`) so it is not tied to a floor plan the walker has
 left; indoors an indoor/implausible fix must **not** re-seed the cloud, so a
-hand-over to PDR happens immediately.
+hand-over to PDR happens immediately. The app also enables free roam when the
+committed estimate is within **3 m of an exterior door** or already outside
+every plan, so PDR can cross the doorway/bbox clearance band without waiting
+for GPS.
 
 **Hysteresis.** A winner only commits a source change after it stays ahead for
 `hysteresisS`, so the marker does not flap at a doorway.

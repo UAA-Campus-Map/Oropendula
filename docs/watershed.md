@@ -53,7 +53,9 @@ enough to compute lazily per floor (~0.1–0.4 s on the real campus).
 - **Room Pin** (`roompin.mjs`) — primary door/placement path; route probes remain
   the fallback when a floor cannot be segmented.
 - **Debug overlay** in `app.html` — Advanced Settings → Compass & graph → Debug →
-  *Show regions (debug)* paints the 4-colour territories for the selected floor.
+  *Show regions (debug)* paints the 4-colour territories for the selected floor,
+  but only where the navGraph is walkable (walls, clearance and masked-out
+  outdoor cells stay transparent).
 - **`watershed.html`** — test page that shows regions, throats, seeds, and the
   source JSON layers for one building/floor.
 

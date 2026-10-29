@@ -10,7 +10,7 @@ the walls, seals the openings, and returns a mask that
 `buildGraphState(..., { mask })` applies to the clearance raster.
 
 Export: `floodIndoor({ wallsLL, extraWallsLL, doorways, seals, sealPoints,
-outdoorSeed, indoorSeed, cell, padM })` →
+outdoorSeeds, outdoorSeed, indoorSeed, cell, padM })` →
 
 ```
 {
@@ -18,10 +18,14 @@ outdoorSeed, indoorSeed, cell, padM })` →
   blocked,                              // walls + seals (flood obstacles)
   wall,                                 // real walls only (preview)
   outdoor,                              // outdoor flood (preview/debug)
+  outdoorDist,                          // BFS distance from the outdoor seed
+  parent,                               // BFS parent cell (leak path)
+  leakPath,                             // seed -> indoor label, when leak
+  leakEntry,                            // first wall-bbox cell on the leak path
   bbox,                                 // expanded grid bbox (metres)
   wallBBox,                             // this floor's wall extents (metres)
   toLL,                                 // mask metre frame -> lon/lat
-  outdoorSeed, indoorSeed,              // the points actually used
+  outdoorSeeds, outdoorSeed, indoorSeed, // the points actually used
   leak, indoorCells, outdoorCells, ms,
 }
 ```
@@ -42,11 +46,12 @@ or `{ error }` when the plan cannot be flooded.
    the real opening. Exterior doors and skybridges are sealed with a 1.2 m disc
    (`sealPoints`). The 1.5 m outer margin leaves free outside cells beyond those
    discs.
-3. **Outdoor seed.** Prefer a free cell in the outer margin (outside the 0.5 m
-   seed ring) with the largest distance to walls; fall back to the 0.5 m ring,
-   then any free outside cell. `outdoorSeed` overrides it. Every free outside
-   cell (not just the ring) is marked outdoor regardless of reachability, so
-   the outside band is contiguous even when a seal or neighbour wall splits it.
+3. **Outdoor seeds.** Without overrides, pick one seed per connected component
+   of the outer margin (then the 0.5 m ring, then any free outside cell). This
+   handles buildings whose outside band is split by a neighbour wall or exit
+   seal. `outdoorSeeds` adds manual seeds (repeat `Seed outdoors`); `outdoorSeed`
+   is the legacy single override. Every free outside cell (not just the ring) is
+   marked outdoor regardless of reachability.
 4. **Outdoor flood.** BFS over free cells from the outdoor seed.
 5. **Indoor validation.** The auto indoor seed is a **room label** chosen by the
    import tool: a room-number label 0.6–6 m from the walls (farthest in that
@@ -68,11 +73,17 @@ independently.
 The **Walkable (flood)** panel in `import.html`:
 
 - **Preview walkable** — flood the selected floor and draw the mask on the map
-  (green = indoor, grey = outdoor; walls transparent). The note shows the cell
-  counts, timing and `LEAK`.
+  (green = indoor; outdoor uses a blue-to-red distance gradient from the seed
+  to the dead ends). The note shows the cell counts, timing and `LEAK`. When the
+  flood reaches the indoor label, the tool draws the BFS leak path in blue and
+  marks where it first enters the wall bbox.
+- **Auto-run** — the preview runs when step 5 opens and re-runs after any
+  connection edit (exits/skybridges change the seals).
 - **Seed indoors** / **Seed outdoors** — tap the map to override the automatic
-  seeds. A manual indoor seed is also the leak check: if the flood reaches it,
-  the panel reports a leak.
+  seeds. `Seed outdoors` can be used repeatedly: add one seed for each
+  disconnected outdoor area (SU is connected to other buildings on two sides).
+  A manual indoor seed is also the leak check: if the flood reaches it, the
+  panel reports a leak.
 - **Seal gap** — tap two points across an opening that leaks. Seals are stored
   on the floor as `floodSeals` and persist in `buildings-config.json`.
 - **Clear seeds/seals** — remove the overrides on this floor.

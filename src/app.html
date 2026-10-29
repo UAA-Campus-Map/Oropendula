@@ -827,7 +827,6 @@
       }
       #bottom-bar { left: auto; right: calc(150px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); }
       #cal-modal { align-items: center; padding: 24px; }
-      #menu-btn { display: none; }   /* calibration is a phone-only flow */
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -877,17 +876,8 @@
     #tour-actions {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 10px;
-    }
-    #tour-skip {
-      border: 0;
-      background: transparent;
-      color: #64748b;
-      font: inherit;
-      font-size: 13px;
-      cursor: pointer;
-      padding: 6px 0;
     }
     #tour-next {
       border: 0;
@@ -900,7 +890,7 @@
       padding: 9px 16px;
       cursor: pointer;
     }
-    #tour-next:focus-visible, #tour-skip:focus-visible {
+    #tour-next:focus-visible {
       outline: 3px solid rgba(37, 99, 235, .35);
       outline-offset: 2px;
     }
@@ -991,16 +981,6 @@
       padding: 14px 24px 20px;
       border-top: 1px solid var(--line);
       background: var(--surface-solid);
-    }
-    .tour-skip {
-      padding: 8px 0;
-      border: 0;
-      background: transparent;
-      color: var(--muted);
-      font: inherit;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
     }
     .tour-page-count {
       display: inline-block;
@@ -1492,7 +1472,6 @@
       <div class="tour-footer">
         <span id="tour-page-count" class="tour-page-count"></span>
         <div class="tour-footer-actions">
-          <button id="tour-page-skip" class="tour-skip" type="button">Skip tour</button>
           <button id="tour-page-next" class="cal-btn cal-primary" type="button">Next →</button>
         </div>
       </div>
@@ -1506,7 +1485,6 @@
       <div id="tour-count"></div>
       <p id="tour-text"></p>
       <div id="tour-actions">
-        <button id="tour-skip" type="button">Skip</button>
         <button id="tour-next" type="button">Next →</button>
       </div>
     </div>
@@ -1675,11 +1653,9 @@
     const tourText = document.getElementById('tour-text');
     const tourCount = document.getElementById('tour-count');
     const tourNext = document.getElementById('tour-next');
-    const tourSkip = document.getElementById('tour-skip');
     const tourModal = document.getElementById('tour-modal');
     const tourPages = [...tourModal.querySelectorAll('[data-tour-page]')];
     const tourPageNext = document.getElementById('tour-page-next');
-    const tourPageSkip = document.getElementById('tour-page-skip');
     const tourPageCount = document.getElementById('tour-page-count');
     const calTourCount = document.getElementById('cal-tour-count');
     const viewBtn = document.getElementById('view-btn');
@@ -1856,6 +1832,8 @@
       // marginally nearest - stacked floors share a footprint).
       ensureLocator(ll, floorOfView(), buildingHint);
       if (!locator) { statusText.textContent = 'Buildings still loading'; return; }
+      // An anchor outside or near an exterior door may seed off-plan.
+      updateFreeRoam({ lon: ll[0], lat: ll[1] });
       // Manual "I'm Here": the tap is treated as an almost-exact position, so
       // seed the cloud with a minimal spread (1 m) rather than the usual 3 m.
       locator.arbiter.anchor(ll, { spreadM: 1 });
@@ -2114,7 +2092,6 @@
         : name === 'correction' ? 4
         : tourTotalSteps());
       tourPageNext.textContent = name === 'summary' ? 'Start navigating' : 'Next →';
-      tourPageSkip.hidden = name === 'summary';
       calTourCount.hidden = true;
       tourModal.hidden = false;
       interfaceTour.hidden = true;
@@ -2226,7 +2203,6 @@
       if (tourPage === 'correction') { startSpotlightTour(); return; }
       if (tourPage === 'summary') finishTour();
     });
-    tourPageSkip.addEventListener('click', finishTour);
     tourNext.addEventListener('click', () => {
       if (!tourActive || tourStage !== 'spotlight') return;
       if (tourNext.dataset.cool === '1') return;
@@ -2234,7 +2210,6 @@
       tourIndex++;
       renderTourStep();
     });
-    tourSkip.addEventListener('click', finishTour);
     window.addEventListener('resize', () => { if (tourStage === 'spotlight') positionTour(); });
     document.addEventListener('keydown', (e) => {
       if (tourActive && e.key === 'Escape' && tourStage !== 'calibration') finishTour();
@@ -4040,6 +4015,28 @@
       return best;
     }
 
+    const SKYBRIDGE_LINK_M = 120;
+
+    /**
+     * Are these two floors joined by a skybridge? Mirrors the router's pairing
+     * enough for auto floor changes: explicit `to` marks win (and may cross
+     * floors); otherwise the portals must be within SKYBRIDGE_LINK_M.
+     */
+    function skybridgeLinksBetween(a, aBuilding, b, bBuilding) {
+      if (!a || !b || a === b || aBuilding === bBuilding) return false;
+      for (const s of a.skybridges ?? []) {
+        if (!s.ll) continue;
+        for (const t of b.skybridges ?? []) {
+          if (!t.ll) continue;
+          if (s.to && s.to !== bBuilding.id) continue;
+          if (t.to && t.to !== aBuilding.id) continue;
+          if (s.to || t.to) return true;
+          if (lonLatDistM(s.ll, t.ll) <= SKYBRIDGE_LINK_M) return true;
+        }
+      }
+      return false;
+    }
+
     // Bind the locator to a building/floor. The DISPLAYED floor wins when it
     // is known ("I'm Here" passes `floorOfView()`): stacked floors share a
     // footprint, so the centroid-nearest pick cannot tell "03" from "01" and
@@ -4061,6 +4058,13 @@
       if (!pick) return;
       if (locator && locator.floor === pick.floor &&
           (!buildingHint || locator.building.id === buildingHint)) return;
+      const skybridgeNeighbors = [];
+      for (const b of buildings) {
+        for (const f of b.floors) {
+          if (f === pick.floor) continue;
+          if (skybridgeLinksBetween(pick.floor, pick.building, f, b)) skybridgeNeighbors.push({ building: b, floor: f });
+        }
+      }
       // A floor's raster (navGraph) ends at its own wall bbox. A connected
       // complex is split across several plans (AS117 and AS119 are one
       // building with separate navgraphs), so a body crossing from one into
@@ -4158,6 +4162,9 @@
       });
       locator = {
         building: pick.building, floor: pick.floor, filter, isWalkable,
+        exits: pick.floor.exits ?? [],
+        skybridgeNeighbors,
+        isOutsideBuildings,
         headingField,
         arbiter: new PositionArbiter({
           filter,
@@ -4176,6 +4183,7 @@
       // A modest radius: this is a heuristic re-bind (floor change / boot), not
       // a correction, so it should not repaint the whole floor.
       const REBIND_SEED_SPREAD_M = 2.5;
+      updateFreeRoam({ lon: seed[0], lat: seed[1] });
       filter.seed(seed, { spreadM: REBIND_SEED_SPREAD_M });
       // Hold the trusted radius at the seed's own spread so the accuracy cap
       // cannot shrink the fresh cloud below it on the first step; it grows with
@@ -4183,6 +4191,50 @@
       locator.arbiter.setAccuracyFloor(REBIND_SEED_SPREAD_M * 2);
       headingSnapper.reset();
       setCorridorBadge(false);
+    }
+
+    const FREE_ROAM_DOOR_M = 3;
+    /**
+     * Near an exterior door, or already outside every plan, PDR must be free
+     * to cross the navGraph bbox/clearance band and roam outdoors. Indoors the
+     * cloud stays wall-constrained; outdoors it is constrained to outside every
+     * building with a plan at this level.
+     */
+    function updateFreeRoam(est) {
+      if (!locator || !est) return;
+      const ll = [est.lon, est.lat];
+      const nearDoor = (locator.exits ?? []).some((e) =>
+        e.ll && lonLatDistM(ll, e.ll) <= FREE_ROAM_DOOR_M);
+      const fix = locator.arbiter?.gpsFix;
+      const fresh = !!fix && fix.accuracy > 0
+        && fix.accuracy <= (locator.arbiter.gpsMaxAccuracyM ?? 60)
+        && performance.now() - fix.t <= (locator.arbiter.gpsStalenessS ?? 6) * 1000;
+      const gpsOutside = fresh && !locator.arbiter.insideBuilding(fix);
+      const outside = gpsOutside || !locator.isWalkable(ll);
+      const on = nearDoor || outside;
+      locator.filter.setFreeRoam(on, outside ? locator.isOutsideBuildings : null);
+    }
+
+    /**
+     * If the estimate has just entered a floor joined to the current one by a
+     * skybridge, move the locator and the displayed floor there. This handles
+     * cross-floor skybridges (e.g. a bridge landing on floor 03 in one building
+     * and floor 02 in the next) without a manual floor-picker change.
+     */
+    function autoSwitchSkybridge(est) {
+      if (!est || !locator || !campusRouter) return est;
+      const ll = [est.lon, est.lat];
+      // Stay on the current floor while it still owns the point; this prevents
+      // ping-pong when two linked floors overlap at the landing.
+      if (locator.floor.navGraph?.isWalkable?.(ll)) return est;
+      for (const n of locator.skybridgeNeighbors ?? []) {
+        if (!n.floor.navGraph?.isWalkable?.(ll)) continue;
+        const level = floorLevels.indexOf(n.floor.floorId) + 1;
+        if (level > 0) setFloor(level);
+        ensureLocator(ll, n.floor.floorId, n.building.id);
+        return locator.arbiter.estimate(performance.now()) ?? est;
+      }
+      return est;
     }
 
     // --- live re-routing ----------------------------------------------------
@@ -4319,6 +4371,7 @@
     function renderEstimate(est) {
       if (!est) return;
       if (!positionSeeded) return;   // no absolute fix yet - don't move the marker
+      updateFreeRoam(est);
       currentEstimate = est;
       const ll = [est.lon, est.lat];
       followCenter = ll;
@@ -4545,7 +4598,7 @@
           locator.arbiter.setHeading(heading);
           const stepLengthM = stepModel.lengthFor(cadenceHz);
           locator.arbiter.step({ stepLengthM, headingRad: heading });
-          const est = locator.arbiter.estimate(t);
+          const est = autoSwitchSkybridge(locator.arbiter.estimate(t));
           applyHeadingSnap(est, heading);
           renderEstimate(est);
         },
@@ -4602,7 +4655,7 @@
       ensureLocator(posLonLat);
       if (locator) {
         locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
-        renderEstimate(locator.arbiter.estimate(t));
+        renderEstimate(autoSwitchSkybridge(locator.arbiter.estimate(t)));
       }
       // ...and to the step-length auto-calibrator: RAW GPS ONLY. Its inputs
       // are this geolocation fix (position/accuracy/speed/course) and the raw
@@ -5311,20 +5364,38 @@
     // Visual aid only: paints the watershed room/corridor territories in 4
     // colours over the selected floor. No labels, boundaries or other layers.
     // Off by default; computed lazily and cached per floor.
-    function regionCanvasFor(ws) {
+    function regionCanvasFor(ws, raster) {
       const cv = document.createElement('canvas');
       cv.width = ws.W; cv.height = ws.H;
       const ctx = cv.getContext('2d');
       const img = ctx.createImageData(ws.W, ws.H);
       const d = img.data;
-      for (let k = 0; k < ws.W * ws.H; k++) {
-        if (ws.blocked[k]) continue;                 // walls stay transparent
-        const r = ws.regions.get(ws.labels[k]);
-        if (!r) continue;
-        const c = r.kind === 'background' ? BACKGROUND_COLOR
-          : REGION_COLORS[(r.color - 1) % REGION_COLORS.length];
-        const o = k * 4;
-        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 205;
+      const rb = raster?.blocked;
+      const rc = raster?.cell ?? 0.1;
+      const rw = raster?.W ?? 0, rh = raster?.H ?? 0;
+      const rox = raster?.OX ?? 0, roy = raster?.OY ?? 0;
+      for (let j = 0; j < ws.H; j++) {
+        // Watershed rows run north -> south; navGraph rows run south -> north.
+        const wy = ws.y1 - (j + 0.5) * ws.cell;
+        for (let i = 0; i < ws.W; i++) {
+          const k = j * ws.W + i;
+          if (ws.blocked[k]) continue;               // raw walls stay transparent
+          // Only paint cells the navGraph can actually walk: the clearance
+          // raster plus the indoor walkability mask. This keeps courtyards,
+          // outside bands and wall-clearance cells uncoloured.
+          if (rb) {
+            const wx = ws.x0 + (i + 0.5) * ws.cell;
+            const gi = Math.floor((wx - rox) / rc);
+            const gj = Math.floor((wy - roy) / rc);
+            if (gi < 0 || gj < 0 || gi >= rw || gj >= rh || rb[gj * rw + gi]) continue;
+          }
+          const r = ws.regions.get(ws.labels[k]);
+          if (!r) continue;
+          const c = r.kind === 'background' ? BACKGROUND_COLOR
+            : REGION_COLORS[(r.color - 1) % REGION_COLORS.length];
+          const o = k * 4;
+          d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 205;
+        }
       }
       ctx.putImageData(img, 0, 0);
       return cv;
@@ -5359,7 +5430,7 @@
       const layerId = `${f.wallLayerId}-regions`;
       if (!map.getSource(srcId)) {
         map.addSource(srcId, {
-          type: 'canvas', canvas: regionCanvasFor(ws),
+          type: 'canvas', canvas: regionCanvasFor(ws, f.navGraph.raster),
           coordinates: [tl, tr, br, bl], animate: false,
         });
         const before = map.getLayer(f.wallLayerId) ? f.wallLayerId

@@ -43,11 +43,18 @@ in code, docs, deployment, and import-tool settings.
   `docs/navgraph-bundles.md` for the byte layout and codec/runtime API.
 - `walkable.mjs` — the import-time **indoor walkability** mask.
   `floodIndoor({ wallsLL, extraWallsLL, doorways, seals, sealPoints,
-  indoorSeed, outdoorSeed })` floods the outside from the wall-bbox ring, seals
+  indoorSeed, outdoorSeeds, outdoorSeed })` floods the outside from the
+  wall-bbox ring, seals
   interior doorways, exterior exits and skybridges, and returns
   `{mask, leak, ...}`. `buildGraphState(..., { mask })` blocks every cell
   outside the mask before nodes/edges are built. Bundle generation refuses on
   `error`/`leak`. See `docs/walkable.md`.
+- `import-v2.html` — the six-step authoring wizard (Building → Floors →
+  Placement → Connections → Walkable → Artifacts). It shares `import.html`'s
+  config key and modules; all v1 controls live in per-step Advanced blocks. The
+  artifact step preflights changed buildings and downloads one ZIP with the
+  config, OSM paths, changed bundles, and **all floor JSONs for affected
+  buildings** (no separate floor upload). See `docs/apps.md`.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).
@@ -634,7 +641,9 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   (`isOutsideBuildings`, built in index.html's `ensureLocator` from the
   same-level floors' navgraphs): the cloud flows around building footprints
   instead of cutting through them, while a skybridge passing over a building
-  with no floor at this level stays free. PDR drives the estimate there; GPS
+  with no floor at this level stays free. The app also enables free roam when
+  the estimate is within **3 m of an exterior door** or already outside every
+  plan, so PDR can leave a building through its doorway band without GPS. PDR drives the estimate there; GPS
   overrides the displayed source only with a **very good fix,
   `gpsOverrideAccuracyM = 3` m**. The cloud is re-anchored from an outdoor fix
   when it is the **first outdoor fix of the session** (once per

@@ -29,7 +29,8 @@ const DOOR_KEEP_M = 0.4;     // threshold cells kept walkable
  * @param {number[][][]} [opts.extraWallsLL] - neighbour walls (same level) + manual seals
  * @param {Array<{barrier?:number[][], ll?:number[]}>} [opts.doorways]
  * @param {number[][][]} [opts.seals] - extra seal segments (lon/lat)
- * @param {number[]} [opts.outdoorSeed] - override (lon/lat)
+ * @param {number[]} [opts.outdoorSeed] - legacy single override (lon/lat)
+ * @param {number[][]} [opts.outdoorSeeds] - multiple outdoor overrides (lon/lat)
  * @param {number[]} [opts.indoorSeed] - override/validation label (lon/lat)
  * @param {number} [opts.cell=0.1]
  * @param {number} [opts.padM=0.5]
@@ -37,7 +38,7 @@ const DOOR_KEEP_M = 0.4;     // threshold cells kept walkable
  */
 export function floodIndoor({
   wallsLL, extraWallsLL = [], doorways = [], seals = [], sealPoints = [],
-  outdoorSeed = null, indoorSeed = null, cell = 0.1, padM = 0.5,
+  outdoorSeed = null, outdoorSeeds = [], indoorSeed = null, cell = 0.1, padM = 0.5,
 } = {}) {
   const t0 = performance.now();
   if (!wallsLL?.length) return { error: 'floor has no walls' };
@@ -150,9 +151,10 @@ export function floodIndoor({
     return toLL([x0 + (i + 0.5) * cell, y0 + (j + 0.5) * cell]);
   };
 
-  // --- outdoor seed: 0.5 m ring outside the building bbox ------------------
+  // --- outdoor seeds: manual overrides, or one per disconnected component --
   // The grid has an extra margin beyond the ring so the outdoor flood is a
-  // contiguous band around the building, not a clipped 0.5 m frame.
+  // contiguous band around the building, not a clipped 0.5 m frame. When
+  // neighbouring buildings split that band, one seed per component is needed.
   const isRing = (k) => {
     const i = k % W, j = (k - i) / W;
     const x = x0 + (i + 0.5) * cell, y = y0 + (j + 0.5) * cell;
@@ -171,34 +173,62 @@ export function floodIndoor({
     return x < minX - padM || x > maxX + padM ||
       y < minY - padM || y > maxY + padM;
   };
-  let outSeed = outdoorSeed ? cellAt(outdoorSeed) : -1;
-  if (outSeed < 0) {
-    // Prefer the outer margin: it is outside the exit-seal discs, so the
-    // flood can travel around the building instead of being cut off in the
-    // 0.5 m seed ring.
-    let best = -1, bestDT = -1;
-    for (let k = 0; k < N; k++) {
-      if (blocked[k] || !isOuterMargin(k)) continue;
-      if (DT[k] > bestDT) { bestDT = DT[k]; best = k; }
-    }
-    if (best < 0) {
-      for (let k = 0; k < N; k++) {
-        if (blocked[k] || !isSeedRing(k)) continue;
+
+  const manualSeeds = [
+    ...(Array.isArray(outdoorSeeds)
+      ? (Array.isArray(outdoorSeeds[0]) ? outdoorSeeds : [outdoorSeeds])
+      : []),
+    ...(outdoorSeed ? [outdoorSeed] : []),
+  ];
+  let outSeeds = [...new Set(manualSeeds.map(cellAt).filter((k) => k >= 0))];
+
+  /** One max-DT seed per connected component of a predicate's free cells. */
+  const componentSeeds = (predicate) => {
+    const seeds = [];
+    const seen = new Uint8Array(N);
+    for (let start = 0; start < N; start++) {
+      if (seen[start] || blocked[start] || !predicate(start)) continue;
+      const q = [start];
+      seen[start] = 1;
+      let best = start, bestDT = -1;
+      for (let head = 0; head < q.length; head++) {
+        const k = q[head];
         if (DT[k] > bestDT) { bestDT = DT[k]; best = k; }
+        const i = k % W, j = (k - i) / W;
+        for (const [di, dj] of DIRS) {
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+          const n = nj * W + ni;
+          if (seen[n] || blocked[n] || !predicate(n)) continue;
+          seen[n] = 1;
+          q.push(n);
+        }
       }
+      seeds.push(best);
     }
-    if (best < 0) {   // ring blocked by neighbour walls: any free outside cell
-      for (let k = 0; k < N; k++) if (!blocked[k] && isRing(k)) { best = k; break; }
+    return seeds;
+  };
+
+  if (!outSeeds.length) {
+    outSeeds = componentSeeds(isOuterMargin);
+    if (!outSeeds.length) outSeeds = componentSeeds(isSeedRing);
+    if (!outSeeds.length) outSeeds = componentSeeds(isRing);
+    if (!outSeeds.length) {
+      for (let k = 0; k < N; k++) if (!blocked[k] && isRing(k)) { outSeeds = [k]; break; }
     }
-    outSeed = best;
   }
-  if (outSeed < 0) return { error: 'no free outdoor cell (bbox fully blocked)' };
+  if (!outSeeds.length) return { error: 'no free outdoor cell (bbox fully blocked)' };
 
   // --- outdoor flood -------------------------------------------------------
   const outdoor = new Uint8Array(N);
+  const outdoorDist = new Int32Array(N).fill(-1);
+  const parent = new Int32Array(N).fill(-1);
   {
-    const qq = [outSeed];
-    outdoor[outSeed] = 1;
+    const qq = [...outSeeds];
+    for (const k of qq) {
+      outdoor[k] = 1;
+      outdoorDist[k] = 0;
+    }
     for (let head = 0; head < qq.length; head++) {
       const k = qq[head], i = k % W, j = (k - i) / W;
       for (const [di, dj] of DIRS) {
@@ -207,6 +237,8 @@ export function floodIndoor({
         const n = nj * W + ni;
         if (outdoor[n] || blocked[n]) continue;
         outdoor[n] = 1;
+        outdoorDist[n] = outdoorDist[k] + 1;
+        parent[n] = k;
         qq.push(n);
       }
     }
@@ -227,6 +259,26 @@ export function floodIndoor({
   }
   if (inSeed < 0) return { error: 'no free indoor cell (all cells are outdoor)' };
   const leak = !!outdoor[inSeed];
+
+  // Trace the flood's path from the seed to the indoor label (leak entry).
+  let leakPath = [], leakEntry = null;
+  if (leak) {
+    const cells = [];
+    for (let k = inSeed; k >= 0; k = parent[k]) {
+      cells.push(k);
+      if (parent[k] < 0) break;
+    }
+    cells.reverse();
+    leakPath = cells.map(llOf);
+    for (const k of cells) {
+      const i = k % W, j = (k - i) / W;
+      const x = x0 + (i + 0.5) * cell, y = y0 + (j + 0.5) * cell;
+      if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+        leakEntry = llOf(k);
+        break;
+      }
+    }
+  }
 
   // --- mask ----------------------------------------------------------------
   // Artificial seals are only for the flood: a sealed threshold is indoor, so
@@ -259,10 +311,15 @@ export function floodIndoor({
     blocked,          // preview/debug: walls + seals (flood obstacles)
     wall,             // real walls only (preview)
     outdoor,          // preview/debug: outdoor flood
+    outdoorDist,      // BFS distance from the outdoor seed (-1 = unreached)
+    parent,           // BFS parent cell (leak path)
+    leakPath,         // seed -> indoor label, when leak
+    leakEntry,        // first cell inside the wall bbox on the leak path
     bbox: { x0, y0, x1: x0 + W * cell, y1: y0 + H * cell },  // expanded grid
     wallBBox: { minX, minY, maxX, maxY },                    // wall extents
     toLL,             // mask metre frame -> lon/lat (preview)
-    outdoorSeed: llOf(outSeed),
+    outdoorSeeds: outSeeds.map(llOf),
+    outdoorSeed: llOf(outSeeds[0]),
     indoorSeed: llOf(inSeed),
     leak,
     indoorCells,
