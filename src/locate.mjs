@@ -263,12 +263,12 @@ export class HeadingDriftCalibrator {
  * @param {number}   [opts.headingNoiseDeg=8]   heading noise at resampling
  * @param {number}   [opts.headingJitterDeg=35] uniform per-step heading jitter
  * @param {number}   [opts.distanceNoise=0.22]  per-step distance jitter, fraction of step
- * @param {number}   [opts.lateralNoiseM=0.20]  per-step lateral jitter, metres
+ * @param {number}   [opts.lateralNoiseM=0.40]  per-step lateral jitter, metres
  * @param {number}   [opts.roughenM=0.20]       post-resample roughening
  */
 export class ParticleFilter {
   constructor({ isWalkable, nearestWalkable, count = DEFAULT_COUNT, headingNoiseDeg = 8,
-    headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.20, roughenM = 0.20,
+    headingJitterDeg = 35, distanceNoise = 0.22, lateralNoiseM = 0.40, roughenM = 0.20,
     segmentStepM = 0.1, behindWeight = 0.05, reversalDeg = 120,
     stallEpsM = 0.2, stallSteps = 3, relaxSteps = 5, respawnSpreadM = 0.3,
     persistentHeadingDeg = 0, seedWalkable = null } = {}) {

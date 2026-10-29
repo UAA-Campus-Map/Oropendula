@@ -66,9 +66,12 @@ State machine `SEARCHING -> LOCKED(dir) -> (turn) -> SEARCHING`.
   when the field is absent (open room, wide lobby).
 
 The correction is applied to the app's heading bias (session-only, like the old
-corridor lock) — it never touches localStorage. The Advanced panel's *Snap* row
-shows the locked direction and confidence, and *Snap heading to corridors*
-disables it.
+corridor lock) — it never touches localStorage. While the snapper is **not
+locked**, the app multiplies `baseHeadingBias` by **0.95 per step**, so a
+correction (or a stale walk-calibration offset) eases back toward the raw
+compass and can recover. The ±45° manual trim is separate and does not decay.
+The Advanced panel's *Snap* row shows the locked direction and confidence, and
+*Snap heading to corridors* disables it (which also freezes the decay).
 
 ## Why not use the gyro to correct the compass?
 

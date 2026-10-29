@@ -518,25 +518,33 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   (`HeadingTracker.bias = base + trim`), applied live while dragging and
   persisted as `pdr-heading-trim`. The calibration walk is authoritative - it
   absorbs the trim into the base and recentres the slider - so the two can
-  never double-count.
+  never double-count. Note that the base itself now decays by ×0.95 per step
+  whenever the corridor snapper is not locked (see the hallway bullet below);
+  only the manual trim is fixed.
 - **Hallway heading-drift correction** (`CompassSnapper` in `app.html` and
   `index.html`; `HeadingDriftCalibrator` remains the older reference class).
   The compass drifts indoors; a person walking a
   narrow hallway walks parallel to the walls, so the floor plan can correct it.
-  Once the walker has gone **6 consecutive near-straight steps** (per-step
-  change ≤6°, net over the streak ≤15°) in a clearly elongated space, a small
-  proportional correction (`gain 0.4`, clamped to 3°/step, 3° deadband) is
+  The snapper locks as soon as the heading field is confident enough
+  (`confidence >= 0.4`) and the heading is within 35° of a candidate direction -
+  there is **no straight-step arming requirement**. While locked, a small
+  proportional correction (`gain 0.5`, clamped to 3°/step, 3° deadband) is
   added each step to `baseHeadingBias` -> `applyHeadingTrim()`, i.e. the SAME
   bias the compass arrow, PDR and trim slider share (so one fix corrects all
   three; the filter's own `headingBias` is left alone to avoid double-counting).
-  It keeps correcting until an **intentional turn** (a >25° step or >35° net
-  over 3 steps), then re-arms after another 6 straight steps. Corrections are
-  **session-only** - they are deliberately NOT written to `localStorage`, so a
-  reload returns to the walk-calibrated bias. A small on-map pill
-  (`#corridor-badge`) shows while it is active.
-  The axis comes from **`corridorAxis`** (locate.mjs), a runtime ray-cast from
-  the current PDR estimate over `navGraph.isWalkable`: it measures the full free
-  chord ALONG a candidate bearing vs the full chord ACROSS it and demands
+  An **intentional turn** (a >25° step or >35° net over 3 steps) releases the
+  lock and re-locks on the new direction when the field is confident.
+  **While the snapper is not locked, `baseHeadingBias` decays by ×0.95 per
+  step** toward the raw compass, so a bad correction (or a stale
+  walk-calibration offset) can recover; the ±45° manual trim does not decay.
+  This includes open rooms, free roam, a GPS-sourced estimate and a missing
+  heading field. Decay is suppressed while snapping is disabled and during the
+  guided calibration walk. A small on-map pill (`#corridor-badge`) shows while
+  locked.
+  The older reference class's axis comes from **`corridorAxis`** (locate.mjs), a
+  runtime ray-cast from the current PDR estimate over `navGraph.isWalkable`: it
+  measures the full free chord ALONG a candidate bearing vs the full chord
+  ACROSS it and demands
   **aspect ratio ≥ 6:1** (`maxM = 17 m` caps each ray, so the measurable chord
   is up to 34 m; the widest detectable hallway is `2·maxM/6 ≈ 5.7 m`). The gate
   was 9:1 with `maxM = 15 m`, which fired on only ~8% of real walkable samples
@@ -751,7 +759,7 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
     (`distanceNoise = 0.22`; heavy tails cover a mismatch between the model's
     step length and the walker's - some particles always take the right
     cumulative distance) and a **perpendicular** lateral jitter
-    (`lateralNoiseM = 0.20`, applied across the travel direction, not on the
+    (`lateralNoiseM = 0.40`, applied across the travel direction, not on the
     east axis). Post-resample roughening (`roughenM = 0.20`) re-inflates the
     cloud in every direction after resampling collapses it.
   - **Heading prior**: a known heading seeds within ±90° (`seed` clamps

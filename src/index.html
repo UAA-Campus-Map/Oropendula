@@ -922,6 +922,13 @@
       }
     }
 
+    /** Ease the heading bias back toward the raw compass while unlocked. */
+    function decayHeadingBias() {
+      if (Math.abs(baseHeadingBias) < 1e-6) return;
+      baseHeadingBias = wrapAngle(baseHeadingBias * HEADING_BIAS_DECAY);
+      applyHeadingTrim();
+    }
+
     // --- hallway compass-drift correction -----------------------------------
     function setCorridorBadge(on) {
       if (corridorBadgeEl) corridorBadgeEl.hidden = !on;
@@ -933,18 +940,25 @@
      * `wantsAxis` gates the ray-cast so it is only paid while arming/active.
      */
     function applyHeadingSnap(est, headingRad) {
+      // Snapping off (or calibrating) freezes the bias: no correction, no decay.
+      const canDecay = headingSnapEnabled && !calibration.active;
       if (!headingSnapEnabled || !locator || !est || est.source !== 'pdr'
           || locator.filter.freeRoam || calibration.active || !locator.headingField) {
         headingSnapper.reset();
         setCorridorBadge(false);
         updateSnapReadout(null);
+        if (canDecay) decayHeadingBias();
         return;
       }
       const field = locator.headingField([est.lon, est.lat]);
       const r = headingSnapper.update(headingRad, field);
-      if (r.correctionRad) {
-        baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
-        applyHeadingTrim();
+      if (r.locked) {
+        if (r.correctionRad) {
+          baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
+          applyHeadingTrim();
+        }
+      } else {
+        decayHeadingBias();
       }
       setCorridorBadge(r.locked);
       updateSnapReadout(r);
@@ -1723,6 +1737,9 @@
     // trim) so the slider never has to know about the relative-frame offset.
     let headingTrimDeg = 0;
     let baseHeadingBias = 0;
+    // While the corridor snapper is not locked, the calibration/correction
+    // bias eases back toward the raw compass so a bad offset can recover.
+    const HEADING_BIAS_DECAY = 0.95;
     // Hallway compass-drift correction: while the walker goes straight down an
     // elongated (>6:1) corridor, nudge the heading bias toward the corridor
     // axis; stop on an intentional turn. The gate was 9:1 (fired on ~8% of real

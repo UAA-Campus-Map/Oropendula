@@ -2267,6 +2267,13 @@
       }
     }
 
+    /** Ease the heading bias back toward the raw compass while unlocked. */
+    function decayHeadingBias() {
+      if (Math.abs(baseHeadingBias) < 1e-6) return;
+      baseHeadingBias = wrapAngle(baseHeadingBias * HEADING_BIAS_DECAY);
+      applyHeadingTrim();
+    }
+
     // --- calibration methods -------------------------------------------------
     // Step length ≈ 0.415 × height (an average walking step; the same figure
     // that lands a 1.75 m walker on the model's 0.72 m default).
@@ -2692,19 +2699,26 @@
      * and HELD until an obvious turn releases it.
      */
     function applyHeadingSnap(est, headingRad) {
+      // Snapping off (or calibrating) freezes the bias: no correction, no decay.
+      const canDecay = headingSnapEnabled && !calWizard.armed;
       if (!headingSnapEnabled || !locator || !est || est.source !== 'pdr'
           || locator.filter.freeRoam || calWizard.armed || !positionSeeded
           || !locator.headingField) {
         headingSnapper.reset();
         setCorridorBadge(false);
         updateSnapReadout(null);
+        if (canDecay) decayHeadingBias();
         return;
       }
       const field = locator.headingField([est.lon, est.lat]);
       const r = headingSnapper.update(headingRad, field);
-      if (r.correctionRad) {
-        baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
-        applyHeadingTrim();
+      if (r.locked) {
+        if (r.correctionRad) {
+          baseHeadingBias = wrapAngle(baseHeadingBias + r.correctionRad);
+          applyHeadingTrim();
+        }
+      } else {
+        decayHeadingBias();
       }
       setCorridorBadge(r.locked);
       updateSnapReadout(r);
@@ -3894,6 +3908,9 @@
     // trim) so the slider never has to know about the relative-frame offset.
     let headingTrimDeg = 0;
     let baseHeadingBias = 0;
+    // While the corridor snapper is not locked, the calibration/correction
+    // bias eases back toward the raw compass so a bad offset can recover.
+    const HEADING_BIAS_DECAY = 0.95;
     // Compass snapping: the floor's allowed directions (corridor axes, junction
     // branches, doorways) come from the per-floor heading field built with the
     // navgraph. The heading snaps to the nearest allowed direction and is held

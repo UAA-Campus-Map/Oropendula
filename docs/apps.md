@@ -24,8 +24,10 @@ bottom-left action pills, a branded splash, and subtle haptics.
 - **Advanced Settings** is a **modal** (opened by the menu button, which is hidden
   on desktop) that holds calibration and the compass/graph controls. Calibration
   offers three ways to set the step length: *estimate from height*, *calibrate
-  from GPS (outside)* — the `autocal.mjs` flow — and a *guided indoor walk*. The
-  splash mirrors the live status line while booting.
+  from GPS (outside)* — the `autocal.mjs` flow — and a *guided indoor walk*.
+  The heading bias is applied live but decays by **×0.95 per step whenever the
+  corridor snapper is not locked** (the ±45° trim does not decay). The splash
+  mirrors the live status line while booting.
 - **The guided indoor walk** asks the user to stand outside a doorway and type the
   room they are in; `findRoom` resolves it, `roomDoorViaRoute` confirms the room's
   egress door by routing, and `pickIndoorTarget` chooses a same-floor room a short

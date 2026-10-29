@@ -7,10 +7,10 @@ beacon or camera. It also finds a corridor's axis (to correct heading drift
 indoors). Exports:
 
 - `ParticleFilter` — map-matching particle filter (PDR).
-- `corridorAxis(isWalkable, ll, opts)` — ray-casts free space for a corridor
-  bearing (null in an open room).
-- `HeadingDriftCalibrator` — nudges the heading bias toward the corridor axis
-  while the walker goes straight, and stops on an intentional turn.
+- `corridorAxis(isWalkable, ll, opts)` — legacy ray-cast helper for a corridor
+  bearing (null in an open room); the app itself uses the heading field.
+- `HeadingDriftCalibrator` — older corridor-axis trimmer, kept for
+  reference/tests; the app uses `CompassSnapper` from `headingfield.mjs`.
 
 ## Theory: what a particle filter is
 
@@ -79,13 +79,11 @@ the belief does *not* collapse on its own.)
 
 ## Corridor heading helpers
 
-- `corridorAxis` ray-casts the free space around a point and returns the axis
-  bearing when the space is strongly elongated (a corridor), else null (open
-  room). This is how the app knows the walker is in a hallway.
-- `HeadingDriftCalibrator` accumulates a straight streak and nudges the shared
-  heading bias toward the corridor axis; a large heading swing (an intentional
-  turn) disarms it. Indoors the magnetometer is unreliable; this borrows the
-  building's own axis as truth.
+- The app's corridor correction comes from the floor's **heading field**
+  (`CompassSnapper`, see `headingfield.md`): near a hallway the passage bearings
+  concentrate, so the snapper locks to the nearest allowed direction and trims
+  drift; an intentional turn releases it. `HeadingDriftCalibrator` is the older
+  axis-ray-cast reference class, not the production path.
 
 ## Implementation notes / invariants
 
@@ -101,7 +99,7 @@ the belief does *not* collapse on its own.)
 - Fixed particle count (`DEFAULT_COUNT = 1000`, also the constructor default);
   arrays are sized once and the resample is allocation-free (ping-pong buffers).
   Per-step defaults: `headingJitterDeg = 35`, `distanceNoise = 0.22`,
-  `lateralNoiseM = 0.20`, `roughenM = 0.20`. `predict` is O(N).
+  `lateralNoiseM = 0.40`, `roughenM = 0.20`. `predict` is O(N).
 
 ## See also
 
