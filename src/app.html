@@ -904,6 +904,12 @@
       outline: 3px solid rgba(37, 99, 235, .35);
       outline-offset: 2px;
     }
+    /* Next button is greyed out (and inert) for the cooldown. */
+    #tour-next:disabled, #tour-page-next:disabled {
+      cursor: default;
+      color: #64748b;
+      background: #cbd5e1;
+    }
 
     /* First-load tour pages (large modal) */
     #tour-modal {
@@ -2036,6 +2042,23 @@
     // the three-step summary. The calibration page is the real calibration
     // modal, so there is only one calibration UI to maintain.
     const TOUR_KEY = 'interface-tour';
+    // A rapid Next press shouldn't skip several tour screens at once; the
+    // button stays disabled for a deliberate 2.5 s *after each screen appears*,
+    // so the wait is preserved however the screen was reached (button, or the
+    // calibration flow handing back to the tour).
+    const TOUR_NEXT_COOLDOWN_MS = 2500;
+    // The spotlight (interface button) tour steps move faster.
+    const TOUR_SPOTLIGHT_COOLDOWN_MS = 1000;
+    /** Disable a tour Next button for `ms`; it just greys out, no fill. */
+    function startTourCooldown(btn, ms = TOUR_NEXT_COOLDOWN_MS) {
+      btn.dataset.cool = '1';
+      btn.disabled = true;
+      clearTimeout(btn._coolTimer);
+      btn._coolTimer = setTimeout(() => {
+        btn.disabled = false;
+        delete btn.dataset.cool;
+      }, ms);
+    }
     const TOUR_STEPS = [
       {target: '#anchor-btn', text: 'Place your location manually with the map pin.'},
       {target: '#room-pin-btn', text: 'Use room search to place yourself outside a room. Room numbers can be found on plaques placed next to each door'},
@@ -2083,6 +2106,7 @@
       tourModal.hidden = false;
       interfaceTour.hidden = true;
       tourPageNext.focus({preventScroll: true});
+      startTourCooldown(tourPageNext);
     }
 
     function startSpotlightTour() {
@@ -2126,8 +2150,7 @@
       tourTip.style.top = `${top}px`;
     }
 
-    function hasNextTourStep() {
-      for (let i = tourIndex + 1; i < TOUR_STEPS.length; i++) {
+    function hasNextTourStep() {      for (let i = tourIndex + 1; i < TOUR_STEPS.length; i++) {
         if (tourTargetFor(TOUR_STEPS[i])) return true;
       }
       return false;
@@ -2148,6 +2171,7 @@
       positionTour();
       tourTip.style.visibility = 'visible';
       tourNext.focus({preventScroll: true});
+      startTourCooldown(tourNext, TOUR_SPOTLIGHT_COOLDOWN_MS);
     }
 
     function finishTour() {
@@ -2175,6 +2199,7 @@
 
     tourPageNext.addEventListener('click', () => {
       if (!tourActive) return;
+      if (tourPageNext.dataset.cool === '1') return;
       if (tourPage === 'welcome') { showTourPage('gps'); return; }
       if (tourPage === 'gps') {
         tourStage = 'calibration';
@@ -2190,6 +2215,7 @@
     tourPageSkip.addEventListener('click', finishTour);
     tourNext.addEventListener('click', () => {
       if (!tourActive || tourStage !== 'spotlight') return;
+      if (tourNext.dataset.cool === '1') return;
       if (!hasNextTourStep()) { showTourPage('summary'); return; }
       tourIndex++;
       renderTourStep();
