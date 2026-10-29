@@ -104,9 +104,20 @@ node smoke.mjs motion pdr arbiter autocal anchorcal headingfield doorways places
 
 Everything else builds real floors (shared across groups via `basis-worker`).
 
+The shared floor load uses the **shipped navGraph bundles** (`graphUrl`, the
+same `.nvg.gz` the app loads) instead of rasterising walls: each floor's
+wall/door geometry is hashed with `graphInputHash` and the bundle is used only
+when its `sourceHash` matches, so a stale cache is rebuilt and **fails the
+gate** (`navGraph bundles decode` / `every navGraph bundle matches its floor
+JSON`). Portals come from the config cache unless the `portals` category needs
+the fresh extraction. This cuts the load from ~16 s to ~2.5 s (routing groups)
+or ~7.6 s when fresh portals are extracted.
+
 Why it is shaped this way: the suite **builds its campuses the way the app
-does** — same registration math, same wall filter, same portal extraction — so a
-green test means the deployed app behaves the same. `pdr` exercises the particle
+does** — same registration math, same wall filter, same bundles, same portal
+extraction — so a green test means the deployed app behaves the same. Every
+line is prefixed with elapsed seconds (set `SMOKE_NO_TIMING=1` for clean
+output), and the load prints one line per building. `pdr` exercises the particle
 filter on **synthetic corridors and turns** (no sensors); `autocal` synthesises
 GPS walks; `router`/`multifloor` route the real campus, checking invariants like
 "outdoor legs never cross a wall" and "all building pairs route".

@@ -1366,8 +1366,8 @@
     </div>
   </div>
 
-  <!-- Locate by room: place a manual PDR anchor in the hallway outside a
-       room with exactly one hallway door. -->
+  <!-- Locate by room: place a manual PDR anchor just outside a room's door
+       (the first doorway on a route to another same-floor room). -->
   <div id="room-pin-modal" hidden>
     <div class="modal-backdrop" data-room-close></div>
     <div class="modal-panel" role="dialog" aria-modal="true"
@@ -3579,9 +3579,10 @@
       }
     }
 
-    // --- Room pin: strict hallway-door resolution -------------------------
-    // Geometry (doorway barriers, hallway test) lives in roompin.mjs so it can
-    // be tested against real floors without a browser.
+    // --- Room pin: route-derived door resolution --------------------------
+    // The door is the first doorway crossed on a route to another same-floor
+    // room; all of that lives in roompin.mjs so it can be tested against real
+    // floors without a browser.
 
     function currentRoomPinBuilding() {
       if (locator?.building) return locator.building;

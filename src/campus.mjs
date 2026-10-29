@@ -42,7 +42,7 @@
  */
 
 import { floorLevelOf } from './floors.mjs';
-import { polylineCrossesSegment } from './geo.mjs';
+import { crossBarrier, nearestApproach } from './geo.mjs';
 
 /** Walking speeds, metres per second. */
 const INDOOR_SPEED = 1.3;
@@ -78,6 +78,9 @@ const FLOOD_WALL_M = 0.45;        // block radius around wall segments
 const FLOOD_SEAL_M = 0.35;        // how far past a door leaf the seal reaches
 const FLOOD_MARGIN_M = 4;         // outdoor seed band around the footprint
 const FLOOD_LEAD_CELLS = 7;       // ~3.5m allowed from a door to the outdoors
+/** A route passing this close to a doorway barrier went through its opening
+ *  (the ADA minimum clear door width, 32 in / 815 mm). */
+const DOOR_PASS_M = 0.815;
 /** An exit's leaf must sit this close to the building outline, metres. */
 const OUTLINE_MAX_M = 1.0;
 /** Max distance between same-connector stops on different floors, metres. */
@@ -1481,14 +1484,16 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       // The route's own destination doorway (and the doorway it starts at) is
       // an endpoint, not a door the walker passes through.
       if (distLL(d.ll, start, scale) <= 2.5 || distLL(d.ll, end, scale) <= 2.5) continue;
-      const a = g.toM(d.barrier[0]), bb = g.toM(d.barrier[1]);
-      let at = null, walked = 0;
-      for (let i = 1; i < ptsM.length && at == null; i++) {
-        if (polylineCrossesSegment([ptsM[i - 1], ptsM[i]], a, bb)) {
-          at = walked + Math.hypot(ptsM[i][0] - ptsM[i - 1][0], ptsM[i][1] - ptsM[i - 1][1]) / 2;
-        }
-        walked += Math.hypot(ptsM[i][0] - ptsM[i - 1][0], ptsM[i][1] - ptsM[i - 1][1]);
-      }
+      // Tolerant crossing: the navGraph passage is carved at the door leaf
+      // midpoint, a few decimetres off the wall-gap barrier, so a route may
+      // cross the line OR squeeze through the opening right beside the barrier
+      // (SU-02). Count either, taking the earliest along the segment.
+      if (!d.barrier) continue;
+      const ba = g.toM(d.barrier[0]), bb = g.toM(d.barrier[1]);
+      const c = crossBarrier(ptsM, ba, bb);
+      let at = c ? c.at : null;
+      const n = nearestApproach(ptsM, ba, bb);
+      if (n && n.dist <= DOOR_PASS_M && (at == null || n.at < at)) at = n.at;
       if (at == null) continue;
       out.push({
         at,

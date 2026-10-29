@@ -15,7 +15,7 @@ The graph object exposes `findPath(startLL, endLL)`, the O(1) predicates
 the low-level attachment API (`attach`, `dijkstraFromAttach`, `distToAttach`,
 `pathToAttach`) used by the router and the particle filter. The additive
 `raster` / `toM` / `toLL` fields expose the clearance raster for room/space
-analysis such as the Room pin hallway check.
+analysis used by the particle filter, the router and Room Pin.
 
 ## Why it's built this way
 

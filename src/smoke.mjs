@@ -15,14 +15,17 @@ import { readFileSync } from 'fs';
 import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { buildGraph, buildGraphState, graphFromState } from './navgraph.mjs';
-import { navGraphInputs } from './navgraph-source.mjs';
+import { navGraphInputs, graphInputHash } from './navgraph-source.mjs';
+import { decodeBundle } from './navgraph-codec.mjs';
+import { gunzipBytes } from './navgraph-codec-io.mjs';
+import { makeBundleGraph } from './navgraph-bundle-runtime.mjs';
 import { floorLevelOf } from './floors.mjs';
 import { extractPortals, buildCampusRouter, buildOutdoorGraph, buildObstacleIndex, shapeSegments, cachePortals, portalsFromCache, isWallLayer, isDoorLayer } from './campus.mjs';
 import { loadOsmShapes, tilesToShapes } from './osm.mjs';
 import { pmtilesGetZxy } from './pmtiles-node.mjs';
 import { convexHull, hullSamples, bestFitRigid, bestFitTranslation, meanPoint } from './align.mjs';
 
-import { DXF_SCALE, metresPerDegree, makeToLL } from './geo.mjs';
+import { DXF_SCALE, metresPerDegree, makeToLL, crossBarrier, nearestApproach } from './geo.mjs';
 import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
 import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
 import { AnchorStepCalibrator } from './anchorcal.mjs';
@@ -31,7 +34,7 @@ import { buildPassages, makeHeadingField, CompassSnapper, distPi } from './headi
 import { PositionArbiter } from './arbiter.mjs';
 import { normName, placeTarget, parseTarget, buildPlaceIndex, searchPlaces, splitRoomQuery, findRoom, findRoomExact, resolvePlace, validatePlaces } from './places.mjs';
 import { doorwaysFromShapes, barrierCrossesPolyline } from './doorways.mjs';
-import { resolveRoomPin } from './roompin.mjs';
+import { resolveRoomPin, sampleTargets, firstDoorCrossing } from './roompin.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
 // import.html); smoke reads the same file index.html fetches.
@@ -102,7 +105,7 @@ const ALL_CATEGORIES = [
   'anchorcal',   // step-length refinement from manual anchors
   'headingfield', // allowed compass directions + compass snapping
   'doorways',    // DOOR-layer clustering and wall-aligned barriers
-  'roompin',     // strict hallway-door resolution (real AS121-02)
+  'roompin',     // route-derived door resolution (real AS121-02)
   'places',      // place nicknames, places.json, favorites
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -128,10 +131,10 @@ const NEEDS_FLOORS = ['walkability', 'portals', 'router', 'osm', 'multifloor', '
 const needsFloors = NEEDS_FLOORS.some(want);
 if (_args.length) console.log(`Running categories: ${[...ACTIVE].join(', ')}\n`);
 
-// SMOKE_TIMING=1 prefixes every line with elapsed seconds - run it when
-// hunting for the slow section. Off by default so the gate's output stays
-// clean.
-if (process.env.SMOKE_TIMING) {
+// Every line is prefixed with elapsed seconds, so a long run's stages are
+// visible as they finish (the shared floor load and each group print headers).
+// Set SMOKE_NO_TIMING=1 for the old clean output.
+if (!process.env.SMOKE_NO_TIMING) {
   const T0 = performance.now();
   const origLog = console.log.bind(console);
   console.log = (...a) =>
@@ -139,74 +142,140 @@ if (process.env.SMOKE_TIMING) {
 }
 
 /**
- * Per-floor basis: JSON parse, wall segments, navGraph, fresh portal set.
- * These are independent per floor and dominated by CPU (buildGraph,
- * extractPortals), so they run across worker threads - this was ~9 s of the
- * suite's ~40 s single-threaded. Set SMOKE_NO_WORKERS=1 to run inline.
+ * Per-floor basis: JSON parse, wall/door geometry, navGraph, portal set.
+ *
+ * The navGraph comes from the shipped per-building bundle (`graphUrl`, the same
+ * `.nvg.gz` the app loads) when its `sourceHash` matches a freshly computed
+ * `graphInputHash` of this floor's wall/door geometry - so a stale cache can
+ * never be used silently: a mismatch rebuilds from the JSON and fails the gate
+ * at the end. Portal extraction (the other CPU cost) is reused from the config
+ * cache unless the `portals` category needs a fresh extraction; the per-floor
+ * work still runs across worker threads.
  */
-function basisFromJson(cfg, floor, data) {
+async function decodeAllBundles() {
+  const bundles = new Map();     // cfg.id -> Map(floorId -> decoded floor)
+  const errors = [];
+  for (const cfg of CONFIG) {
+    if (!cfg.graphUrl) continue;
+    try {
+      const gz = readFileSync(new URL('.' + cfg.graphUrl, import.meta.url));
+      const bytes = await gunzipBytes(new Uint8Array(gz));
+      const decoded = decodeBundle(bytes);
+      bundles.set(cfg.id, new Map(decoded.floors.map((f) => [f.floorId, f])));
+    } catch (err) {
+      errors.push(`${cfg.id}: ${err?.message || err}`);
+    }
+  }
+  return { bundles, errors };
+}
+
+function floorBasisFromData(cfg, floor, data, bundleFloor, wantFresh) {
   const toLL = makeToLL(cfg, floor);
-  // Same wall filter as index.html's loadFloor() (case-insensitive: AS106
-  // writes WINDOWS in caps).
-  const walls = data.shapes.filter(s => isWallLayer(s.layer));
-  const lines = walls.flatMap(s =>
-    shapeSegments(s).map(([a, b]) => [toLL(a[0], a[1]), toLL(b[0], b[1])]));
+  const { lines, doors } = navGraphInputs(cfg, floor, data, toLL);
+  const sourceHash = graphInputHash({ lines, doors });
+  const bundleOk = !!bundleFloor && bundleFloor.sourceHash === sourceHash;
+  const navGraph = bundleOk
+    ? makeBundleGraph(bundleFloor, { lines, doorPoints: doors })
+    : graphFromState(buildGraphState(lines, doors));
+  if (bundleOk && want('corridor')) navGraph.ensureHeadingField();
+  const freshPortals = (wantFresh || !floor.portals)
+    ? extractPortals(data.shapes, toLL)
+    : portalsFromCache(floor.portals, toLL);
   return {
-    floor, toLL, lines,
-    navGraph: buildGraph(lines),
-    freshPortals: extractPortals(data.shapes, toLL),
-    textLines: data.text_lines ?? [],
+    floor, toLL, lines, doors, navGraph, freshPortals,
+    textLines: data.text_lines ?? [], sourceHash,
+    fromBundle: bundleOk, hasBundle: !!cfg.graphUrl,
   };
 }
 
 async function buildFloorBasis() {
+  const wantFresh = want('portals');
+  const { bundles, errors } = await decodeAllBundles();
   const jobs = [];
   for (let i = 0; i < CONFIG.length; i++) {
     for (let k = 0; k < CONFIG[i].floors.length; k++) {
-      jobs.push({ i, k, cfg: CONFIG[i], floor: CONFIG[i].floors[k] });
+      const cfg = CONFIG[i], floor = CONFIG[i].floors[k];
+      jobs.push({ i, k, cfg, floor, bundleFloor: bundles.get(cfg.id)?.get(floor.floorId) ?? null });
     }
   }
+  const remaining = CONFIG.map(cfg => cfg.floors.length);
+  let floorsDone = 0, buildingsDone = 0;
+  const noteFloor = (i) => {
+    floorsDone++;
+    if (--remaining[i] > 0) return;
+    buildingsDone++;
+    const cfg = CONFIG[i];
+    const n = cfg.floors.length;
+    console.log(`  load ${String(buildingsDone).padStart(2)}/${CONFIG.length} ${cfg.id} ` +
+      `(${n} floor${n > 1 ? 's' : ''}) - ${floorsDone}/${jobs.length} floors`);
+  };
+  let basis;
   if (process.env.SMOKE_NO_WORKERS) {
-    return CONFIG.map(cfg => cfg.floors.map(floor => {
+    basis = CONFIG.map((cfg, i) => cfg.floors.map(floor => {
       const data = JSON.parse(readFileSync(new URL(floor.url.replace(/^\//, ''), import.meta.url), 'utf8'));
-      return basisFromJson(cfg, floor, data);
+      const b = floorBasisFromData(cfg, floor, data,
+        bundles.get(cfg.id)?.get(floor.floorId) ?? null, wantFresh);
+      noteFloor(i);
+      return b;
     }));
-  }
-  const basis = CONFIG.map(cfg => cfg.floors.map(() => null));
-  const concurrency = Math.max(1, Math.min(8, (availableParallelism?.() ?? 4) - 1));
-  let next = 0;
-  await Promise.all(Array.from({ length: concurrency }, () => (async () => {
-    const worker = new Worker(new URL('./basis-worker.mjs', import.meta.url));
-    try {
-      for (;;) {
-        const job = jobs[next++];
-        if (!job) break;
-        const result = await new Promise((resolve, reject) => {
-          const onMessage = m => { cleanup(); resolve(m); };
-          const onError = e => { cleanup(); reject(e); };
-          const cleanup = () => {
-            worker.off('message', onMessage);
-            worker.off('error', onError);
+  } else {
+    basis = CONFIG.map(cfg => cfg.floors.map(() => null));
+    const concurrency = Math.max(1, Math.min(8, (availableParallelism?.() ?? 4) - 1));
+    let next = 0;
+    await Promise.all(Array.from({ length: concurrency }, () => (async () => {
+      const worker = new Worker(new URL('./basis-worker.mjs', import.meta.url));
+      try {
+        for (;;) {
+          const job = jobs[next++];
+          if (!job) break;
+          const result = await new Promise((resolve, reject) => {
+            const onMessage = m => { cleanup(); resolve(m); };
+            const onError = e => { cleanup(); reject(e); };
+            const cleanup = () => {
+              worker.off('message', onMessage);
+              worker.off('error', onError);
+            };
+            worker.on('message', onMessage);
+            worker.on('error', onError);
+            worker.postMessage({ cfg: job.cfg, floor: job.floor,
+              bundleFloor: job.bundleFloor, freshPortals: wantFresh });
+          });
+          if (!result.ok) throw new Error(`basis worker: ${result.error}`);
+          const navGraph = result.bundleFloor
+            ? makeBundleGraph(result.bundleFloor, { lines: result.lines, doorPoints: result.doors })
+            : graphFromState(buildGraphState(result.lines, result.doors));
+          if (result.bundleFloor && want('corridor')) navGraph.ensureHeadingField();
+          basis[job.i][job.k] = {
+            floor: job.floor,
+            // toLL is a function - rebuild it here rather than serialising it.
+            toLL: makeToLL(job.cfg, job.floor),
+            lines: result.lines,
+            doors: result.doors,
+            navGraph,
+            freshPortals: result.freshPortals,
+            textLines: result.textLines,
+            sourceHash: result.sourceHash,
+            fromBundle: !!result.bundleFloor,
+            hasBundle: !!job.cfg.graphUrl,
           };
-          worker.on('message', onMessage);
-          worker.on('error', onError);
-          worker.postMessage({ cfg: job.cfg, floor: job.floor });
-        });
-        if (!result.ok) throw new Error(`basis worker: ${result.error}`);
-        basis[job.i][job.k] = {
-          floor: job.floor,
-          // toLL is a function - rebuild it here rather than serialising it.
-          toLL: makeToLL(job.cfg, job.floor),
-          lines: result.lines,
-          navGraph: graphFromState(result.state),
-          freshPortals: result.freshPortals,
-          textLines: result.textLines,
-        };
+          noteFloor(job.i);
+        }
+      } finally {
+        await worker.terminate();
       }
-    } finally {
-      await worker.terminate();
-    }
-  })()));
+    })()));
+  }
+  // Cache validation: a bundle that fails to decode, or whose sourceHash does
+  // not match the floor JSON, fails the gate - so the shipped cache can never go
+  // stale unnoticed.
+  if (needsFloors) {
+    const stale = basis.flat().filter((b) => b.hasBundle && !b.fromBundle);
+    check(`navGraph bundles decode (${bundles.size}/${CONFIG.filter((c) => c.graphUrl).length} buildings)`,
+      errors.length === 0, errors.join('; '));
+    check('every navGraph bundle matches its floor JSON (sourceHash)',
+      stale.length === 0,
+      stale.slice(0, 6).map((b) => `${b.floor?.floorId}`).join(', '));
+  }
   return basis;
 }
 
@@ -3037,6 +3106,30 @@ const door = { barrier: [[0, 0], [2, 0]] };
 check('barrier crossing is detected', barrierCrossesPolyline(door, [[1, -1], [1, 1]]));
 check('a near miss does not cross the barrier', !barrierCrossesPolyline(door, [[1, 0.5], [3, 0.5]]));
 
+// Room Pin's tolerant crossing (geo.crossBarrier): the navGraph passage is
+// carved at the door leaf midpoint, so a route threads the opening a few
+// decimetres to the side of the wall-gap barrier. Exact intersection misses it;
+// the tolerant version must not.
+const vBarrier = [[5, -0.5], [5, 0.5]];   // 1 m vertical opening
+check('tolerant crossing: straight through counts',
+  !!crossBarrier([[0, 0], [10, 0]], vBarrier[0], vBarrier[1]));
+check('tolerant crossing: 0.35 m past the jamb still counts',
+  !!crossBarrier([[0, 0.85], [10, 0.85]], vBarrier[0], vBarrier[1]));
+check('tolerant crossing: 1 m past the jamb does not count',
+  !crossBarrier([[0, 1.5], [10, 1.5]], vBarrier[0], vBarrier[1]));
+check('tolerant crossing reports arc length and direction',
+  (() => { const c = crossBarrier([[0, 0], [10, 0]], vBarrier[0], vBarrier[1]);
+    return !!c && Math.abs(c.at - 5) < 1e-9 && Math.abs(c.dir[0] - 1) < 1e-9; })());
+
+// A route through the opening but *beside* the barrier (the navGraph passage is
+// offset from the wall gap) is caught by nearest-approach instead.
+check('nearestApproach: beside the jamb is within the ADA pass distance',
+  (() => { const n = nearestApproach([[0, 0.3], [10, 0.3]], vBarrier[0], vBarrier[1]);
+    return !!n && n.dist <= 0.815; })());
+check('nearestApproach: a route 1.5 m away does not count',
+  (() => { const n = nearestApproach([[0, 1.5], [10, 1.5]], vBarrier[0], vBarrier[1]);
+    return !n || n.dist > 0.815; })());
+
 // Real floor: the target doorway must be a wall opening, not an open leaf.
 const cfg = CONFIG.find((b) => b.id === 'AS121');
 const fl = cfg.floors.find((f) => f.floorId === '02');
@@ -3060,7 +3153,8 @@ check('ECB 208 barrier is the wall opening, not the 0.9 m leaf', !!near &&
 }
 
 // ---------------------------------------------------------------------------
-// Room Pin: an exact room's one hallway door on the real ECB plan.
+// Room Pin: an exact room's door, found by routing to another same-floor room
+// (the first doorway the route crosses), on the real ECB plan.
 // ---------------------------------------------------------------------------
 if (want('roompin')) {
 console.log('\nRoom Pin (roompin.mjs, real AS121-02):');
@@ -3087,12 +3181,45 @@ const router = buildCampusRouter([building]);
 const hit = findRoomExact(building, '208');
 check('exact room lookup finds ECB 208', !hit.error && hit.floor.floorId === '02', hit.error ?? '');
 const pin = hit.error ? hit : resolveRoomPin(building, hit, router);
-check('ECB 208 resolves to one hallway door', !pin.error, pin.error ?? '');
+check('ECB 208 resolves to one door', !pin.error, pin.error ?? '');
 check('pin point is outside the doorway', !pin.error &&
   Math.hypot((pin.ll[0] - pin.doorLL[0]) * metresPerDegree(pin.ll[1]).lon,
-             (pin.ll[1] - pin.doorLL[1]) * metresPerDegree(pin.ll[1]).lat) > 0.8,
+             (pin.ll[1] - pin.doorLL[1]) * metresPerDegree(pin.ll[1]).lat) > 0.3,
   pin.error ?? '');
 check('unknown exact room is rejected', !!findRoomExact(building, 'ZZZ').error);
+
+// The door comes from the first doorway a route to a random same-floor room
+// crosses; probes are seeded so a room's set is stable across runs.
+const seed = `ECB|02|208`;
+const targets = sampleTargets(floor, hit.labelLL, seed);
+check('probes are stable for a room (seeded)',
+  JSON.stringify(targets) === JSON.stringify(sampleTargets(floor, hit.labelLL, seed)));
+check('probes are other same-floor rooms',
+  targets.length === 6 && !targets.some((ll) =>
+    ll[0] === hit.labelLL[0] && ll[1] === hit.labelLL[1]), `${targets.length} probes`);
+let nearCross = null;
+for (const ll of targets) {
+  const c = firstDoorCrossing(router.route(hit.labelLL, ll,
+    { startFloor: '02', endFloor: '02' }), floor);
+  if (c && Math.hypot((c.door.ll[0] - hit.labelLL[0]) * metresPerDegree(hit.labelLL[1]).lon,
+                      (c.door.ll[1] - hit.labelLL[1]) * metresPerDegree(hit.labelLL[1]).lat) <= 15) {
+    nearCross = c;
+    break;
+  }
+}
+check('a first-crossed door is found near the room', !!nearCross,
+  nearCross ? `${nearCross.door.id} @${nearCross.at.toFixed(1)}m` : 'none');
+check('the resolved pin uses that nearby door', !pin.error && pin.doorLL &&
+  pin.doorLL[0] === nearCross?.door.ll[0] && pin.doorLL[1] === nearCross?.door.ll[1]);
+
+// A floor where the room is the only label has nothing to route to.
+const lone = { floorId: '01', roomLabels: [
+  { type: 'Feature', geometry: { type: 'Point', coordinates: [1, 1] }, properties: { text: 'only' } },
+] };
+const lonePin = resolveRoomPin({ id: 'X', sourceId: 'X', floors: [lone] },
+  { floor: lone, text: 'only', labelLL: [1, 1] }, router);
+check('a lone room on its floor is refused',
+  lonePin.error === 'Room only is the only room on its floor.', lonePin.error ?? '');
 
 // A route crossing an interior door lists it and can avoid it.
 const room209 = findRoomExact(building, '209');

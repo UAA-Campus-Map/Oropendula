@@ -64,17 +64,30 @@ ground floor even when a building has a basement.
 
 ### Room pin
 
-The right-edge **Locate by room** button places a manual PDR anchor in the
-hallway outside a room in the current building. It accepts either a bare room
-number (`211`, defaulting to the current building) or a building code plus room
+The right-edge **Locate by room** button places a manual PDR anchor just
+outside a room in the current building. It accepts either a bare room number
+(`211`, defaulting to the current building) or a building code plus room
 (`AS124 211` / `LIB 211`), using the same longest-code matching as the search
-bar. It requires an exact, unique room match and clusters DOOR-layer leaves
-into physical doorways with a wall-aligned barrier. A door is accepted only
-when a point across its wall reaches another doorway without crossing any
-doorway bar (so the point is outside the room and on a hallway, and not a
-wall/vestibule). It refuses ambiguous rooms and rooms with multiple hallway
-doors. A successful placement stops GPS, binds PDR to that building/floor, and
-seeds the particle cloud at the centre of the hallway outside the door.
+bar. It requires an exact, unique room match. The room's door is found by
+**routing** from the label to **6 seeded-random other rooms on the same floor**
+and taking the **first doorway each route crosses**; every door is assumed to
+open onto circulation space, so there is no geometric hallway test. The door
+must lie within 15 m of the label. Probes that cross **no** door (same open
+space) are ignored. The **majority first hop door** (the door most probes leave
+through; ties break on distance) is used. "Multiple doors" is reported when two
+probes leave through first doors **≥ 2 m apart** (different openings); doors
+closer than that are one entrance (double door / two leaves). It also refuses
+ambiguous rooms and a floor where the room is the only label. The user is placed
+0.8 m beyond that door, continuing the line from the room's label through the
+door into the hallway (a walkable point, backed off toward the door if needed).
+
+Door *crossing* is tolerant (`geo.crossBarrier` + `geo.nearestApproach`): a
+doorway's barrier is the wall gap, but the navGraph passage is carved at the
+door leaf midpoint, so a route often threads the opening a few decimetres to the
+side of the barrier. A door counts as crossed when the route crosses the
+barrier's line (±0.4 m past the jamb) **or** passes within 0.815 m (the ADA
+minimum clear door width, 32 in) of the barrier segment through its opening. The
+same rule backs interior-door detection for **blocked doors**.
 
 ### Blocked doors/staircases
 
