@@ -4016,25 +4016,40 @@
     }
 
     const SKYBRIDGE_LINK_M = 120;
+    const SKYBRIDGE_TRIGGER_M = 3.0;
 
     /**
-     * Are these two floors joined by a skybridge? Mirrors the router's pairing
-     * enough for auto floor changes: explicit `to` marks win (and may cross
+     * Portal pairs joining two floors. Explicit `to` marks win (and may cross
      * floors); otherwise the portals must be within SKYBRIDGE_LINK_M.
      */
-    function skybridgeLinksBetween(a, aBuilding, b, bBuilding) {
-      if (!a || !b || a === b || aBuilding === bBuilding) return false;
+    function skybridgeLinks(a, aBuilding, b, bBuilding) {
+      if (!a || !b || a === b || aBuilding === bBuilding) return [];
+      const out = [];
       for (const s of a.skybridges ?? []) {
         if (!s.ll) continue;
         for (const t of b.skybridges ?? []) {
           if (!t.ll) continue;
           if (s.to && s.to !== bBuilding.id) continue;
           if (t.to && t.to !== aBuilding.id) continue;
-          if (s.to || t.to) return true;
-          if (lonLatDistM(s.ll, t.ll) <= SKYBRIDGE_LINK_M) return true;
+          const d = lonLatDistM(s.ll, t.ll);
+          if (!(s.to || t.to) && d > SKYBRIDGE_LINK_M) continue;
+          out.push({ from: s.ll, to: t.ll, d });
         }
       }
-      return false;
+      return out;
+    }
+
+    /** Position of `ll` along a portal pair (t=0 source, t=1 destination). */
+    function skybridgeProjection(ll, a, b) {
+      const m = metresPerDegree(ll[1]);
+      const dx = (b[0] - a[0]) * m.lon, dy = (b[1] - a[1]) * m.lat;
+      const px = (ll[0] - a[0]) * m.lon, py = (ll[1] - a[1]) * m.lat;
+      const l2 = dx * dx + dy * dy;
+      const t = l2 ? (px * dx + py * dy) / l2 : 0;
+      const tc = Math.max(0, Math.min(1, t));
+      const qx = a[0] + (b[0] - a[0]) * tc;
+      const qy = a[1] + (b[1] - a[1]) * tc;
+      return { t, dist: lonLatDistM(ll, [qx, qy]) };
     }
 
     // Bind the locator to a building/floor. The DISPLAYED floor wins when it
@@ -4062,7 +4077,9 @@
       for (const b of buildings) {
         for (const f of b.floors) {
           if (f === pick.floor) continue;
-          if (skybridgeLinksBetween(pick.floor, pick.building, f, b)) skybridgeNeighbors.push({ building: b, floor: f });
+          for (const link of skybridgeLinks(pick.floor, pick.building, f, b)) {
+            skybridgeNeighbors.push({ building: b, floor: f, from: link.from, to: link.to });
+          }
         }
       }
       // A floor's raster (navGraph) ends at its own wall bbox. A connected
@@ -4224,10 +4241,12 @@
     function autoSwitchSkybridge(est) {
       if (!est || !locator || !campusRouter) return est;
       const ll = [est.lon, est.lat];
-      // Stay on the current floor while it still owns the point; this prevents
-      // ping-pong when two linked floors overlap at the landing.
-      if (locator.floor.navGraph?.isWalkable?.(ll)) return est;
       for (const n of locator.skybridgeNeighbors ?? []) {
+        if (!n.from || !n.to) continue;
+        const { t, dist } = skybridgeProjection(ll, n.from, n.to);
+        // Cross the midpoint of the portal pair; the reverse link projects
+        // back to < 0.5, so this cannot ping-pong at an overlapping landing.
+        if (t <= 0.55 || dist > SKYBRIDGE_TRIGGER_M) continue;
         if (!n.floor.navGraph?.isWalkable?.(ll)) continue;
         const level = floorLevels.indexOf(n.floor.floorId) + 1;
         if (level > 0) setFloor(level);

@@ -793,7 +793,7 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
     (`distanceNoise = 0.22`; heavy tails cover a mismatch between the model's
     step length and the walker's - some particles always take the right
     cumulative distance) and a **perpendicular** lateral jitter
-    (`lateralNoiseM = 0.40`, applied across the travel direction, not on the
+    (`lateralNoiseM = 0.30`, applied across the travel direction, not on the
     east axis). Post-resample roughening (`roughenM = 0.20`) re-inflates the
     cloud in every direction after resampling collapses it.
   - **Heading prior**: a known heading seeds within ±90° (`seed` clamps

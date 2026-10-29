@@ -96,7 +96,7 @@ the belief does *not* collapse on its own.)
   weight); empty until seeded.
 - **Respawn and roughening jitter are swept, not endpoint-tested.** A wall-killed
   particle inherits a surviving particle's position and a Gaussian jitter; the
-  jitter segment is walked with `_advance` so a larger spread (e.g. 0.4 m)
+  jitter segment is walked with `_advance` so a larger spread (e.g. 0.3 m)
   cannot jump a thin wall into the next room. The post-resample roughening uses
   the same sweep.
 - `version` is bumped whenever the cloud changes, so the renderer can skip
@@ -104,7 +104,7 @@ the belief does *not* collapse on its own.)
 - Fixed particle count (`DEFAULT_COUNT = 1000`, also the constructor default);
   arrays are sized once and the resample is allocation-free (ping-pong buffers).
   Per-step defaults: `headingJitterDeg = 35`, `distanceNoise = 0.22`,
-  `lateralNoiseM = 0.40`, `roughenM = 0.20`. `predict` is O(N).
+  `lateralNoiseM = 0.30`, `roughenM = 0.20`. `predict` is O(N).
 
 ## See also
 
