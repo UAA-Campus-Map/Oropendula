@@ -755,6 +755,30 @@ console.log('\nPDR particle filter:');
     check('re-spawned particles stay on walkable ground (no cross-wall spawns)',
       offPlan === 0, `${offPlan} off-plan`);
   }
+  // A sealed wall must stay sealed even with the larger PDR spread: both
+  // wall-killed respawns and post-resample roughening sweep their jitter.
+  {
+    const sealedWalkable = (p) => {
+      const e = (p[0] - lon0) * mpd.lon, n = (p[1] - lat0) * mpd.lat;
+      if (Math.abs(e) >= 6 || Math.abs(n) >= 3) return false;
+      if (Math.abs(e) <= 0.3) return false;   // solid wall, no doorway
+      return true;
+    };
+    const f = new ParticleFilter({
+      isWalkable: sealedWalkable, nearestWalkable: roomNearest,
+      count: 400, headingNoiseDeg: 4, distanceNoise: 0.05,
+      lateralNoiseM: 0.4, respawnSpreadM: 0.4,
+    });
+    f.seed(toLL(-1.5, 1.4), { spreadM: 0.1, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    for (let k = 0; k < 12; k++) f.predict(0.7, Math.PI / 2, { accuracyM: 20 });
+    let crossed = 0;
+    for (let i = 0; i < f.count; i++) {
+      const e = (f.lon[i] - lon0) * mpd.lon;
+      if (e > 0.3) crossed++;
+    }
+    check('0.4 m spread does not spawn across a sealed wall',
+      crossed === 0, `${crossed} crossed`);
+  }
   // The reported estimate is walkable even with the cloud split across the wall.
   {
     const f = new ParticleFilter({ isWalkable: roomWalkable, nearestWalkable: roomNearest, count: 200 });

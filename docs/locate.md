@@ -94,6 +94,11 @@ the belief does *not* collapse on its own.)
   outdoor PDR works even without free roam / GPS.
 - `points()` returns `{ lon, lat, w }` for the map overlay (`w` is relative
   weight); empty until seeded.
+- **Respawn and roughening jitter are swept, not endpoint-tested.** A wall-killed
+  particle inherits a surviving particle's position and a Gaussian jitter; the
+  jitter segment is walked with `_advance` so a larger spread (e.g. 0.4 m)
+  cannot jump a thin wall into the next room. The post-resample roughening uses
+  the same sweep.
 - `version` is bumped whenever the cloud changes, so the renderer can skip
   rebuilding the overlay for GPS-only estimates.
 - Fixed particle count (`DEFAULT_COUNT = 1000`, also the constructor default);

@@ -475,8 +475,16 @@ export class ParticleFilter {
     const by = src >= 0 ? this.lat[src] : this.lat[i];
     const [plon, plat] = offsetLL(bx, by,
       gaussian() * this.respawnSpreadM, gaussian() * this.respawnSpreadM);
-    if (this.freeRoam || this.isWalkable([plon, plat])) { this.lon[i] = plon; this.lat[i] = plat; }
-    else { this.lon[i] = bx; this.lat[i] = by; }
+    if (this.freeRoam) {
+      this.lon[i] = plon;
+      this.lat[i] = plat;
+    } else {
+      // Sweep the jitter, not just its endpoint: a 0.4 m spread can otherwise
+      // jump a thin wall into the next room while the endpoint is walkable.
+      const p = this._advance(bx, by, plon, plat);
+      this.lon[i] = p[0];
+      this.lat[i] = p[1];
+    }
     this.heading[i] = heading;
     this._hOff[i] = src >= 0 ? this._hOff[src] : 0;
   }
@@ -653,12 +661,19 @@ export class ParticleFilter {
     const step = 1 / n;
     let r = Math.random() * step, c = weight[0], idx = 0;
     const mpd = metresPerDegree(this.lat[0]);
+    this._mpd = mpd;
     for (let i = 0; i < n; i++) {
       const u = r + i * step;
       while (u > c && idx < n - 1) { idx++; c += weight[idx]; }
-      // Roughening so copies do not stay identical forever.
+      // Roughening so copies do not stay identical forever. Sweep the jitter
+      // too, otherwise the 0.2 m roughening can put a copy across a thin wall.
       const re = gaussian() * this.roughenM, rn = gaussian() * this.roughenM;
-      const plon = this.lon[idx] + re / mpd.lon, plat = this.lat[idx] + rn / mpd.lat;
+      let plon = this.lon[idx] + re / mpd.lon;
+      let plat = this.lat[idx] + rn / mpd.lat;
+      if (!this.freeRoam) {
+        const p = this._advance(this.lon[idx], this.lat[idx], plon, plat);
+        plon = p[0]; plat = p[1];
+      }
       const h = this.heading[idx] + gaussian() * this.headingNoise * 0.5;
       sLon[i] = plon; sLat[i] = plat; sH[i] = h; sHO[i] = this._hOff[idx];
     }
