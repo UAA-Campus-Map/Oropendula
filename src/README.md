@@ -7,12 +7,16 @@ modules in this directory.
 - **Production entry point:** `app.html` → https://uaa-campus-map.net
 - **Demo / tools:** `index.html` (original demo), `import.html` (building
   authoring + deploy), `places.html` (place nicknames), `locate-test.html`
-  (positioning testbed), `import-progress.html`.
+  (positioning testbed), `watershed.html` (room/watershed visualiser),
+  `import-progress.html`.
 - **Data in this directory:** `buildings-config.json` (registrations, portal
   cache, `graphUrl`/hashes), per-floor `*.json`, per-building `*.nvg.gz` navGraph
   bundles, `places.json`, `osm-paths.json`, `style.json`.
 - **Tests:** `node smoke.mjs` (see [`../docs/tooling.md`](../docs/tooling.md));
   the gate must be green before deploying changed files.
+- **Indoor walkability:** `walkable.mjs` floods the outside and produces the
+  mask that `buildGraphState(..., { mask })` applies before graph generation
+  (see [`../docs/walkable.md`](../docs/walkable.md)).
 
 Read [`agents.md`](agents.md) first — it is the single narrative of hard-won
 context — then [`../docs/README.md`](../docs/README.md) for one page per module

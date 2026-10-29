@@ -91,6 +91,8 @@
 </head>
 <body>
   <div id="map"></div>
+  <canvas id="walkable-canvas" width="1" height="1"
+    style="position:fixed;left:-10000px;top:0;width:1px;height:1px"></canvas>
   <div id="panel">
     <h1>Building import &amp; placement</h1>
     <div id="drop">Drop a building JSON here<br>(or use the picker)</div>
@@ -164,6 +166,24 @@
       <div id="bridge-note" class="hint"></div>
     </div>
 
+    <h2 style="margin-top:12px">Walkable (flood)</h2>
+    <p class="hint" style="margin-top:0">Outdoor flood from a seed in the ring
+      outside the walls; doorways are sealed. Everything the flood cannot reach
+      inside the bbox is indoor. Seeds and seals are optional overrides.
+      <span class="key manual"></span> seed &nbsp; <span class="key auto"></span> seal</p>
+    <div class="row">
+      <button id="seedIndoorBtn" title="Tap an indoor room; the flood must not reach it">Seed indoors</button>
+      <button id="seedOutdoorBtn" title="Tap an outdoor point; auto-picks the bbox ring">Seed outdoors</button>
+    </div>
+    <div class="row">
+      <button id="sealGapBtn" title="Tap two points across a leaking opening">Seal gap</button>
+      <button id="clearWalkBtn" title="Remove seeds and seals on this floor">Clear seeds/seals</button>
+    </div>
+    <div class="row">
+      <button id="previewWalkBtn" title="Flood this floor and draw the walkable mask">Preview walkable</button>
+    </div>
+    <div id="walk-note" class="hint"></div>
+
     <h2>Placement</h2>
     <label>origin lon <input type="text" id="originLon" /></label>
     <label>origin lat <input type="text" id="originLat" /></label>
@@ -213,6 +233,8 @@
     import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
     import { gzipBytes } from './navgraph-codec-io.mjs';
     import { navGraphInputs, graphInputHash, graphFingerprint, linesBBox } from './navgraph-source.mjs';
+    import { doorwaysFromShapes } from './doorways.mjs';
+    import { floodIndoor } from './walkable.mjs';
     import { makeZip } from './zip.mjs';
     import { loadOsmShapes } from './osm.mjs';
     import { hullSamples, bestFitTranslation } from './align.mjs';
@@ -251,7 +273,9 @@
     let didInitialFit = false;      // first load: fit the plan clear of the panel
     let portalsDirty = false;       // a portal cache was computed since last persist
     let previewRaf = 0;             // live drag redraw scheduled
-    let editMode = null;            // 'place-door' | 'remove-door' | 'place-bridge' | 'remove-bridge'
+    let editMode = null;            // 'place-door' | ... | 'seed-indoor' | 'seed-outdoor' | 'seal-gap'
+    let sealFirst = null;           // first DXF point of a two-tap flood seal
+    let walkPreview = null;         // last flood result for the selected floor
     let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
     let graphBusy = false;          // a bundle generation run is in progress
     let diffBusy = false;           // deploy-diff calculation/generation
@@ -470,6 +494,27 @@
 
     map.on('load', () => {
       addFillLayer('imp-walls', '#c0392b', 1.6);
+      // Flood-fill walkable preview (canvas overlay, under the wall lines).
+      // Start with a tiny valid quad (a zero-area quad makes MapLibre's
+      // Mercator transform singular) and hide it until a preview is drawn.
+      if (!map.getSource('imp-walkable')) {
+        const c = map.getCenter();
+        const d = 0.0001;
+        map.addSource('imp-walkable', {
+          type: 'canvas',
+          canvas: $('walkable-canvas'),
+          coordinates: [
+            [c.lng - d, c.lat - d], [c.lng + d, c.lat - d],
+            [c.lng + d, c.lat + d], [c.lng - d, c.lat + d],
+          ],
+        });
+      }
+      if (!map.getLayer('imp-walkable')) {
+        map.addLayer({
+          id: 'imp-walkable', type: 'raster', source: 'imp-walkable',
+          paint: { 'raster-opacity': 0 },
+        }, 'imp-walls');
+      }
       // Topmost-floor shadow: dashed blue, drawn UNDER the selected floor so
       // the new plan can be aligned on top of it.
       if (!map.getSource('imp-walls-shadow')) {
@@ -561,6 +606,36 @@
     map.on('click', (e) => {
       const b = building(), f = floor();
       if (!b || !f || !editMode) return;
+      if (editMode === 'seed-indoor' || editMode === 'seed-outdoor') {
+        const mode = editMode;
+        const dxf = toDxfAt(b, f, e.lngLat);
+        if (mode === 'seed-indoor') f.indoorSeed = { dxf };
+        else f.outdoorSeed = { dxf };
+        editMode = null;
+        persist();
+        invalidateGraph(b);
+        status(mode === 'seed-indoor' ? 'Indoor seed set' : 'Outdoor seed set');
+        syncPortalPanel();
+        previewWalkable();
+        return;
+      }
+      if (editMode === 'seal-gap') {
+        const dxf = toDxfAt(b, f, e.lngLat);
+        if (!sealFirst) {
+          sealFirst = dxf;
+          status('Seal: tap the second point across the gap');
+          return;
+        }
+        (f.floodSeals ??= []).push({ dxf: [sealFirst, dxf] });
+        sealFirst = null;
+        editMode = null;
+        persist();
+        invalidateGraph(b);
+        status('Flood seal added');
+        syncPortalPanel();
+        previewWalkable();
+        return;
+      }
       if (editMode === 'dest-bridge') { setBridgeDest(b, f, e.lngLat); return; }
       const [action, kind] = editMode.split('-');
       const key = kind === 'door' ? 'exits' : 'skybridges';
@@ -824,6 +899,7 @@
                           'imp-portal-labels']) {
           setData(id, empty);
         }
+        renderWalkable(null);
         if ($('shadow-note')) $('shadow-note').textContent = 'Shadow: none';
         hideBuildingLabel();
         syncMarkers();
@@ -843,6 +919,7 @@
       const shadow = topmostOtherFloor(b, f);
       if ($('showShadow').checked && shadow) await loadFloorData(b, shadow);
       renderSelectedFloor(b, f);
+      renderWalkable(null);   // a preview belongs to the floor it was computed for
 
       // other buildings as ghosts
       const ghost = [];
@@ -889,6 +966,175 @@
         : mode.startsWith('place') ? 'place' : 'remove';
       status(editMode ? `Tap the map to ${verb} ${label}` : 'Editing off');
       syncPortalPanel();
+    }
+
+    function setWalkMode(mode) {
+      editMode = editMode === mode ? null : mode;
+      sealFirst = null;
+      const msg = editMode === 'seed-indoor' ? 'Tap an indoor room'
+        : editMode === 'seed-outdoor' ? 'Tap an outdoor point'
+        : editMode === 'seal-gap' ? 'Tap the first point across the gap'
+        : 'Walkable editing off';
+      status(msg);
+      syncPortalPanel();
+    }
+
+    /**
+     * Pick a sensible indoor label: a room-number label in the 0.6–6 m wall
+     * band (farthest in the band), falling back to the closest label. Room
+     * numbers sit in rooms; roof/site/legend labels sit far out in the open and
+     * are excluded by the band. Used as the leak-validation seed.
+     */
+    function autoIndoorSeed(data, toLL) {
+      const labels = (data?.text_lines ?? [])
+        .filter((t) => Number.isFinite(t.x) && Number.isFinite(t.y) && String(t.text ?? '').trim());
+      if (!labels.length) return null;
+      const segs = (data.shapes ?? []).filter((s) => isWallLayer(s.layer)).flatMap(shapeSegments);
+      const info = labels.map((t) => {
+        let d2 = Infinity;
+        for (const [a, b] of segs) {
+          const dx = b[0] - a[0], dy = b[1] - a[1];
+          const l2 = dx * dx + dy * dy;
+          let u = l2 ? ((t.x - a[0]) * dx + (t.y - a[1]) * dy) / l2 : 0;
+          u = u < 0 ? 0 : u > 1 ? 1 : u;
+          const px = a[0] + u * dx, py = a[1] + u * dy;
+          const dd = (t.x - px) ** 2 + (t.y - py) ** 2;
+          if (dd < d2) d2 = dd;
+        }
+        return {
+          t,
+          wallM: Math.sqrt(d2) * DXF_SCALE,
+          roomNo: /^[A-Z]?\d+[A-Z]?\d*$/.test(String(t.text).trim()),
+        };
+      });
+      const room = info.filter((x) => x.roomNo);
+      const pool = room.length ? room : info;
+      const band = pool.filter((x) => x.wallM >= 0.6 && x.wallM <= 6);
+      const pick = band.length
+        ? band.reduce((a, b) => (b.wallM > a.wallM ? b : a))
+        : pool.reduce((a, b) => (b.wallM < a.wallM ? b : a));
+      return toLL(pick.t.x, pick.t.y);
+    }
+
+    /** Flood the selected floor: walls + same-level neighbours + doorways/seals. */
+    async function walkableMaskForFloor(b, f) {
+      const data = await loadFloorData(b, f);
+      if (!data) return { error: `no floor JSON for ${b.id} ${f.floorId}` };
+      const toLL = makeToLL(b, f);
+      const { lines } = navGraphInputs(b, f, data, toLL);
+      if (!lines.length) return { error: 'floor has no wall lines' };
+      const doorways = doorwaysFromShapes(data.shapes, toLL);
+      const bb = linesBBox(lines);
+      if (!bb) return { error: 'floor has no wall bbox' };
+      // Any same-level building whose wall bbox overlaps the flood grid
+      // (wall bbox + 2.0 m; the seed ring itself is 0.5 m).
+      const padM = 0.5;
+      const gridPadM = padM + 1.5;
+      const mpd = metresPerDegree((bb[1] + bb[3]) / 2);
+      const padLon = gridPadM / mpd.lon, padLat = gridPadM / mpd.lat;
+      const extraWallsLL = [];
+      for (const other of config) {
+        if (other === b) continue;
+        for (const ff of other.floors ?? []) {
+          if (!ff.url || floorRank(ff.floorId) !== floorRank(f.floorId)) continue;
+          const od = await loadFloorData(other, ff);
+          if (!od) continue;
+          const oLL = makeToLL(other, ff);
+          const { lines: ol } = navGraphInputs(other, ff, od, oLL);
+          const ob = linesBBox(ol);
+          if (!ob) continue;
+          if (ob[0] > bb[2] + padLon || ob[2] < bb[0] - padLon ||
+              ob[1] > bb[3] + padLat || ob[3] < bb[1] - padLat) continue;
+          extraWallsLL.push(...ol);
+        }
+      }
+      const seals = (f.floodSeals ?? []).map((s) => s.dxf.map(([x, y]) => toLL(x, y)));
+      // Exterior doors and skybridges are openings too: seal a disc around
+      // each portal so the outdoor flood cannot enter the building there.
+      const sealPoints = [];
+      const exitPortals = [...(f.exits ?? []), ...(f.portals?.exits ?? [])];
+      for (const d of exitPortals) {
+        if (d?.dxf) sealPoints.push([toLL(d.dxf[0], d.dxf[1]), 1.2]);
+      }
+      for (const d of f.skybridges ?? []) {
+        if (d?.dxf) sealPoints.push([toLL(d.dxf[0], d.dxf[1]), 1.2]);
+      }
+      const indoorSeed = f.indoorSeed?.dxf
+        ? toLL(f.indoorSeed.dxf[0], f.indoorSeed.dxf[1])
+        : autoIndoorSeed(data, toLL);
+      const outdoorSeed = f.outdoorSeed?.dxf ? toLL(f.outdoorSeed.dxf[0], f.outdoorSeed.dxf[1]) : null;
+      return floodIndoor({
+        wallsLL: lines, extraWallsLL, doorways, seals, sealPoints,
+        indoorSeed, outdoorSeed, cell: 0.1, padM,
+      });
+    }
+
+    /** Draw a flood result on the canvas source; null hides it. */
+    function renderWalkable(result) {
+      walkPreview = result ?? null;
+      if (!mapReady) return;
+      const src = map.getSource('imp-walkable');
+      if (!src) return;
+      const canvas = $('walkable-canvas');
+      if (!result?.mask) {
+        if (map.getLayer('imp-walkable')) {
+          map.setPaintProperty('imp-walkable', 'raster-opacity', 0);
+        }
+        return;
+      }
+      const { mask, wall, toLL } = result;
+      const { W, H, cell, x0, y0, data } = mask;
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(W, H);
+      for (let j = 0; j < H; j++) {
+        const row = (H - 1 - j) * W;          // canvas row 0 is north
+        for (let i = 0; i < W; i++) {
+          const k = j * W + i, p = (row + i) * 4;
+          if (wall[k]) { img.data[p + 3] = 0; continue; }
+          if (data[k]) { img.data[p] = 46; img.data[p + 1] = 204; img.data[p + 2] = 113; }
+          else { img.data[p] = 127; img.data[p + 1] = 140; img.data[p + 2] = 141; }
+          img.data[p + 3] = 170;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      const x1 = x0 + W * cell, y1 = y0 + H * cell;
+      // Canvas coordinates: top-left, top-right, bottom-right, bottom-left.
+      if (map.getLayer('imp-walkable')) {
+        map.setPaintProperty('imp-walkable', 'raster-opacity', 0.55);
+      }
+      src.setCoordinates([
+        toLL([x0, y1]), toLL([x1, y1]), toLL([x1, y0]), toLL([x0, y0]),
+      ]);
+    }
+
+    async function previewWalkable() {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      let result;
+      try {
+        result = await walkableMaskForFloor(b, f);
+      } catch (err) {
+        renderWalkable(null);
+        $('walk-note').textContent = `Flood failed: ${err.message || err}`;
+        status(`walkable: ${err.message || err}`);
+        return;
+      }
+      if (result.error) {
+        renderWalkable(null);
+        $('walk-note').textContent = `Flood failed: ${result.error}`;
+        status(`walkable: ${result.error}`);
+        return;
+      }
+      renderWalkable(result);
+      const pct = result.indoorCells + result.outdoorCells
+        ? Math.round(100 * result.indoorCells / (result.indoorCells + result.outdoorCells)) : 0;
+      $('walk-note').textContent =
+        `${result.leak ? 'LEAK - ' : ''}indoor ${result.indoorCells} cells (${pct}%), ` +
+        `outdoor ${result.outdoorCells}, ${Math.round(result.ms)}ms` +
+        (result.leak ? ' - add a seal or move the indoor seed' : '');
+      status(result.leak ? 'walkable flood leaked: refuse to generate bundles'
+        : 'walkable preview drawn');
     }
 
     const portalLabel = key => key === 'exits' ? 'door' : 'skybridge';
@@ -963,6 +1209,18 @@
       setActive('bridgePlaceBtn', editMode === 'place-bridge');
       setActive('bridgeRemoveBtn', editMode === 'remove-bridge');
       setActive('bridgeDestBtn', editMode === 'dest-bridge');
+      setActive('seedIndoorBtn', editMode === 'seed-indoor');
+      setActive('seedOutdoorBtn', editMode === 'seed-outdoor');
+      setActive('sealGapBtn', editMode === 'seal-gap');
+
+      const seeds = [];
+      if (f?.indoorSeed) seeds.push('indoor');
+      if (f?.outdoorSeed) seeds.push('outdoor');
+      const nSeals = f?.floodSeals?.length ?? 0;
+      $('walk-note').textContent = !f ? ''
+        : `${seeds.length ? `Seeds: ${seeds.join(' + ')}` : 'Seeds: auto'} · ` +
+          `seals: ${nSeals}` +
+          (walkPreview?.leak ? ' · LEAK' : '');
     }
 
     // --- markers: datum (drag to move) + rotation handle --------------------
@@ -1397,6 +1655,24 @@
     wire('bridgePlaceBtn', 'click', () => setEditMode('place-bridge'));
     wire('bridgeRemoveBtn', 'click', () => setEditMode('remove-bridge'));
     wire('bridgeDestBtn', 'click', () => setEditMode('dest-bridge'));
+    wire('seedIndoorBtn', 'click', () => setWalkMode('seed-indoor'));
+    wire('seedOutdoorBtn', 'click', () => setWalkMode('seed-outdoor'));
+    wire('sealGapBtn', 'click', () => setWalkMode('seal-gap'));
+    wire('previewWalkBtn', 'click', () => { previewWalkable(); });
+    wire('clearWalkBtn', 'click', () => {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      delete f.indoorSeed;
+      delete f.outdoorSeed;
+      delete f.floodSeals;
+      editMode = null;
+      sealFirst = null;
+      persist();
+      invalidateGraph(b);
+      renderWalkable(null);
+      refresh();
+      status('walkable seeds/seals cleared');
+    });
     wire('doorSeedBtn', 'click', () => {
       const b = building(), f = floor();
       if (!b || !f) return;
@@ -1493,7 +1769,7 @@
     }
 
     /** Ask the bundle worker for one encoded floor block. */
-    function requestGraphBlock(worker, floorId, walls, doors, sourceHash) {
+    function requestGraphBlock(worker, floorId, walls, doors, sourceHash, mask) {
       return new Promise((resolve, reject) => {
         const id = ++graphSeq;
         const timer = setTimeout(() => {
@@ -1518,7 +1794,7 @@
         };
         worker.addEventListener('message', onMessage);
         worker.addEventListener('error', onError, { once: true });
-        worker.postMessage({ id, floorId, walls, doors, sourceHash });
+        worker.postMessage({ id, floorId, walls, doors, sourceHash, mask });
       });
     }
 
@@ -1539,10 +1815,22 @@
           f.graphHash = sourceHash;
           f.wallBBox = linesBBox(lines);
 
+          // Walkability must be settled *before* the navGraph raster: flood the
+          // outside, seal the doors, keep only the indoor cells. Refuse the
+          // bundle on a leak rather than shipping an outdoor-connected graph.
+          const flood = await walkableMaskForFloor(b, f);
+          if (flood.error) {
+            throw new Error(`walkable flood failed for ${b.id} ${f.floorId}: ${flood.error}`);
+          }
+          if (flood.leak) {
+            throw new Error(`walkable flood leaked for ${b.id} ${f.floorId}: ` +
+              'seed indoors / seal the opening, then regenerate');
+          }
+
           let encoded = null;
           if (worker) {
             try {
-              encoded = await requestGraphBlock(worker, f.floorId, lines, doors, sourceHash);
+              encoded = await requestGraphBlock(worker, f.floorId, lines, doors, sourceHash, flood.mask);
             } catch (err) {
               console.warn('bundle worker failed; building synchronously:', err);
               worker.terminate();
@@ -1552,7 +1840,7 @@
           if (!encoded) {
             // Yield first so the status line can paint before a synchronous build.
             await new Promise((r) => setTimeout(r));
-            const state = buildGraphState(lines, doors, { passages: false });
+            const state = buildGraphState(lines, doors, { passages: false, mask: flood.mask });
             const { block, meta } = encodeFloorBlock(state, { sourceHash });
             encoded = { floorId: f.floorId, meta, block };
           }

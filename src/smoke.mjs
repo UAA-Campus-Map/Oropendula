@@ -35,6 +35,7 @@ import { PositionArbiter } from './arbiter.mjs';
 import { normName, placeTarget, parseTarget, buildPlaceIndex, searchPlaces, splitRoomQuery, findRoom, findRoomExact, resolvePlace, validatePlaces } from './places.mjs';
 import { doorwaysFromShapes, barrierCrossesPolyline } from './doorways.mjs';
 import { resolveRoomPin, sampleTargets, firstDoorCrossing } from './roompin.mjs';
+import { floodIndoor } from './walkable.mjs';
 
 // Registrations are the shared buildings-config.json (produced by
 // import.html); smoke reads the same file index.html fetches.
@@ -106,6 +107,7 @@ const ALL_CATEGORIES = [
   'headingfield', // allowed compass directions + compass snapping
   'doorways',    // DOOR-layer clustering and wall-aligned barriers
   'roompin',     // route-derived door resolution (real AS121-02)
+  'walkable',    // indoor flood mask (synthetic courtyard/leak)
   'places',      // place nicknames, places.json, favorites
 ];
 const _args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -3247,6 +3249,72 @@ if (crossDoor) {
   check('alternate route avoids the blocked barrier', !crossesBlocked,
     blockedDoor ? blockedDoor.id : 'none');
 }
+}
+
+// ---------------------------------------------------------------------------
+// Indoor flood mask (walkable.mjs). Synthetic plans: a courtyard open to the
+// south (outdoor cells inside the bbox) and a room whose door either leaks or
+// is sealed. Fast: no building load.
+// ---------------------------------------------------------------------------
+if (want('walkable')) {
+console.log('\nIndoor flood mask (walkable.mjs, synthetic):');
+const lat0 = 61.19, lon0 = -149.83;
+const mpd0 = metresPerDegree(lat0);
+const ll = (x, y) => [lon0 + x / mpd0.lon, lat0 + y / mpd0.lat];
+const at = (res, x, y) => {
+  if (!res?.mask) return 0;
+  const { mask } = res;
+  const i = Math.floor((x - mask.x0) / mask.cell);
+  const j = Math.floor((y - mask.y0) / mask.cell);
+  if (i < 0 || j < 0 || i >= mask.W || j >= mask.H) return 0;
+  return mask.data[j * mask.W + i];
+};
+
+// C-shaped building: 20x20 outer walls, 4m-wide courtyard notch open south.
+const wallsC = [
+  [ll(0, 0), ll(0, 20)],
+  [ll(0, 20), ll(20, 20)],
+  [ll(20, 20), ll(20, 0)],
+  [ll(20, 0), ll(12, 0)],
+  [ll(8, 0), ll(0, 0)],
+  [ll(8, 0), ll(8, 10)],
+  [ll(8, 10), ll(12, 10)],
+  [ll(12, 10), ll(12, 0)],
+];
+const court = floodIndoor({ wallsLL: wallsC, indoorSeed: ll(4, 5) });
+check('courtyard flood succeeds', !court.error, court.error ?? '');
+check('courtyard (inside bbox) is outdoor', !court.error && at(court, 10, 5) === 0);
+check('building interior is walkable', !court.error && at(court, 4, 5) === 1);
+check('courtyard does not leak', !court.error && !court.leak);
+
+const gPlain = graphFromState(buildGraphState(wallsC, [], { passages: false }));
+const gMasked = court.error ? null : graphFromState(
+  buildGraphState(wallsC, [], { passages: false, mask: court.mask }));
+check('navgraph without mask walks the courtyard', gPlain.isWalkable(ll(10, 5)));
+check('navgraph with mask blocks the courtyard', !!gMasked && !gMasked.isWalkable(ll(10, 5)));
+check('navgraph with mask keeps the interior', !!gMasked && gMasked.isWalkable(ll(4, 5)));
+
+// 10x10 room with a 1m door gap in the south wall.
+const wallsB = [
+  [ll(0, 0), ll(4, 0)],
+  [ll(5, 0), ll(10, 0)],
+  [ll(0, 0), ll(0, 10)],
+  [ll(0, 10), ll(10, 10)],
+  [ll(10, 10), ll(10, 0)],
+];
+const doorB = { ll: ll(4.5, 0), barrier: [ll(4, 0), ll(5, 0)] };
+const open = floodIndoor({ wallsLL: wallsB, indoorSeed: ll(5, 5) });
+check('an open door floods the room (leak)', !open.error && open.leak);
+const sealed = floodIndoor({ wallsLL: wallsB, doorways: [doorB], indoorSeed: ll(5, 5) });
+check('a doorway seal stops the flood', !sealed.error && !sealed.leak);
+check('the sealed room is walkable', !sealed.error && at(sealed, 5, 5) === 1);
+check('the doorway threshold stays walkable', !sealed.error && at(sealed, 4.5, 0) === 1);
+const manual = floodIndoor({
+  wallsLL: wallsB, seals: [[ll(4, 0), ll(5, 0)]], indoorSeed: ll(5, 5),
+});
+check('a manual seal stops the flood', !manual.error && !manual.leak);
+const autoLeak = floodIndoor({ wallsLL: wallsB });
+check('a fully flooded floor is refused', !!autoLeak.error, autoLeak.error ?? '');
 }
 
 // ---------------------------------------------------------------------------

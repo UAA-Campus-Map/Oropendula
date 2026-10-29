@@ -41,6 +41,13 @@ in code, docs, deployment, and import-tool settings.
   floor JSON. `gen-navgraphs.mjs` and the import tool's Deploy section generate
   them. See
   `docs/navgraph-bundles.md` for the byte layout and codec/runtime API.
+- `walkable.mjs` — the import-time **indoor walkability** mask.
+  `floodIndoor({ wallsLL, extraWallsLL, doorways, seals, sealPoints,
+  indoorSeed, outdoorSeed })` floods the outside from the wall-bbox ring, seals
+  interior doorways, exterior exits and skybridges, and returns
+  `{mask, leak, ...}`. `buildGraphState(..., { mask })` blocks every cell
+  outside the mask before nodes/edges are built. Bundle generation refuses on
+  `error`/`leak`. See `docs/walkable.md`.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).

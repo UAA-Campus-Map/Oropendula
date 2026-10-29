@@ -116,7 +116,7 @@ function makeClearLine(blocked, W, H, OX, OY) {
   };
 }
 
-export function buildGraphState(walls, doors = [], { passages: buildPassagesEnabled = true } = {}) {
+export function buildGraphState(walls, doors = [], { passages: buildPassagesEnabled = true, mask = null } = {}) {
   const t0 = performance.now();
 
   // Normalise the three shapes callers have in circulation. Guessing wrong
@@ -196,6 +196,20 @@ export function buildGraphState(walls, doors = [], { passages: buildPassagesEnab
           blocked[i] = 1;
         }
       }
+    }
+  }
+
+  // Optional indoor mask (walkable.mjs): cells outside it are not walkable.
+  // The mask is in the same metre frame (origin = min wall lon/lat); sample by
+  // world position so differing origins/cells are handled.
+  if (mask) {
+    const { x0: mx0, y0: my0, cell: mc, W: MW, H: MH, data: md } = mask;
+    for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+      const i = r * W + c;
+      if (blocked[i]) continue;
+      const x = OX + (c + 0.5) * CELL, y = OY + (r + 0.5) * CELL;
+      const mi = Math.floor((x - mx0) / mc), mj = Math.floor((y - my0) / mc);
+      if (mi < 0 || mj < 0 || mi >= MW || mj >= MH || md[mj * MW + mi] === 0) blocked[i] = 1;
     }
   }
 

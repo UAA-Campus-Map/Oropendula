@@ -6,16 +6,16 @@
  * thread only assembles the tiny bundle header.
  *
  * Protocol:
- *   in:  {id, floorId, walls, doors}
+ *   in:  {id, floorId, walls, doors, sourceHash, mask}
  *   out: {id, floorId, meta, block: ArrayBuffer}  or  {id, error}
  */
 import { buildGraphState } from './navgraph.mjs';
 import { encodeFloorBlock } from './navgraph-codec.mjs';
 
 self.onmessage = (e) => {
-  const { id, floorId, walls, doors, sourceHash } = e.data || {};
+  const { id, floorId, walls, doors, sourceHash, mask } = e.data || {};
   try {
-    const state = buildGraphState(walls, doors, { passages: false });
+    const state = buildGraphState(walls, doors, { passages: false, mask });
     const { block, meta } = encodeFloorBlock(state, { sourceHash });
     const buffer = block.byteOffset === 0 && block.byteLength === block.buffer.byteLength
       ? block.buffer

@@ -44,8 +44,8 @@ neighbour. The door is found from **watershed connectivity**:
 - `Room X is the only room on its floor.` — no other same-floor label to probe
   (fallback path only).
 - `Room X has no nearby doors.` — no door found (fallback: no probe crossed one).
-- `Room X has multiple doors.` — more than one watershed throat ≥ 0.6 m (fallback:
-  two probes' first doors ≥ 2 m apart).
+- `Room X has multiple doors.` — more than one watershed throat ≥ 0.6 m into a
+  room ≥ 8 m² (fallback: two probes' first doors ≥ 2 m apart).
 - `Room X: couldn't find a spot outside the door.` — a door was found but no
   walkable placement point.
 
@@ -67,8 +67,9 @@ neighbour. The door is found from **watershed connectivity**:
 ## Tests
 
 `node smoke.mjs roompin` builds the real AS121-02 floor and checks exact lookup,
-a resolved door outside the doorway, the seeded probe set, the tolerant-crossing
-helpers, the lone-room error, and interior-door blocking.
+a multi-door room refused (ECB 208), a single-door room resolved outside its
+doorway, the seeded probe fallback, the tolerant-crossing helpers, the lone-room
+error, and interior-door blocking.
 
 ## See also
 

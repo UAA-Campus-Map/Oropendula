@@ -191,6 +191,16 @@ The Deploy section also generates per-building navGraph bundles
 building. Use the current-building button for one bundle or "Download all
 navgraph bundles" for a full regeneration.
 
+**Walkable (flood):** before each floor's graph is built, the tool floods the
+outside from the wall-bbox ring, seals interior doorways, exterior exits and
+skybridges, and masks everything the flood reached. The panel can preview the
+mask (green indoor, grey outdoor), override the indoor/outdoor seeds, and add
+two-point seals for openings the DXF door layer misses. Same-level buildings
+whose bbox overlaps contribute their walls. A leak (the outdoor flood reaches
+the auto indoor room label) **refuses bundle generation**; seal it or move the
+seed, then regenerate. The mask is baked into the `.nvg.gz`; see
+[`walkable.md`](walkable.md).
+
 **Deploy diff:** "Check changes vs deployed" recomputes each building's
 graph-input fingerprint from the local floor JSONs and compares the draft
 config with the server's `buildings-config.json` (canonical JSON, by building
@@ -228,11 +238,26 @@ the GPS/PDR estimate with an uncertainty circle, heading arrow and breadcrumb
 trail, and lets you tap to place an anchor. It imports the real modules, so it is
 a convenient place to observe the filter without sensors.
 
+## `watershed.html` — watershed test page
+
+Test-only visualiser for `watershed.mjs`. Pick any registered building and floor
+and it paints the room/corridor territories in 4 colours, with:
+- **throats = region boundaries** as door markers (green = corridor-facing,
+  orange = room↔room), sized by width;
+- seeds (room labels vs corridor), and the source JSON layers colour-coded
+  (walls black, windows cyan, doors red, stairs purple, elevators amber; other
+  layers hashed) with a per-layer show/hide legend;
+- a click-a-region popup with area and adjacent throats/widths.
+
+It is a debugging aid for door/region behaviour, not a production entry point.
+The same colouring is available inside `app.html` behind **Advanced Settings →
+Compass & graph → Debug → Show regions (debug)**.
+
 ## See also
 
 - [`tooling.md`](tooling.md) — the test suite that verifies the shared logic.
 - [`navgraph-bundles.md`](navgraph-bundles.md) — the cached binary graph format used by `app.html`.
-- [`roompin.md`](roompin.md), [`doorways.md`](doorways.md) — Room Pin and the
-  doorway geometry it uses.
+- [`roompin.md`](roompin.md), [`watershed.md`](watershed.md), [`doorways.md`](doorways.md)
+  — Room Pin, the segmentation it uses, and the DXF doorway geometry.
 - [`locate.md`](locate.md), [`autocal.md`](autocal.md) — the algorithms the
   calibration flows drive.

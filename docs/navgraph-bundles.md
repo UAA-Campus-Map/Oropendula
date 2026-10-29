@@ -218,12 +218,19 @@ so they are exactly the source weights.
 `navgraph.mjs` accepts an optional third argument:
 
 ```js
-buildGraphState(walls, doors, { passages: false });
+buildGraphState(walls, doors, { passages: false, mask: null });
 ```
 
 When `passages` is `false`, the expensive `buildPassages()` step is skipped and
 the returned state has `passages: null`. Default is `true`, preserving the app's
 worker/fallback behavior. Bundle generation always uses `false`.
+
+`mask` is the optional indoor-walkability raster from `walkable.mjs`
+(`{x0, y0, cell, W, H, data}`, `data = 1` indoor). Every free cell whose mask
+sample is 0 is blocked before nodes/edges are built. The import tool computes it
+per floor *before* the bundle build and refuses on a leak (see
+[`walkable.md`](walkable.md)). The CLI `gen-navgraphs.mjs` does **not** apply the
+mask yet, so use the import tool for production bundles.
 
 ### `navgraph-codec.mjs`
 
@@ -412,12 +419,15 @@ The bundle worker protocol is:
 Generation:
 
 1. For each floor, derive `lines`/`doors` with `navGraphInputs()`.
-2. Send `{ floorId, walls, doors }` to `navgraph-bundle-worker.mjs`.
-3. The worker runs `buildGraphState(..., { passages: false })` and
+2. Flood the floor with `walkable.mjs` (same-level neighbour walls, doorways,
+   exits, skybridges) and refuse on a leak; keep the returned `mask`.
+3. Send `{ floorId, walls, doors, sourceHash, mask }` to
+   `navgraph-bundle-worker.mjs`.
+4. The worker runs `buildGraphState(..., { passages: false, mask })` and
    `encodeFloorBlock()`, transferring the block back.
-4. The main thread calls `encodeBundleFromBlocks()`, then `gzipBytes()`.
-5. The file downloads as `<buildingId>.nvg.gz`.
-6. The building's `graphUrl` is set and `buildings-config.json` is downloaded
+5. The main thread calls `encodeBundleFromBlocks()`, then `gzipBytes()`.
+6. The file downloads as `<buildingId>.nvg.gz`.
+7. The building's `graphUrl` is set and `buildings-config.json` is downloaded
    separately with the usual button.
 
 The import tool deletes `graphUrl` when graph inputs change (floor replacement,

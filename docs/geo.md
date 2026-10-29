@@ -13,7 +13,8 @@ coordinate system. The map, the router and the particle filter all work in
 - `crossBarrier(polylineM, a, b, toleranceM)` / `nearestApproach(polylineM, a, b)`
   — the tolerant door-crossing tests (all in metres): whether a route crosses a
   doorway barrier's line (with a small end tolerance) or passes through the
-  opening beside it. Used by Room Pin and interior-door blocking; see
+  opening beside it. Used by Room Pin's fallback path and interior-door blocking;
+  see
   `campus.md` / `roompin.md`.
 - `DXF_SCALE = 0.0254` (metres per inch).
 

@@ -92,7 +92,8 @@ same-floor trips short-circuit to a single indoor leg.
   keys (`building|floor|door|interior-<id>`). Interior doors are wall-aligned
   barriers supplied by the app; blocking one forces a different indoor path and
   does not become a macro node. Interior-door detection is **tolerant** — the
-  same `crossBarrier` + `nearestApproach` test Room Pin uses (a route counts as
+  same `crossBarrier` + `nearestApproach` test Room Pin's fallback path and
+  interior-door blocking use (a route counts as
   crossing when it passes the barrier line, ±0.4 m past a jamb, or comes within
   0.815 m — the ADA 32 in clear width — of the barrier), because the navGraph
   passage is offset from the wall-gap barrier.

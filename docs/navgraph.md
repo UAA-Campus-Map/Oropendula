@@ -6,7 +6,7 @@ Turns one floor's wall segments into a queryable navigation graph and answers
 path queries on it. Exports:
 
 - `buildGraph(walls, doors = [])` → the live graph object (build + query closures).
-- `buildGraphState(walls, doors = [], { passages })` / `graphFromState(state)` →
+- `buildGraphState(walls, doors = [], { passages, mask })` / `graphFromState(state)` →
   the same graph split into
   a **serializable half** (the expensive raster) and a **cheap rehydration half**,
   so the build can run in a Web Worker.
@@ -70,6 +70,13 @@ reconstructs exactly the same adjacency order and weights as
 
 `buildGraphState(walls, doors, { passages: false })` skips the passage build when
 generating a bundle. The default remains `true`.
+
+`mask` is the optional indoor-walkability gate from `walkable.mjs`: a
+`{x0, y0, cell, W, H, data}` raster in the same metre frame, where `data = 1`
+marks indoor cells. Every free cell whose mask sample is 0 (or that falls
+outside the mask bbox) is blocked before nodes/edges are built. The import tool
+computes the mask *before* the bundle build and refuses on a leak; see
+[`walkable.md`](walkable.md).
 
 At boot `app.html` fetches each building's `graphUrl`, gunzips/decodes it, and
 uses `makeBundleGraph()` to produce the same query graph. Missing, invalid or

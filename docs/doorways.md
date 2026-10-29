@@ -49,8 +49,8 @@ Two primitives live here/`geo.mjs`:
 
 ## Who uses it
 
-- **Room Pin** (`roompin.mjs`) — pick the room's door from the probes' first
-  crossings.
+- **Room Pin** (`roompin.mjs`) — the watershed throat is the primary door; the
+  probe/first-crossing path is the fallback.
 - **Interior-door blocking** (`campus.mjs` `interiorPortalsForSegment`) — list the
   interior doors a route crosses, so one can be `avoidPortals`'d.
 - `places.mjs` `doorwayFor` prefers a floor's physical `doorways` and falls back

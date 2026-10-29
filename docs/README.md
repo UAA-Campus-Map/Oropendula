@@ -30,12 +30,14 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 | 2 | [navgraph.md](navgraph.md) | `navgraph.mjs` | per-floor clearance raster + visibility graph + Dijkstra |
 | 2a | [navgraph-bundles.md](navgraph-bundles.md) | `navgraph-codec.mjs` + runtime | cached binary navGraph format, hashes, exports and boot path |
 | 2b | `navgraph-source.mjs` | shared graph inputs | wall/door extraction, input hash, wall bbox |
+| 2c | [walkable.md](walkable.md) | `walkable.mjs` | indoor flood mask (courtyards, doors, leak refusal) |
 | 3 | [campus.md](campus.md) | `campus.mjs` | portals, doors, skybridges, the outdoor graph, and the tiered router |
 | 4 | [osm.md](osm.md) | `osm.mjs` | OpenStreetMap roads → the same shape format, for outdoor legs |
 | 5 | [pmtiles-node.md](pmtiles-node.md) | `pmtiles-node.mjs` | dependency-free PMTiles reader for the tests |
 | 6 | [motion.md](motion.md) | `motion.mjs` | step detection, compass heading, step-length model, sensor wiring |
 | 6a | [doorways.md](doorways.md) | `doorways.mjs` | DOOR-leaf clustering, wall-aligned barriers, crossing tests |
-| 6b | [roompin.md](roompin.md) | `roompin.mjs` | exact room -> majority first door on seeded probes -> outside point |
+| 6b | [roompin.md](roompin.md) | `roompin.mjs` | exact room -> watershed throat -> outside point |
+| 6c | [watershed.md](watershed.md) | `watershed.mjs` | room/corridor segmentation, throats = doors, 4-colouring |
 | 7 | [locate.md](locate.md) | `locate.mjs` | the map-matching **particle filter** (PDR) + corridor heading |
 | 8 | [arbiter.md](arbiter.md) | `arbiter.mjs` | fuses GPS and PDR continuously, picks the more certain one |
 | 9 | [autocal.md](autocal.md) | `autocal.mjs` | online step-length calibration from GPS |
