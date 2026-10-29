@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Watershed test — SU floor 02</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+  <link rel="modulepreload" href="/maplibre-gl.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-shared.mjs" />
+  <link rel="modulepreload" href="/maplibre-gl-worker.mjs" />
+  <style>
+    :root { --panel: rgba(255,255,255,.94); --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; }
+    * { box-sizing: border-box; }
+    html, body, #map { height: 100%; margin: 0; }
+    body { font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); }
+    #panel {
+      position: fixed; top: 10px; left: 10px; z-index: 5; width: 300px; max-height: calc(100% - 20px);
+      overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: 0 6px 24px rgba(15,23,42,.14); padding: 12px;
+    }
+    #panel h1 { font-size: 14px; margin: 0 0 2px; }
+    #panel .sub { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
+    .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+    .row label { flex: 1 1 auto; }
+    select, button { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.active { outline: 2px solid #2563eb; }
+    #status { font-size: 11px; color: var(--muted); margin-top: 8px; white-space: pre-line; }
+    #legend { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+    #legend h2 { font-size: 12px; margin: 0 0 6px; }
+    .leg { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 11px; }
+    .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.15); }
+    .leg .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leg .ar { color: var(--muted); }
+    #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 5;
+      background: rgba(15,23,42,.82); color: #fff; padding: 6px 12px; border-radius: 999px; font-size: 12px; display: none; }
+    .mlabel { font-size: 10px; font-weight: 600; color: #0f172a; background: rgba(255,255,255,.85);
+      padding: 1px 3px; border-radius: 3px; border: 1px solid rgba(15,23,42,.25); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="panel">
+    <h1>Watershed test</h1>
+    <div class="sub" id="sub">regions grown from room labels<br>
+      JSON layers: walls <b>black</b>, windows <b style="color:#0891b2">cyan</b>, doors <b style="color:#dc2626">red</b>, stairs purple, elevators amber; other layers hashed.</div>
+
+    <div class="row"><label for="building">Building</label><select id="building"></select></div>
+    <div class="row"><label for="floor">Floor</label><select id="floor"></select></div>
+    <div class="row"><label for="opacity">Region opacity</label><input id="opacity" type="range" min="0" max="1" step="0.05" value="0.55" style="flex:1 1 120px"></div>
+
+    <div class="row">
+      <label><input id="bgConnectors" type="checkbox" checked> corridor seeds at stairs/elevators/exits</label>
+    </div>
+    <div class="row">
+      <button id="addSeed" class="primary">Add corridor seed (click map)</button>
+    </div>
+    <div class="row">
+      <button id="recompute">Recompute</button>
+    </div>
+
+    <div class="row"><label><input id="showRegions" type="checkbox" checked> regions</label></div>
+    <div class="row"><label><input id="showBoundaries" type="checkbox" checked> boundaries</label></div>
+    <div class="row"><label><input id="showJson" type="checkbox" checked> JSON layers (all)</label></div>
+    <div class="row"><label><input id="showWalls" type="checkbox"> navGraph wall set (black)</label></div>
+    <div class="row"><label><input id="showLabels" type="checkbox" checked> room labels</label></div>
+    <div class="row"><label><input id="showDoors" type="checkbox" checked> doorways</label></div>
+    <div class="row"><label><input id="showSeeds" type="checkbox" checked> seeds</label></div>
+
+    <div id="status">Loading…</div>
+    <div id="legend"><h2>Regions</h2><div id="legendBody"></div></div>
+    <div id="jsonLegendWrap"><h2>JSON layers</h2><div id="jsonLegend"></div></div>
+  </div>
+  <div id="hint">Click the map to add a corridor seed</div>
+
+  <script type="module">
+    import * as maplibregl from '/maplibre-gl.mjs';
+    import { makeToLL } from './geo.mjs';
+    import { navGraphInputs } from './navgraph-source.mjs';
+    import { buildGraphState, graphFromState } from './navgraph.mjs';
+    import { portalsFromCache, shapeSegments } from './campus.mjs';
+    import { doorwaysFromShapes } from './doorways.mjs';
+    import { watershed, REGION_COLORS, BACKGROUND_COLOR } from './watershed.mjs';
+
+    maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
+
+    const map = new maplibregl.Map({
+      container: 'map', zoom: 18, center: [-149.8264, 61.1902],
+      pitch: 0, style: 'https://uaa-campus-map.net/style.json',
+      dragRotate: false, pitchWithRotate: false,
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $('status');
+    const legendBody = $('legendBody');
+    const jsonLegend = $('jsonLegend');
+    const BUILDING_ID = 'AS119';   // SU
+
+    let CONFIG = null, cfg = null, floorCfg = null;
+    let graph = null, floorData = null, toLL = null, wallsLL = [];
+    let doorways = [];
+    let ws = null;
+    let extraSeeds = [];             // click-added corridor seeds {name, ll}
+    let addSeedMode = false;
+    let markers = [];
+    let currentOpacity = 0.55;
+    let framed = false;
+    let jsonInfo = new Map();        // layer name -> {color, count}
+    let jsonVisible = new Set();     // currently shown source layers
+    let jsonFeatures = [];           // LineString features, one per wall/other segment
+
+    function hslToHex(h, s, l) {
+      s /= 100; l /= 100;
+      const a = s * Math.min(l, 1 - l);
+      const f = (n) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+      const to = (n) => Math.round(255 * f(n)).toString(16).padStart(2, '0');
+      return `#${to(0)}${to(8)}${to(4)}`;
+    }
+    function layerColor(name) {
+      const special = {
+        WALL: '#111827', WALLS: '#111827',
+        WINDOW: '#06b6d4', WINDOWS: '#06b6d4',
+        DOOR: '#ef4444', DOORS: '#ef4444',
+        STAIR: '#a855f7', STAIRS: '#a855f7',
+        ELEVATOR: '#f59e0b', ELEVATORS: '#f59e0b',
+        COLUMN: '#84cc16', COLUMNS: '#84cc16',
+      };
+      const key = String(name ?? '?').toUpperCase();
+      if (special[key]) return special[key];
+      let h = 0;
+      for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+      return hslToHex(h % 360, 62, 46);
+    }
+
+    map.on('load', boot);
+
+    async function boot() {
+      CONFIG = await (await fetch('/buildings-config.json')).json();
+      const params = new URLSearchParams(location.search);
+      const bsel = $('building');
+      for (const b of CONFIG) {
+        const o = document.createElement('option');
+        o.value = b.id; o.textContent = b.id;
+        bsel.appendChild(o);
+      }
+      const wantB = params.get('b');
+      const initialB = CONFIG.some((b) => b.id === wantB) ? wantB
+        : (CONFIG.some((b) => b.id === BUILDING_ID) ? BUILDING_ID : CONFIG[0].id);
+      bsel.value = initialB;
+      bsel.addEventListener('change', () => loadBuilding(bsel.value, null));
+      $('floor').addEventListener('change', () => loadFloor($('floor').value));
+      $('opacity').addEventListener('input', (e) => {
+        currentOpacity = +e.target.value;
+        if (map.getLayer('ws-regions')) map.setPaintProperty('ws-regions', 'raster-opacity', currentOpacity);
+      });
+      $('bgConnectors').addEventListener('change', recompute);
+      $('recompute').addEventListener('click', recompute);
+      $('addSeed').addEventListener('click', () => {
+        addSeedMode = !addSeedMode;
+        $('addSeed').classList.toggle('active', addSeedMode);
+        $('hint').style.display = addSeedMode ? 'block' : 'none';
+        map.getCanvas().style.cursor = addSeedMode ? 'crosshair' : '';
+      });
+      for (const [id, layer] of [['showRegions','ws-regions'],['showBoundaries','ws-boundaries'],
+                                 ['showWalls','ws-walls'],['showDoors','ws-doors'],['showSeeds','ws-seeds']]) {
+        $(id).addEventListener('change', (e) => {
+          if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', e.target.checked ? 'visible' : 'none');
+        });
+      }
+      $('showLabels').addEventListener('change', (e) => {
+        for (const m of markers) m.getElement().style.display = e.target.checked ? '' : 'none';
+      });
+      $('showJson').addEventListener('change', (e) => {
+        if (map.getLayer('ws-json')) map.setLayoutProperty('ws-json', 'visibility', e.target.checked ? 'visible' : 'none');
+      });
+
+      map.on('click', onMapClick);
+      await loadBuilding(initialB, params.get('f'));
+    }
+
+    async function loadBuilding(buildingId, wantFloor) {
+      cfg = CONFIG.find((b) => b.id === buildingId);
+      if (!cfg) { statusEl.textContent = `Building ${buildingId} not found`; return; }
+      const fsel = $('floor');
+      fsel.replaceChildren();
+      for (const f of cfg.floors) {
+        const o = document.createElement('option');
+        o.value = f.floorId; o.textContent = `Floor ${f.floorId}`;
+        fsel.appendChild(o);
+      }
+      const floorId = wantFloor && cfg.floors.some((f) => f.floorId === wantFloor)
+        ? wantFloor
+        : (cfg.floors.some((f) => f.floorId === '02') ? '02' : cfg.floors[0].floorId);
+      fsel.value = floorId;
+      await loadFloor(floorId);
+    }
+
+    function clearOverlays() {
+      for (const m of markers) m.remove();
+      markers = [];
+      for (const id of ['ws-regions','ws-boundaries','ws-json','ws-walls','ws-doors','ws-seeds']) {
+        if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(id)) map.removeSource(id);
+      }
+    }
+
+    async function loadFloor(floorId) {
+      statusEl.textContent = 'Loading floor…';
+      floorCfg = cfg.floors.find((f) => f.floorId === floorId);
+      floorData = await (await fetch(floorCfg.url)).json();
+      toLL = makeToLL(cfg, floorCfg);
+      const { lines, doors } = navGraphInputs(cfg, floorCfg, floorData, toLL);
+      wallsLL = lines;
+      graph = graphFromState(buildGraphState(lines, doors, { passages: false }));
+      doorways = doorwaysFromShapes(floorData.shapes, toLL);
+      extraSeeds = [];
+      framed = false;
+      const code = floorData.ID || cfg.id;
+      const opt = $('building').selectedOptions[0];
+      if (opt) opt.textContent = `${code} (${cfg.id})`;
+      $('sub').innerHTML = `${code} (${cfg.id}) · floor ${floorCfg.floorId} · regions grown from room labels<br>` +
+        `JSON layers: walls <b>black</b>, windows <b style="color:#0891b2">cyan</b>, doors <b style="color:#dc2626">red</b>, stairs purple, elevators amber; other layers hashed.`;
+      buildJsonLayers();
+      await recompute();
+    }
+
+    function buildJsonLayers() {
+      jsonInfo = new Map();
+      jsonVisible = new Set();
+      jsonFeatures = [];
+      const counts = new Map();
+      for (const s of floorData.shapes ?? []) {
+        const name = String(s.layer ?? '?');
+        const segs = shapeSegments(s);
+        if (!segs.length) continue;
+        counts.set(name, (counts.get(name) || 0) + segs.length);
+        const color = layerColor(name);
+        for (const [a, b] of segs) {
+          jsonFeatures.push({
+            type: 'Feature',
+            properties: { layer: name, color },
+            geometry: { type: 'LineString', coordinates: [toLL(a[0], a[1]), toLL(b[0], b[1])] },
+          });
+        }
+      }
+      for (const [name, count] of counts) jsonInfo.set(name, { color: layerColor(name), count });
+      for (const name of jsonInfo.keys()) jsonVisible.add(name);
+    }
+
+    function applyJsonFilter() {
+      if (!map.getLayer('ws-json')) return;
+      const names = [...jsonVisible];
+      map.setFilter('ws-json', names.length
+        ? ['in', ['get', 'layer'], ['literal', names]]
+        : ['==', ['get', 'layer'], '__none__']);
+    }
+
+    function connectorSeeds() {
+      if (!$('bgConnectors').checked) return [];
+      let portals = { elevators: [], stairs: [], exits: [] };
+      try { if (floorCfg.portals) portals = portalsFromCache(floorCfg.portals, toLL); } catch (e) { /* ignore */ }
+      const out = [];
+      for (const p of [...portals.stairs, ...portals.elevators, ...portals.exits]) {
+        out.push({ name: 'corridor', ll: p.ll });
+      }
+      for (const e of floorCfg.exits ?? []) out.push({ name: 'exit', ll: toLL(e.dxf[0], e.dxf[1]) });
+      return out;
+    }
+
+    async function recompute() {
+      if (!graph) return;
+      statusEl.textContent = 'Running watershed…';
+      await new Promise((r) => setTimeout(r, 10));   // let the status paint
+      const roomLabels = (floorData.text_lines ?? [])
+        .map((t) => ({ text: String(t.text ?? '').trim(), ll: toLL(t.x, t.y) }))
+        .filter((l) => l.text);
+      ws = watershed({
+        wallsLL, graph, roomLabels,
+        backgroundSeeds: [...connectorSeeds(), ...extraSeeds],
+        cell: 0.2, maxColors: 4,
+      });
+      render();
+      const bg = [...ws.regions.values()].filter((r) => r.kind === 'background').length;
+      statusEl.textContent =
+        `floor ${floorCfg.floorId} · ${ws.regions.size} regions (${bg} corridor)\n` +
+        `${ws.W}×${ws.H} cells @ ${ws.cell} m · ${ws.ms.toFixed(0)} ms · ${ws.colorCount} colours`;
+      renderLegend();
+      renderJsonLegend();
+    }
+
+    function regionColor(id) {
+      const r = ws.regions.get(id);
+      if (!r) return [200, 200, 200];
+      if (r.kind === 'background') return BACKGROUND_COLOR;
+      return REGION_COLORS[(r.color - 1) % REGION_COLORS.length];
+    }
+
+    function canvasFor(mode) {
+      const { W, H, labels, blocked, boundary } = ws;
+      const cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d');
+      const img = ctx.createImageData(W, H);
+      const d = img.data;
+      for (let k = 0; k < W * H; k++) {
+        const o = k * 4;
+        if (mode === 'boundaries') {
+          if (boundary[k]) { d[o] = 15; d[o+1] = 23; d[o+2] = 42; d[o+3] = 230; }
+          continue;
+        }
+        if (blocked[k]) continue;                 // transparent: walls layer shows
+        const id = labels[k];
+        if (!id) { d[o] = 203; d[o+1] = 213; d[o+2] = 225; d[o+3] = 90; continue; }
+        const c = regionColor(id);
+        d[o] = c[0]; d[o+1] = c[1]; d[o+2] = c[2]; d[o+3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      return cv;
+    }
+
+    function regionCoords() {
+      const tl = graph.toLL([ws.x0, ws.y1]);
+      const tr = graph.toLL([ws.x1, ws.y1]);
+      const br = graph.toLL([ws.x1, ws.y0]);
+      const bl = graph.toLL([ws.x0, ws.y0]);
+      return [tl, tr, br, bl];
+    }
+
+    function addCanvas(id, canvas, opacity) {
+      map.addSource(id, { type: 'canvas', canvas, coordinates: regionCoords(), animate: false });
+      map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 0 } });
+    }
+
+    function render() {
+      clearOverlays();
+
+      // walls
+      map.addSource('ws-walls', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: wallsLL.map((s) => ({
+          type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: s },
+        })) },
+      });
+      map.addLayer({ id: 'ws-walls', type: 'line', source: 'ws-walls',
+        layout: { visibility: $('showWalls').checked ? 'visible' : 'none' },
+        paint: { 'line-color': '#0f172a', 'line-width': 1.2 } });
+
+      // regions + boundaries
+      addCanvas('ws-regions', canvasFor('regions'), currentOpacity);
+      addCanvas('ws-boundaries', canvasFor('boundaries'), 0.9);
+
+      // every source JSON layer, colour-coded (walls black, windows cyan, …)
+      map.addSource('ws-json', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: jsonFeatures },
+      });
+      map.addLayer({ id: 'ws-json', type: 'line', source: 'ws-json',
+        layout: { visibility: $('showJson').checked ? 'visible' : 'none' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1 } });
+      applyJsonFilter();
+
+      // doorways
+      map.addSource('ws-doors', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: doorways.map((d) => ({
+          type: 'Feature', properties: { id: d.id },
+          geometry: { type: 'Point', coordinates: d.ll },
+        })) },
+      });
+      map.addLayer({ id: 'ws-doors', type: 'circle', source: 'ws-doors',
+        paint: { 'circle-radius': 3, 'circle-color': '#111827', 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
+
+      // seeds
+      map.addSource('ws-seeds', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: ws.seedCells.map((s) => ({
+          type: 'Feature', properties: { kind: s.kind, name: s.name },
+          geometry: { type: 'Point', coordinates: graph.toLL(graph.toM(s.ll)) },
+        })) },
+      });
+      map.addLayer({ id: 'ws-seeds', type: 'circle', source: 'ws-seeds',
+        paint: {
+          'circle-radius': 4,
+          'circle-color': ['match', ['get','kind'], 'background', '#475569', '#ffffff'],
+          'circle-stroke-color': ['match', ['get','kind'], 'background', '#475569', '#0f172a'],
+          'circle-stroke-width': 1.5,
+        } });
+
+      // room labels
+      for (const l of (floorData.text_lines ?? [])) {
+        const text = String(l.text ?? '').trim();
+        if (!text) continue;
+        const el = document.createElement('div');
+        el.className = 'mlabel';
+        el.textContent = text;
+        el.style.display = $('showLabels').checked ? '' : 'none';
+        markers.push(new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat(toLL(l.x, l.y)).addTo(map));
+      }
+
+      // frame the floor once (not on every recompute/seed click)
+      if (!framed) {
+        const b = new maplibregl.LngLatBounds();
+        for (const s of wallsLL) for (const p of s) b.extend(p);
+        if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 0 });
+        framed = true;
+      }
+      map.triggerRepaint();
+    }
+
+    function renderLegend() {
+      const rows = [...ws.regions.values()].sort((a, b) => b.area - a.area);
+      legendBody.replaceChildren(...rows.map((r) => {
+        const row = document.createElement('div'); row.className = 'leg';
+        const sw = document.createElement('span'); sw.className = 'sw';
+        const c = regionColor(r.id); sw.style.background = `rgb(${c[0]},${c[1]},${c[2]})`;
+        const nm = document.createElement('span'); nm.className = 'nm';
+        nm.textContent = r.kind === 'background' ? `corridor (${r.id})` : `${r.name} (${r.id})`;
+        const ar = document.createElement('span'); ar.className = 'ar';
+        ar.textContent = `${(r.area * ws.cell * ws.cell).toFixed(0)} m²`;
+        row.append(sw, nm, ar);
+        return row;
+      }));
+    }
+
+    function renderJsonLegend() {
+      const rows = [...jsonInfo.entries()]
+        .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
+      jsonLegend.replaceChildren(...rows.map(([name, info]) => {
+        const row = document.createElement('div'); row.className = 'leg';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = jsonVisible.has(name);
+        cb.addEventListener('change', () => {
+          if (cb.checked) jsonVisible.add(name); else jsonVisible.delete(name);
+          applyJsonFilter();
+        });
+        const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = info.color;
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = name;
+        const ar = document.createElement('span'); ar.className = 'ar'; ar.textContent = String(info.count);
+        row.append(cb, sw, nm, ar);
+        return row;
+      }));
+    }
+
+    function onMapClick(e) {
+      if (!ws || !graph) return;
+      const [x, y] = graph.toM([e.lngLat.lng, e.lngLat.lat]);
+      const i = Math.floor((x - ws.x0) / ws.cell);
+      const j = Math.floor((ws.y1 - y) / ws.cell);
+      if (i < 0 || j < 0 || i >= ws.W || j >= ws.H) return;
+      if (addSeedMode) {
+        extraSeeds.push({ name: 'click', ll: [e.lngLat.lng, e.lngLat.lat] });
+        recompute();
+        return;
+      }
+      const k = j * ws.W + i;
+      if (ws.blocked[k]) return;
+      const id = ws.labels[k];
+      const r = ws.regions.get(id);
+      if (!r) return;
+      const nbrs = [...ws.adjacency.values()]
+        .filter((a) => a.a === id || a.b === id)
+        .map((a) => {
+          const other = a.a === id ? a.b : a.a;
+          const o = ws.regions.get(other);
+          return `${o ? (o.kind === 'background' ? 'corridor' : o.name) : other} — ${a.widthM.toFixed(2)} m throat`;
+        });
+      new maplibregl.Popup({ closeButton: true })
+        .setLngLat(e.lngLat)
+        .setHTML(`<b>${r.kind === 'background' ? 'corridor' : r.name}</b> (region ${id})<br>` +
+          `${(r.area * ws.cell * ws.cell).toFixed(0)} m²` +
+          (nbrs.length ? `<br><br>${nbrs.join('<br>')}` : ''))
+        .addTo(map);
+    }
+  </script>
+</body>
+</html>
