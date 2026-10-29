@@ -1345,6 +1345,11 @@
           </div>
           <div class="info-label" style="margin-top:8px">Graph</div>
           <div id="graph-stats" class="info-value" style="color:var(--muted);font-size:0.75rem">Not built</div>
+          <div class="info-label" style="margin-top:8px">Debug</div>
+          <label class="switch-row">
+            <span>Show regions (debug)</span>
+            <input type="checkbox" id="regions-toggle" class="switch" />
+          </label>
           <button id="cal-advanced-back" class="cal-btn" style="width:100%">Back</button>
         </div>
       </div>
@@ -1579,6 +1584,7 @@
     import { splitRoomQuery, findRoom, findRoomExact, doorwayFor, normName, placeTarget,
              buildPlaceIndex, searchPlaces, resolvePlace } from './places.mjs';
     import { resolveRoomPin } from './roompin.mjs';
+    import { watershed, REGION_COLORS, BACKGROUND_COLOR } from './watershed.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
     
     // Protocol registration
@@ -1611,6 +1617,7 @@
     // is on another floor; cleared on the next manual floor change.
     let destinationRevealed = false;
     let is3D = false;            // starts in 2D; toggled by the view button
+    let showRegions = false;     // DEBUG: watershed region overlay (Advanced -> Debug)
     // Building labels appear at/above this zoom; collision handling hides any
     // label that would squish into another. Adjust this single constant.
     const BUILDING_LABEL_MIN_ZOOM = 15.5;
@@ -1714,6 +1721,7 @@
     const headingSnapToggle = document.getElementById('heading-snap-toggle');
     const statusText = document.getElementById('status-text');
     const graphStats = document.getElementById('graph-stats');
+    const regionsToggle = document.getElementById('regions-toggle');
     const calStateIcon = document.getElementById('cal-state-icon');
     const headingTrimEl = document.getElementById('heading-trim');
     const headingTrimValEl = document.getElementById('heading-trim-val');
@@ -1936,6 +1944,11 @@
     headingSnapToggle.addEventListener('change', () => {
       headingSnapEnabled = headingSnapToggle.checked;
       if (!headingSnapEnabled) { headingSnapper.reset(); setCorridorBadge(false); updateSnapReadout(null); }
+    });
+    // DEBUG: watershed region overlay (Advanced -> Debug). Visual aid only.
+    regionsToggle.addEventListener('change', () => {
+      showRegions = regionsToggle.checked;
+      updateRegionOverlay();
     });
     document.getElementById('portal-ignore-select').addEventListener('change', () => {
       // The dropdown names the ONLY type to use; the router takes the type to
@@ -5294,6 +5307,83 @@
      * floor JSON, navGraph and portals are all loaded eagerly. Inserted below
      * 'portals' so dots and the route stay on top.
      */
+    // --- DEBUG: watershed region overlay (Advanced -> Debug) -----------------
+    // Visual aid only: paints the watershed room/corridor territories in 4
+    // colours over the selected floor. No labels, boundaries or other layers.
+    // Off by default; computed lazily and cached per floor.
+    function regionCanvasFor(ws) {
+      const cv = document.createElement('canvas');
+      cv.width = ws.W; cv.height = ws.H;
+      const ctx = cv.getContext('2d');
+      const img = ctx.createImageData(ws.W, ws.H);
+      const d = img.data;
+      for (let k = 0; k < ws.W * ws.H; k++) {
+        if (ws.blocked[k]) continue;                 // walls stay transparent
+        const r = ws.regions.get(ws.labels[k]);
+        if (!r) continue;
+        const c = r.kind === 'background' ? BACKGROUND_COLOR
+          : REGION_COLORS[(r.color - 1) % REGION_COLORS.length];
+        const o = k * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 205;
+      }
+      ctx.putImageData(img, 0, 0);
+      return cv;
+    }
+
+    function ensureRegionLayer(f) {
+      if (f._regionLayerId) return;
+      if (!f.navGraph?.raster || !f.obstacleLines) return;
+      let ws = f._watershed;
+      if (!ws) {
+        try {
+          ws = watershed({
+            wallsLL: f.obstacleLines,
+            graph: f.navGraph,
+            roomLabels: (f.roomLabels ?? [])
+              .map((l) => ({ text: String(l.properties?.text ?? '').trim(), ll: l.geometry?.coordinates }))
+              .filter((l) => l.text && Array.isArray(l.ll)),
+            backgroundSeeds: [
+              ...(f.elevators ?? []), ...(f.stairs ?? []), ...(f.exits ?? []),
+            ].map((p) => ({ name: 'corridor', ll: p.ll })),
+            cell: 0.2, maxColors: 4,
+          });
+          f._watershed = ws;
+        } catch (e) { return; }
+      }
+      const r = f.navGraph.raster;
+      const tl = f.navGraph.toLL([r.OX, r.OY + r.H * r.cell]);
+      const tr = f.navGraph.toLL([r.OX + r.W * r.cell, r.OY + r.H * r.cell]);
+      const br = f.navGraph.toLL([r.OX + r.W * r.cell, r.OY]);
+      const bl = f.navGraph.toLL([r.OX, r.OY]);
+      const srcId = `${f.wallSourceId}-regions`;
+      const layerId = `${f.wallLayerId}-regions`;
+      if (!map.getSource(srcId)) {
+        map.addSource(srcId, {
+          type: 'canvas', canvas: regionCanvasFor(ws),
+          coordinates: [tl, tr, br, bl], animate: false,
+        });
+        const before = map.getLayer(f.wallLayerId) ? f.wallLayerId
+          : map.getLayer('portals') ? 'portals'
+          : map.getLayer('navigation-route') ? 'navigation-route' : undefined;
+        map.addLayer({
+          id: layerId, type: 'raster', source: srcId,
+          paint: { 'raster-opacity': 0.5, 'raster-fade-duration': 0 },
+        }, before);
+      }
+      f._regionLayerId = layerId;
+    }
+
+    function updateRegionOverlay() {
+      const floorId = currentFloorId();
+      for (const b of buildings) for (const f of b.floors) {
+        const show = showRegions && !is3D && f.floorId === floorId;
+        if (show) ensureRegionLayer(f);
+        if (f._regionLayerId && map.getLayer(f._regionLayerId)) {
+          map.setLayoutProperty(f._regionLayerId, 'visibility', show ? 'visible' : 'none');
+        }
+      }
+    }
+
     function ensureFloorLayers(f) {
       if (f._layersAdded) return;
       const before = map.getLayer('portals') ? 'portals'
@@ -5448,6 +5538,7 @@
       }
       applyStructureStyle();
       refreshLive3D();   // the 3D avatar follows the selected floor
+      updateRegionOverlay();   // DEBUG: keep the region overlay on the displayed floor
     }
 
     // Map load

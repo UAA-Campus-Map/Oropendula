@@ -143,6 +143,10 @@ does not reappear. Returning users who skipped calibration are still prompted
 separately by `autoOpenCalibrationModal()`.
 
 ### Notable internals
+- **Debug region overlay:** Advanced Settings → **Compass & graph** → *Debug* →
+  **Show regions (debug)** paints the watershed room/corridor territories in 4
+  colours over the selected floor (`watershed.mjs`). Visual aid only — no labels
+  or boundaries, off by default, hidden in 3D.
 - The particle cloud is the production position indicator (`pdr-particles`),
   drawn from `ParticleFilter.points()`.
 - **Cached graphs:** boot fetches each building's `graphUrl` bundle in parallel,
