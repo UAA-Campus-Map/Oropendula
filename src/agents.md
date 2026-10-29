@@ -115,8 +115,8 @@ in code, docs, deployment, and import-tool settings.
   GPS again.
 - `app.html` — the production Navigator frontend: the same modules and
   navigation logic as index.html behind a mobile-first UI (route preview card,
-  calibration modal, cached navGraph bundle boot, place search/favorites).
-  See `docs/apps.md`.
+  calibration modal, cached navGraph bundle boot, place search/favorites,
+  first-load tour). See `docs/apps.md`.
 - `places.mjs` — place nicknames and the shared room lookup used by
   `app.html`, `places.html` and smoke: `splitRoomQuery` / `findRoom` /
   `doorwayFor`, name normalisation and ranking, `placeTarget` / `parseTarget`,

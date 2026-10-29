@@ -21,10 +21,11 @@ bottom-left action pills, a branded splash, and subtle haptics.
 - **Route preview** is a top-anchored expandable card (`showRoute` →
   `routePreviewSteps`/`routeStepEl`) with tappable legs that fly the map to where
   each step happens, instead of the older bottom pill.
-- **Calibration** is a **modal** (phone-only; hidden on desktop) that replaces the
-  old line-walk panel. It offers three ways to set the step length: *estimate from
-  height*, *calibrate from GPS (outside)* — the `autocal.mjs` flow — and a
-  *guided indoor walk*. The splash mirrors the live status line while booting.
+- **Advanced Settings** is a **modal** (opened by the menu button, which is hidden
+  on desktop) that holds calibration and the compass/graph controls. Calibration
+  offers three ways to set the step length: *estimate from height*, *calibrate
+  from GPS (outside)* — the `autocal.mjs` flow — and a *guided indoor walk*. The
+  splash mirrors the live status line while booting.
 - **The guided indoor walk** asks the user to stand outside a doorway and type the
   room they are in; `findRoom` resolves it, `roomDoorViaRoute` confirms the room's
   egress door by routing, and `pickIndoorTarget` chooses a same-floor room a short
@@ -83,14 +84,33 @@ other doors. Blocked portals are passed to
 `campusRouter.route(..., {avoidPortals})`; the session-wide block set applies to
 every later route until reload, and there is deliberately no unblock UI.
 
-### First-load interface tour
+### First-load tour
 
-The first visit shows a short spotlight tour after the calibration modal closes
-(or after boot when calibration is already complete). It points at the search
-bar, floor control, 2D/3D, Follow, GPS, “I’m Here”, Room Pin, blocked-door, and
-calibration controls with 3–10 word descriptions. The final button says
-**“Let’s go”**. Completion or **Skip** stores `interface-tour` in
-`localStorage`, so the tour does not reappear.
+The first visit is a guided tour, not a separate calibration popup followed by
+spotlights. It runs in this order:
+
+1. **Welcome** large modal: “UAA Campus Map”, a one-line explanation, and the
+   first-visit note.
+2. **How positioning works** large modal: GPS outdoors; step counting indoors;
+   the next screen calibrates the step length.
+3. **Calibration page**: opens the real calibration modal (height estimate,
+   GPS auto-calibration, or guided indoor walk). Closing calibration resumes the
+   tour at the correction page.
+4. **Correcting your position** large modal: pins and the room search tool.
+5. **Interface spotlight**, starting with the location pin (“I’m Here”) and
+   Room Pin, then search, GPS, Follow, 2D/3D, blocked-door and calibration.
+   The floor-picker step is last and spells out that the picker must match the
+   floor the user is actually on; that help text is also on the control itself.
+6. **Summary** large modal with three numbered steps: set your position, input
+   your destination, and correct your position/floor as necessary. The
+   spotlight’s final **“Next →”** opens this page; **“Start navigating”**
+   closes it.
+
+Every tour screen — the large modals, the calibration modal header, the
+spotlight, and the summary — shows **“Step n of m”** in the same sequence.
+Completion or **Skip** stores `interface-tour` in `localStorage`, so the tour
+does not reappear. Returning users who skipped calibration are still prompted
+separately by `autoOpenCalibrationModal()`.
 
 ### Notable internals
 - The particle cloud is the production position indicator (`pdr-particles`),
