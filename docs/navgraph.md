@@ -5,8 +5,9 @@
 Turns one floor's wall segments into a queryable navigation graph and answers
 path queries on it. Exports:
 
-- `buildGraph(walls)` → the live graph object (build + query closures).
-- `buildGraphState(walls)` / `graphFromState(state)` → the same graph split into
+- `buildGraph(walls, doors = [])` → the live graph object (build + query closures).
+- `buildGraphState(walls, doors = [], { passages })` / `graphFromState(state)` →
+  the same graph split into
   a **serializable half** (the expensive raster) and a **cheap rehydration half**,
   so the build can run in a Web Worker.
 

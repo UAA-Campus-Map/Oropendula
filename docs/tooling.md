@@ -15,10 +15,12 @@ while floors are rasterised (~0.1–1.2 s each on desktop).
 
 ### `basis-worker.mjs`
 Test-only (`smoke.mjs`). Builds **one floor's basis** on a worker thread: parse
-the building JSON, derive lon/lat wall segments, build the navGraph state, and
-extract a fresh portal set. Everything in/out is structured-cloneable; the main
-thread rehydrates with `graphFromState`. Used to parallelise the suite's floor
-loading.
+the building JSON, derive the wall/door geometry, compute `graphInputHash` and
+**validate the cached navGraph bundle's `sourceHash`**, and produce the floor's
+portal set (fresh `extractPortals` for the `portals` category, else the config
+cache). It returns the decoded bundle floor when the hash matches (the main
+thread rehydrates with `makeBundleGraph`) or the raw inputs to build on-device
+when it does not. Everything in/out is structured-cloneable.
 
 ### `navgraph-bundle-worker.mjs`
 Import-tool worker. Builds one floor with `buildGraphState(..., {passages:false})`
@@ -102,7 +104,8 @@ node smoke.mjs motion pdr arbiter autocal anchorcal headingfield doorways places
 (`places` reads the floor JSONs' room labels but builds no navGraph; see
 `places.md`. `roompin` builds one real floor, AS121-02.)
 
-Everything else builds real floors (shared across groups via `basis-worker`).
+Everything else loads the real floors (shared across groups via
+`basis-worker`).
 
 The shared floor load uses the **shipped navGraph bundles** (`graphUrl`, the
 same `.nvg.gz` the app loads) instead of rasterising walls: each floor's
@@ -115,9 +118,9 @@ or ~7.6 s when fresh portals are extracted.
 
 Why it is shaped this way: the suite **builds its campuses the way the app
 does** — same registration math, same wall filter, same bundles, same portal
-extraction — so a green test means the deployed app behaves the same. Every
-line is prefixed with elapsed seconds (set `SMOKE_NO_TIMING=1` for clean
-output), and the load prints one line per building. `pdr` exercises the particle
+extraction — so a green test means the deployed app behaves the same. Timestamps
+are **off by default**; `SMOKE_TIMING=1` prefixes every line with elapsed
+seconds. `pdr` exercises the particle
 filter on **synthetic corridors and turns** (no sensors); `autocal` synthesises
 GPS walks; `router`/`multifloor` route the real campus, checking invariants like
 "outdoor legs never cross a wall" and "all building pairs route".

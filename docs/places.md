@@ -23,10 +23,13 @@ everyone's search without that review, and the site has **no backend and no
 `smoke.mjs`):
 
 - `splitRoomQuery(buildings, q)`, `findRoom(building, roomText)`,
-  `doorwayFor(floor, labelLL)`, `findBuilding`, `normRoom` — the room search
+  `findRoomExact(building, roomText)`, `doorwayFor(floor, labelLL)`,
+  `findBuilding`, `normRoom` — the room search
   that used to live inline in `app.html`; `findRoom` returns the label `text` as
-  drawn. `doorwayFor` prefers the floor's physical `doorways` (wall-aligned
-  barriers) and falls back to DOOR-leaf midpoints when only those exist.
+  drawn. `findRoomExact` matches one exact label only (or an `error`) and is what
+  Room Pin requires (no prefix/named-room match). `doorwayFor` prefers the floor's
+  physical `doorways` (wall-aligned barriers) and falls back to DOOR-leaf
+  midpoints when only those exist.
 - `nameTokens`, `normName` — name normalisation (case, accents, punctuation and
   `and/the/of/a/an` ignored: "AI & Robotics Lab" = "ai robotics lab").
 - `placeTarget(place)` / `parseTarget(target)` — the canonical location key,

@@ -21,6 +21,11 @@ bottom-left action pills, a branded splash, and subtle haptics.
 - **Route preview** is a top-anchored expandable card (`showRoute` →
   `routePreviewSteps`/`routeStepEl`) with tappable legs that fly the map to where
   each step happens, instead of the older bottom pill.
+- **Planning a route never changes the floor** and no longer zooms to the
+  destination: it **fits the view to the whole route** (`routeBounds`) and
+  reveals the destination pin even when the destination is on another floor
+  (`destinationRevealed`, cleared on the next manual floor change). Tapping a
+  route step still flies to that step and switches floor.
 - **Advanced Settings** is a **modal** (opened by the menu button, which is hidden
   on desktop) that holds calibration and the compass/graph controls. Calibration
   offers three ways to set the step length: *estimate from height*, *calibrate
@@ -78,8 +83,11 @@ through; ties break on distance) is used. "Multiple doors" is reported when two
 probes leave through first doors **≥ 2 m apart** (different openings); doors
 closer than that are one entrance (double door / two leaves). It also refuses
 ambiguous rooms and a floor where the room is the only label. The user is placed
-0.8 m beyond that door, continuing the line from the room's label through the
-door into the hallway (a walkable point, backed off toward the door if needed).
+**0.5 m beyond that door**, continuing the line from the room's label through the
+door into the hallway; when that line runs into a wall (a far, off-axis door,
+e.g. RH 210) it falls back to the barrier normal (away from the label), then the
+route direction, then the nearest walkable point to the door. The pin is always a
+walkable point, backed off toward the door if needed.
 
 Door *crossing* is tolerant (`geo.crossBarrier` + `geo.nearestApproach`): a
 doorway's barrier is the wall gap, but the navGraph passage is carved at the
@@ -113,13 +121,20 @@ spotlights. It runs in this order:
    tour at the correction page.
 4. **Correcting your position** large modal: pins and the room search tool.
 5. **Interface spotlight**, starting with the location pin (“I’m Here”) and
-   Room Pin, then search, GPS, Follow, 2D/3D, blocked-door and calibration.
-   The floor-picker step is last and spells out that the picker must match the
-   floor the user is actually on; that help text is also on the control itself.
+   Room Pin, then search, GPS, Follow, 2D/3D, blocked-door and Advanced Settings
+   (the menu button). The floor-picker step is last and spells out that the
+   picker must match the floor the user is actually on; that help text is also on
+   the control itself.
 6. **Summary** large modal with three numbered steps: set your position, input
    your destination, and correct your position/floor as necessary. The
    spotlight’s final **“Next →”** opens this page; **“Start navigating”**
    closes it.
+
+The **Next button has a deliberate cooldown** so a rapid tap cannot skip several
+screens: it is disabled (greyed out) for **2.5 s after each big modal page
+appears** and **1 s after each spotlight step appears** (the cooldown starts when
+the screen is shown, so it is preserved however the screen was reached — e.g. the
+calibration flow handing back to the correction page).
 
 Every tour screen — the large modals, the calibration modal header, the
 spotlight, and the summary — shows **“Step n of m”** in the same sequence.
@@ -212,5 +227,7 @@ a convenient place to observe the filter without sensors.
 
 - [`tooling.md`](tooling.md) — the test suite that verifies the shared logic.
 - [`navgraph-bundles.md`](navgraph-bundles.md) — the cached binary graph format used by `app.html`.
+- [`roompin.md`](roompin.md), [`doorways.md`](doorways.md) — Room Pin and the
+  doorway geometry it uses.
 - [`locate.md`](locate.md), [`autocal.md`](autocal.md) — the algorithms the
   calibration flows drive.

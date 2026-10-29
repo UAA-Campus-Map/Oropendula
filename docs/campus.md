@@ -91,7 +91,11 @@ same-floor trips short-circuit to a single indoor leg.
 - `avoidPortals` accepts exterior door keys, connector keys, and interior-door
   keys (`building|floor|door|interior-<id>`). Interior doors are wall-aligned
   barriers supplied by the app; blocking one forces a different indoor path and
-  does not become a macro node.
+  does not become a macro node. Interior-door detection is **tolerant** — the
+  same `crossBarrier` + `nearestApproach` test Room Pin uses (a route counts as
+  crossing when it passes the barrier line, ±0.4 m past a jamb, or comes within
+  0.815 m — the ADA 32 in clear width — of the barrier), because the navGraph
+  passage is offset from the wall-gap barrier.
 - Skybridge pairing: explicit `to` marks win and may join different floor
   numbers. Unmarked bridges auto-pair by proximity within `SKYBRIDGE_MAX_M`,
   preferring the same floor but allowing a cross-floor pair when no same-floor

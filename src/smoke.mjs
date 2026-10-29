@@ -131,10 +131,9 @@ const NEEDS_FLOORS = ['walkability', 'portals', 'router', 'osm', 'multifloor', '
 const needsFloors = NEEDS_FLOORS.some(want);
 if (_args.length) console.log(`Running categories: ${[...ACTIVE].join(', ')}\n`);
 
-// Every line is prefixed with elapsed seconds, so a long run's stages are
-// visible as they finish (the shared floor load and each group print headers).
-// Set SMOKE_NO_TIMING=1 for the old clean output.
-if (!process.env.SMOKE_NO_TIMING) {
+// Timestamps are OFF by default so the gate's output stays clean; set
+// SMOKE_TIMING=1 to prefix every line with elapsed seconds.
+if (process.env.SMOKE_TIMING) {
   const T0 = performance.now();
   const origLog = console.log.bind(console);
   console.log = (...a) =>

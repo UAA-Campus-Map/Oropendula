@@ -2150,7 +2150,8 @@
       tourTip.style.top = `${top}px`;
     }
 
-    function hasNextTourStep() {      for (let i = tourIndex + 1; i < TOUR_STEPS.length; i++) {
+    function hasNextTourStep() {
+      for (let i = tourIndex + 1; i < TOUR_STEPS.length; i++) {
         if (tourTargetFor(TOUR_STEPS[i])) return true;
       }
       return false;

@@ -34,8 +34,8 @@ The runtime pipeline runs **sensors → motion → locate → arbiter → app**:
 | 4 | [osm.md](osm.md) | `osm.mjs` | OpenStreetMap roads → the same shape format, for outdoor legs |
 | 5 | [pmtiles-node.md](pmtiles-node.md) | `pmtiles-node.mjs` | dependency-free PMTiles reader for the tests |
 | 6 | [motion.md](motion.md) | `motion.mjs` | step detection, compass heading, step-length model, sensor wiring |
-| 6a | `doorways.mjs` | doorway geometry | DOOR-leaf clustering, wall-aligned barriers, crossing tests |
-| 6b | `roompin.mjs` | Room Pin | exact room -> first door on seeded same-floor probe routes -> outside point |
+| 6a | [doorways.md](doorways.md) | `doorways.mjs` | DOOR-leaf clustering, wall-aligned barriers, crossing tests |
+| 6b | [roompin.md](roompin.md) | `roompin.mjs` | exact room -> majority first door on seeded probes -> outside point |
 | 7 | [locate.md](locate.md) | `locate.mjs` | the map-matching **particle filter** (PDR) + corridor heading |
 | 8 | [arbiter.md](arbiter.md) | `arbiter.mjs` | fuses GPS and PDR continuously, picks the more certain one |
 | 9 | [autocal.md](autocal.md) | `autocal.mjs` | online step-length calibration from GPS |

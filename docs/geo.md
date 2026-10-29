@@ -10,6 +10,11 @@ coordinate system. The map, the router and the particle filter all work in
 - `dxfCoordsToLonLat(origin, x, y, rot, scale)` and its inverse
   `lonLatToDxf(...)`.
 - `metresPerDegree(lat)` — the local metres per degree of longitude/latitude.
+- `crossBarrier(polylineM, a, b, toleranceM)` / `nearestApproach(polylineM, a, b)`
+  — the tolerant door-crossing tests (all in metres): whether a route crosses a
+  doorway barrier's line (with a small end tolerance) or passes through the
+  opening beside it. Used by Room Pin and interior-door blocking; see
+  `campus.md` / `roompin.md`.
 - `DXF_SCALE = 0.0254` (metres per inch).
 
 ## Why it exists / why this design
@@ -50,3 +55,4 @@ offset {x, y, rot}  the datum point in DXF inches, plus a rotation (radians)
 
 - [`navgraph.md`](navgraph.md) — builds its metre frame from these segments.
 - [`campus.md`](campus.md) — portal extraction consumes `toLL`.
+- [`roompin.md`](roompin.md) — `crossBarrier` / `nearestApproach` in use.

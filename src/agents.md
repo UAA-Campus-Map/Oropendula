@@ -20,17 +20,18 @@ in code, docs, deployment, and import-tool settings.
 ## Architecture
 
 - `navgraph.mjs` — **frozen; only additive changes are permitted.** `buildGraph(
-  wallLines)` returns `{findPath(a, b), nodes, stats, isWalkable, nearestWalkable}`;
+  walls, doors = [])` returns `{findPath(a, b), nodes, stats, isWalkable, nearestWalkable}`;
   `attach(ll)` returns the nodes a point can see and is the basis of
   `buildingAt` and route attachment. Walls are *obstacles*; it routes free space around them on a
   ~0.1 m grid extending ~0.45 m past the wall bbox. `isWalkable(ll)` is an O(1)
   lookup into that same clearance raster (used by the PDR particle filter and
   the GPS-validity gate); `nearestWalkable(ll, radiusCells)` spirals out to the
   closest free cell. Other additive surface: the attachment API (Performance,
-  item 2) and `buildGraphState(walls)` / `graphFromState(state)` — the graph as
+  item 2) and `buildGraphState(walls, doors = [], { passages })` /
+  `graphFromState(state)` — the graph as
   serializable raster/nodes/adjacency state plus a rehydrate step, so floors
   can be built in Worker threads; `buildGraph` is exactly
-  `graphFromState(buildGraphState(walls))` and unchanged in behaviour.
+  `graphFromState(buildGraphState(walls, doors))` and unchanged in behaviour.
   Existing behaviour is untouched. `navgraph-codec.mjs` packs the serializable
   half into compact per-building `<id>.nvg.gz` bundles: Float64 nodes, undirected
   CSR adjacency, RLE blocked raster, no weights, no passages.
@@ -43,7 +44,9 @@ in code, docs, deployment, and import-tool settings.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).
-  index.html, smoke.mjs and import.html all import from here.
+  Also `crossBarrier(polylineM, a, b, tol)` and `nearestApproach(polylineM, a,
+  b)` — the tolerant door-crossing tests (see Room Pin). index.html, smoke.mjs
+  and import.html all import from here.
 - `campus.mjs` — the tiered router. `extractPortals(shapes, toLL)` pulls
   elevators/stairs/exits from tagged DXF layers; `buildCampusRouter(buildings,
   outdoorShapes?)` links connectors across floors, builds the macro graph over
@@ -98,6 +101,14 @@ in code, docs, deployment, and import-tool settings.
   (`query(ll)` -> candidate bearings + a `confidence`); `CompassSnapper` snaps the
   live heading to the nearest candidate and holds it until a deliberate turn.
   See `docs/headingfield.md`.
+- `doorways.mjs` — physical doorways. `doorwaysFromShapes(shapes, toLL)` clusters
+  DOOR/DOORS-layer leaves (double doors into one opening) and turns each into a
+  **wall-aligned barrier** (the wall gap, using the leaf's swing arc when drawn),
+  with a stable geometry-derived id. `barrierCrossesPolyline` is the exact test;
+  see Room Pin for the tolerant one. The same doorways back interior-door
+  blocking and the Room Pin door lookup.
+- `roompin.mjs` — **Room Pin** ("Locate by room"): turn an exact room number into
+  a manual PDR anchor just outside its door. See the Room Pin section below.
 - `arbiter.mjs` — `PositionArbiter` runs GPS and PDR **at the same time** and
   picks the smaller uncertainty (GPS `coords.accuracy` vs a PDR error that grows
   with distance walked). Hysteresis stops flapping; a validity gate rejects
@@ -116,10 +127,15 @@ in code, docs, deployment, and import-tool settings.
 - `app.html` — the production Navigator frontend: the same modules and
   navigation logic as index.html behind a mobile-first UI (route preview card,
   calibration modal, cached navGraph bundle boot, place search/favorites,
-  first-load tour). See `docs/apps.md`.
+  first-load tour). Planning a route **keeps the current floor and fits the whole
+  route** (no zoom-to-destination), and reveals the destination pin even when it
+  is on another floor (`destinationRevealed`); the first-load tour's Next button
+  has a deliberate cooldown (2.5 s on the big modal pages, 1 s on the spotlight
+  steps) and greys out while disabled. See `docs/apps.md`.
 - `places.mjs` — place nicknames and the shared room lookup used by
-  `app.html`, `places.html` and smoke: `splitRoomQuery` / `findRoom` /
-  `doorwayFor`, name normalisation and ranking, `placeTarget` / `parseTarget`,
+  `app.html`, `places.html`, `roompin.mjs` and smoke: `findBuilding` /
+  `splitRoomQuery` / `findRoom` / `findRoomExact` / `doorwayFor`, `normRoom`,
+  name normalisation and ranking, `placeTarget` / `parseTarget`,
   `buildPlaceIndex` / `searchPlaces`, `resolvePlace` / `validatePlaces`.
   `places.json` is optional and edited in `places.html`. See
   `docs/places.md`.
@@ -291,7 +307,9 @@ stores the result on each floor entry of `buildings-config.json` as
 - **`gen-portals.mjs`** (dev-only) is the CLI fallback for bootstrapping the
   cache; the import tool is the normal path (a floor JSON change is re-imported
   there and comes back cached). Then deploy `buildings-config.json`.
-- smoke.mjs verifies every shipped floor's cache equals a fresh extraction.
+- smoke.mjs verifies every shipped floor's cache equals a fresh extraction when
+  the `portals` category runs (the full gate); other categories load with or
+  without the cache as above.
 
 ## Performance
 
@@ -549,8 +567,8 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   is up to 34 m; the widest detectable hallway is `2·maxM/6 ≈ 5.7 m`). The gate
   was 9:1 with `maxM = 15 m`, which fired on only ~8% of real walkable samples
   and could not even reach 9:1 on a hallway wider than 3.3 m; 6:1 with the 17 m
-  ray roughly doubles the rate (~14%, measured over 2160 samples on all 18
-  floors) while still rejecting squarish rooms. The sum-of-opposite-rays geometry
+  ray roughly doubles the rate (measured **6.4% → 12.1% over 8907 samples on all
+  75 floors**) while still rejecting squarish rooms. The sum-of-opposite-rays geometry
   makes the gate honest:
   open rooms/atria, wide lobbies, intersections (the cross-corridor blows up the
   across-run) and L-corners (both chords long) all return `null`, so the heading
@@ -788,14 +806,16 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
 `node smoke.mjs` — the only gate; run it after any change to campus.mjs,
 geo.mjs, osm.mjs, align.mjs, buildings-config.json, a building registration, a
 floor JSON or a navGraph bundle.
-**It takes category arguments so you don't run the whole ~23 s suite every
-time** (`node smoke.mjs --list` shows them): `align, walkability, pdr, corridor,
+**It takes category arguments so you don't run the whole suite every time**
+(`node smoke.mjs --list` shows them): `align, walkability, pdr, corridor,
 arbiter, portals, router, osm, multifloor, motion, autocal, anchorcal,
-headingfield, places`. No args = everything. The groups that need no real-floor
-load (`motion pdr arbiter autocal anchorcal headingfield`) skip the ~4-20 s
-building load entirely and run in <1 s:
-`node smoke.mjs motion pdr arbiter autocal anchorcal headingfield`. `places`
-reads the floor JSON room labels but builds no navGraph. The building-loading
+headingfield, doorways, roompin, places`. No args = everything (the full gate is
+minutes, dominated by `router`/`multifloor` and the live OSM fetch). The groups
+that need no real-floor load (`motion pdr arbiter autocal anchorcal headingfield
+doorways roompin`) run in seconds/`<1 s`:
+`node smoke.mjs motion pdr arbiter autocal anchorcal headingfield doorways roompin`.
+`places` reads the floor JSON room labels but builds no navGraph; `doorways`
+reads one real floor (AS121-02) and `roompin` builds it. The building-loading
 groups share one load. It covers:
 portal sanity, exits outside the footprint / near real doors, exit reachability
 for every building, six end-to-end routes (same floor, cross-building, outdoor
@@ -826,13 +846,24 @@ under an upper-floor bridge (AS164-03).
 
 The full suite is several hundred checks over 24 buildings / 75 floors; runtime
 varies with machine load and the live OSM fetch. `router` loads the real campus
-and takes minutes; use the focused categories while iterating. The per-floor basis (JSON parse, wall segments,
-`buildGraphState`, fresh `extractPortals`) is independent per floor and runs in
-a small pool of **worker threads** (`basis-worker.mjs`), rehydrated with
-`graphFromState` — verified byte-identical to the inline path (same checks and
-metrics; only PDR randomness and timing differ). `SMOKE_NO_WORKERS=1` runs the
-basis inline; `SMOKE_TIMING=1` prefixes every line with elapsed seconds. The
-whole per-floor basis now costs ~3.7 s wall (was ~9.2 s).
+and takes minutes; use the focused categories while iterating.
+
+**The shared floor load uses the shipped navGraph bundles** (`.nvg.gz` via
+`graphUrl`, decoded with `makeBundleGraph`) instead of rasterising walls, and
+verifies each floor's `sourceHash` against a freshly computed
+`graphInputHash({lines, doors})`. A mismatch (or a bundle that fails to decode)
+is reported and **fails the gate** (`navGraph bundles decode` /
+`every navGraph bundle matches its floor JSON`), so the cache can never go
+stale unnoticed; a mismatch falls back to the on-device build for that floor.
+Portals come from the config cache unless the `portals` category needs the
+fresh extraction (their equality is asserted there). Measured: ~2.5 s to load
+for routing groups, ~7.6 s when fresh portals are extracted.
+
+Per-floor work still runs in a small pool of **worker threads**
+(`basis-worker.mjs`), which validates the bundle hash and returns the decoded
+floor plus the portal set. `SMOKE_NO_WORKERS=1` runs it inline. Timestamps are
+**off by default**; `SMOKE_TIMING=1` prefixes every line with elapsed seconds,
+and the load prints or omits a per-building line accordingly.
 
 **Model fidelity**: the suite builds its campuses the way `index.html` does -
 same wall filter and `shapeSegments`, same `makeToLL`, portals from the shipped
@@ -1055,7 +1086,7 @@ the map walks with you". Semantics:
   stays live. `renderEstimate` stores `followCenter` and restarts the loop
   while active; the loop stops itself when paused/disabled.
 
-## Building / room search (index.html)
+## Building / room search (app.html)
 
 The search box takes "<building code> <room>", e.g. `BMH 114A`. The building
 code is the floor JSON's `ID` field (BMH, ESH, SMH, RH, CUDY, AASC, SU); the
@@ -1072,11 +1103,13 @@ from the label stays walkable (no wall between -> same open space, so it is the
 room's door, not an adjacent room's). Falls back to the label when no such door
 exists. `runSearch` routes from the live GPS/PDR estimate when
 "My Location" is running, else the map centre, makes the hit the destination
-marker/pin, jumps the floor picker to its floor and flies there. AS112 (WWA)
-is not registered in `buildings-config.json`, so it is not searchable.
+marker/pin, and draws the route. **Route entry does not change the floor or zoom
+to the destination**: it fits the view to the whole route and reveals the
+destination pin (see the app notes below). AS112 (WWA) is not registered in
+`buildings-config.json`, so it is not searchable.
 
-The room lookup (`splitRoomQuery`, `findRoom`, `doorwayFor`) lives in
-**`places.mjs`**, shared with `places.html` and smoke.
+The room lookup (`splitRoomQuery`, `findRoom`, `findRoomExact`, `doorwayFor`)
+lives in **`places.mjs`**, shared with `places.html`, `roompin.mjs` and smoke.
 `app.html` also searches **place nicknames** (`places.json`, edited in
 `places.html`) and the phone's **favorites** (localStorage), with a suggestion
 dropdown. Order: a picked suggestion, a full name ("Subway"), then
@@ -1085,6 +1118,45 @@ card links to the vote form (`PLACE_VOTE_FORM_URL`, empty = hidden), and
 admins add accepted names to `places.json`. `places.json` is optional: missing means no
 nicknames, never a failed boot. Details, server setup and invariants:
 [`docs/places.md`](../docs/places.md).
+
+## Room Pin ("Locate by room")
+
+`roompin.mjs` turns an **exact room number** into a manual PDR anchor just
+outside the room's door. `resolveRoomPin(building, hit, campusRouter)`:
+
+1. **Exact, unique room** (`findRoomExact`); a duplicate label across floors is
+   refused. No other same-floor room label -> `is the only room on its floor`.
+2. **Probe the floor.** Route from the label to **6 seeded-random other rooms on
+   the same floor** (seeded from `building|floor|room`, so a room's probe set is
+   stable across runs). Each probe contributes its **first door** crossed.
+3. **Tolerant crossing** (`geo.crossBarrier` + `geo.nearestApproach`): a door
+   counts as crossed when the route crosses its **barrier line** (±0.4 m past the
+   jamb) **or passes within 0.815 m** (ADA 32 in clear width) of the barrier.
+   This matters because the navGraph passage is carved at the DOOR leaf midpoint,
+   offset from the wall-gap barrier by ~0.3-0.5 m, so a strict in-segment
+   intersection misses real doors (most of SU-02).
+4. **Majority first hop** wins (ties break on distance). Probes that cross no
+   door are ignored. `multiple doors` is reported only when two probes leave
+   through first doors **>= 2 m apart** (different openings); closer doors are one
+   entrance (double door / two leaves). A door farther than 15 m from the label is
+   not the room's.
+5. **Placement**: 0.5 m beyond the door, continuing the **label -> door** line
+   (the label is a stable inside-the-room reference). Fallbacks when that line
+   runs into a wall (a far, off-axis door - RH 210): the **barrier normal** away
+   from the label, then the route direction, then the nearest walkable point to
+   the door. The pin is a walkable point, backed off toward the door if needed.
+
+Hard-won notes:
+- The old approach (probe an 8 m-away door and prove no other doorway is crossed)
+  rejected most rooms; every door is now assumed to open onto circulation space.
+- **SU floor 02 is special**: its raster is one open ~1000 m2 blob (wall gaps not
+  covered by door leaves), so room/door reasoning there is approximate. We tried a
+  `buildGraphState` **gap-seal pass** (bridge wall ends < 1 m with no door leaf)
+  and **reverted it** - sealing the leaks barely changed SU-02's region and did
+  not fix the misplacement. Do not reintroduce it casually; if a floor leaks,
+  prefer fixing the floor data.
+- The placement side was once derived from the route tangent, which is
+  meaningless for a parallel graze; the label is the reliable side reference.
 
 ## Browser demo notes
 

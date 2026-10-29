@@ -471,6 +471,13 @@ Gzip corruption is detected by `gunzipBytes()`/the platform decompressor. The
 app treats any decode failure as a signal to fall back to on-device graph
 building, so a bad bundle cannot brick the app.
 
+`smoke.mjs` enforces the same hash contract across the whole shipped set: it
+loads floors through the bundles, verifies each floor's `sourceHash` against a
+freshly computed `graphInputHash({ lines, doors })`, and **fails the gate**
+(`navGraph bundles decode` / `every navGraph bundle matches its floor JSON`) if a
+bundle is missing, undecodable, or stale, so a shipped cache cannot drift from
+the floor JSONs unnoticed.
+
 ## Tests
 
 ```sh
