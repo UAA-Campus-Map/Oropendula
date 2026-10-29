@@ -16,6 +16,7 @@
  * intersection misses many doors.
  */
 import { metresPerDegree, crossBarrier, nearestApproach } from './geo.mjs';
+import { watershed } from './watershed.mjs';
 
 const DOOR_CLUSTER_M = 1.4;   // fallback clustering when a floor has no doorways
 const DOOR_MAX_M = 15;        // label -> door proximity guard
@@ -188,6 +189,104 @@ export function placementOutside(floor, door, dir, labelLL = null) {
   return g.isWalkable(door.ll) ? door.ll : (g.nearestWalkable(door.ll) ?? null);
 }
 
+// --- watershed door selection (primary) ------------------------------------
+// A per-floor watershed (see watershed.mjs) partitions the floor into room and
+// corridor territories. The room's corridor door is the throat between its
+// territory and the background/corridor territory, which is exactly the
+// "outside the door" side Room Pin needs. Cached per floor object (~0.1-0.4 s).
+const WS_CELL = 0.2;
+const wsCache = new WeakMap();
+
+function cellForGrid(ws, g, ll) {
+  const [x, y] = g.toM(ll);
+  const i = Math.floor((x - ws.x0) / ws.cell);
+  const j = Math.floor((ws.y1 - y) / ws.cell);
+  if (i < 0 || j < 0 || i >= ws.W || j >= ws.H) return -1;
+  return j * ws.W + i;
+}
+
+function watershedFor(floor) {
+  if (wsCache.has(floor)) return wsCache.get(floor);
+  const g = floor.navGraph;
+  const roomLabels = (floor.roomLabels ?? [])
+    .map((l) => ({ text: String(l.properties?.text ?? '').trim(), ll: l.geometry?.coordinates }))
+    .filter((l) => l.text && Array.isArray(l.ll));
+  const backgroundSeeds = [];
+  for (const e of floor.elevators ?? []) backgroundSeeds.push({ name: 'corridor', ll: e.ll });
+  for (const s of floor.stairs ?? []) backgroundSeeds.push({ name: 'corridor', ll: s.ll });
+  for (const e of floor.exits ?? []) backgroundSeeds.push({ name: 'corridor', ll: e.ll });
+  let ws = null;
+  try {
+    ws = watershed({
+      wallsLL: floor.obstacleLines ?? [], graph: g, roomLabels, backgroundSeeds,
+      cell: WS_CELL, maxColors: 4,
+    });
+  } catch (e) { ws = null; }
+  wsCache.set(floor, ws);
+  return ws;
+}
+
+/**
+ * Resolve a room's door and outside point from the watershed territories:
+ * the room's region -> the throat shared with the corridor/background region.
+ * Returns null when the watershed cannot find a corridor-facing throat.
+ */
+function watershedPin(floor, hit) {
+  const ws = watershedFor(floor);
+  if (!ws) return null;
+  const g = floor.navGraph;
+  const m = metresPerDegree(hit.labelLL[1]);
+
+  let region = [...ws.regions.values()].find((r) => r.kind === 'room' && r.name === hit.text);
+  if (!region) {
+    const c = cellForGrid(ws, g, hit.labelLL);
+    if (c < 0) return null;
+    region = ws.regions.get(ws.labels[c]);
+  }
+  if (!region) return null;
+
+  const edges = [...ws.adjacency.values()].filter((e) => e.a === region.id || e.b === region.id);
+  const candidates = [];
+  for (const e of edges) {
+    const otherId = e.a === region.id ? e.b : e.a;
+    const other = ws.regions.get(otherId);
+    if (!other) continue;
+    const k = e.boundaryCell;
+    const i = k % ws.W, j = (k - i) / ws.W;
+    const ll = g.toLL([ws.x0 + (i + 0.5) * ws.cell, ws.y1 - (j + 0.5) * ws.cell]);
+    const d = Math.hypot((ll[0] - hit.labelLL[0]) * m.lon, (ll[1] - hit.labelLL[1]) * m.lat);
+    candidates.push({ edge: e, other, boundaryLL: ll, d });
+  }
+  if (!candidates.length) return null;
+  // Prefer a connector-seeded corridor; otherwise the largest adjacent region
+  // (a lobby / suite) is the more corridor-like side. Ties: nearest throat.
+  candidates.sort((a, b) => {
+    const ab = a.other.kind === 'background' ? 0 : 1;
+    const bb = b.other.kind === 'background' ? 0 : 1;
+    if (ab !== bb) return ab - bb;
+    if (a.other.area !== b.other.area) return b.other.area - a.other.area;
+    return a.d - b.d;
+  });
+  const chosen = candidates[0];
+
+  // Outward direction = label -> throat, then 0.5 m into the corridor side.
+  const p = g.toM(chosen.boundaryLL), lb = g.toM(hit.labelLL);
+  let dx = p[0] - lb[0], dy = p[1] - lb[1];
+  const l = Math.hypot(dx, dy) || 1;
+  dx /= l; dy /= l;
+  let ll = null;
+  for (const d of [PLACE_M, 0.4, 0.3, 0.2]) {
+    const q = g.toLL([p[0] + dx * d, p[1] + dy * d]);
+    if (!g.isWalkable(q)) continue;
+    const c = cellForGrid(ws, g, q);
+    if (c >= 0 && ws.labels[c] === chosen.other.id) { ll = q; break; }
+    if (!ll) ll = q;   // walkable fallback (still outside the room)
+  }
+  if (!ll) ll = g.nearestWalkable(chosen.boundaryLL);
+  if (!ll) return null;
+  return { doorLL: chosen.boundaryLL, ll };
+}
+
 /**
  * @param {object} building
  * @param {{text, floor, labelLL}|{error}} hit - from `findRoomExact`
@@ -197,6 +296,10 @@ export function placementOutside(floor, door, dir, labelLL = null) {
 export function resolveRoomPin(building, hit, campusRouter) {
   if (hit.error) return hit;
   const floor = hit.floor;
+  // Primary: watershed room territory -> the throat shared with the corridor.
+  const ws = watershedPin(floor, hit);
+  if (ws) return { building, floor, room: hit.text, doorLL: ws.doorLL, ll: ws.ll };
+  // Fallback: route probes + first-door crossing (the previous method).
   const candidates = sampleTargets(floor, hit.labelLL,
     `${building?.sourceId ?? building?.id ?? ''}|${floor.floorId}|${hit.text}`);
   if (!candidates.length) return {error: `Room ${hit.text} is the only room on its floor.`};

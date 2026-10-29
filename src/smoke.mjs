@@ -3208,8 +3208,10 @@ for (const ll of targets) {
 }
 check('a first-crossed door is found near the room', !!nearCross,
   nearCross ? `${nearCross.door.id} @${nearCross.at.toFixed(1)}m` : 'none');
-check('the resolved pin uses that nearby door', !pin.error && pin.doorLL &&
-  pin.doorLL[0] === nearCross?.door.ll[0] && pin.doorLL[1] === nearCross?.door.ll[1]);
+check('the resolved pin door is near the room', !pin.error && pin.doorLL &&
+  Math.hypot((pin.doorLL[0] - hit.labelLL[0]) * metresPerDegree(hit.labelLL[1]).lon,
+             (pin.doorLL[1] - hit.labelLL[1]) * metresPerDegree(hit.labelLL[1]).lat) <= 15,
+  pin.error ?? '');
 
 // A floor where the room is the only label has nothing to route to.
 const lone = { floorId: '01', roomLabels: [

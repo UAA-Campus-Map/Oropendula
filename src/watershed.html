@@ -65,7 +65,8 @@
     <div class="row"><label><input id="showJson" type="checkbox" checked> JSON layers (all)</label></div>
     <div class="row"><label><input id="showWalls" type="checkbox"> navGraph wall set (black)</label></div>
     <div class="row"><label><input id="showLabels" type="checkbox" checked> room labels</label></div>
-    <div class="row"><label><input id="showDoors" type="checkbox" checked> doorways</label></div>
+    <div class="row"><label><input id="showThroats" type="checkbox" checked> throats = region boundaries</label></div>
+    <div class="row"><label><input id="showDoors" type="checkbox"> DXF doorways</label></div>
     <div class="row"><label><input id="showSeeds" type="checkbox" checked> seeds</label></div>
 
     <div id="status">Loading…</div>
@@ -163,7 +164,8 @@
         map.getCanvas().style.cursor = addSeedMode ? 'crosshair' : '';
       });
       for (const [id, layer] of [['showRegions','ws-regions'],['showBoundaries','ws-boundaries'],
-                                 ['showWalls','ws-walls'],['showDoors','ws-doors'],['showSeeds','ws-seeds']]) {
+                                 ['showWalls','ws-walls'],['showThroats','ws-throats'],
+                                 ['showDoors','ws-doors'],['showSeeds','ws-seeds']]) {
         $(id).addEventListener('change', (e) => {
           if (map.getLayer(layer)) map.setLayoutProperty(layer, 'visibility', e.target.checked ? 'visible' : 'none');
         });
@@ -199,7 +201,7 @@
     function clearOverlays() {
       for (const m of markers) m.remove();
       markers = [];
-      for (const id of ['ws-regions','ws-boundaries','ws-json','ws-walls','ws-doors','ws-seeds']) {
+      for (const id of ['ws-regions','ws-boundaries','ws-json','ws-walls','ws-throats','ws-doors','ws-seeds']) {
         if (map.getLayer(id)) map.removeLayer(id);
         if (map.getSource(id)) map.removeSource(id);
       }
@@ -220,6 +222,7 @@
       const opt = $('building').selectedOptions[0];
       if (opt) opt.textContent = `${code} (${cfg.id})`;
       $('sub').innerHTML = `${code} (${cfg.id}) · floor ${floorCfg.floorId} · regions grown from room labels<br>` +
+        `doors = <b>region boundaries</b> (throats): <b style="color:#16a34a">green</b> = corridor, <b style="color:#ea580c">orange</b> = room↔room<br>` +
         `JSON layers: walls <b>black</b>, windows <b style="color:#0891b2">cyan</b>, doors <b style="color:#dc2626">red</b>, stairs purple, elevators amber; other layers hashed.`;
       buildJsonLayers();
       await recompute();
@@ -283,7 +286,7 @@
       render();
       const bg = [...ws.regions.values()].filter((r) => r.kind === 'background').length;
       statusEl.textContent =
-        `floor ${floorCfg.floorId} · ${ws.regions.size} regions (${bg} corridor)\n` +
+        `floor ${floorCfg.floorId} · ${ws.regions.size} regions (${bg} corridor) · ${ws.adjacency.size} throats\n` +
         `${ws.W}×${ws.H} cells @ ${ws.cell} m · ${ws.ms.toFixed(0)} ms · ${ws.colorCount} colours`;
       renderLegend();
       renderJsonLegend();
@@ -332,6 +335,27 @@
       map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 0 } });
     }
 
+    function throatFeatures() {
+      const out = [];
+      const nameOf = (r) => (!r ? '?' : r.kind === 'background' ? 'corridor' : r.name);
+      for (const e of ws.adjacency.values()) {
+        const k = e.boundaryCell;
+        const i = k % ws.W, j = (k - i) / ws.W;
+        const ll = graph.toLL([ws.x0 + (i + 0.5) * ws.cell, ws.y1 - (j + 0.5) * ws.cell]);
+        const A = ws.regions.get(e.a), B = ws.regions.get(e.b);
+        out.push({
+          type: 'Feature',
+          properties: {
+            a: e.a, b: e.b, widthM: +e.widthM.toFixed(2),
+            corridor: (A?.kind === 'background' || B?.kind === 'background') ? 1 : 0,
+            label: `${nameOf(A)} ↔ ${nameOf(B)}`,
+          },
+          geometry: { type: 'Point', coordinates: ll },
+        });
+      }
+      return out;
+    }
+
     function render() {
       clearOverlays();
 
@@ -360,7 +384,21 @@
         paint: { 'line-color': ['get', 'color'], 'line-width': 1 } });
       applyJsonFilter();
 
-      // doorways
+      // doors = region boundaries (throats). Green = corridor-facing,
+      // orange = room<->room. Radius scales with throat width.
+      map.addSource('ws-throats', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: throatFeatures() },
+      });
+      map.addLayer({ id: 'ws-throats', type: 'circle', source: 'ws-throats',
+        layout: { visibility: $('showThroats').checked ? 'visible' : 'none' },
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'widthM'], 0, 3, 2, 8],
+          'circle-color': ['match', ['get', 'corridor'], 1, '#16a34a', '#f97316'],
+          'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5,
+        } });
+
+      // DXF doorway midpoints (off by default: they are not the region boundary)
       map.addSource('ws-doors', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: doorways.map((d) => ({
@@ -369,6 +407,7 @@
         })) },
       });
       map.addLayer({ id: 'ws-doors', type: 'circle', source: 'ws-doors',
+        layout: { visibility: $('showDoors').checked ? 'visible' : 'none' },
         paint: { 'circle-radius': 3, 'circle-color': '#111827', 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
 
       // seeds
