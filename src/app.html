@@ -1601,6 +1601,9 @@
     let ignorePortals = 'both';     // advanced-panel portal preference
     let destinationMarker = null;
     let destinationFloor = null;   // floor the destination lands on (null = outdoors)
+    // Set when a route is first planned so the destination pin shows even if it
+    // is on another floor; cleared on the next manual floor change.
+    let destinationRevealed = false;
     let is3D = false;            // starts in 2D; toggled by the view button
     // Building labels appear at/above this zoom; collision handling hides any
     // label that would squish into another. Adjust this single constant.
@@ -3334,13 +3337,14 @@
       if (map.getLayer('campus-3d-route')) {
         map.setLayoutProperty('campus-3d-route', 'visibility', is3D ? 'visible' : 'none');
       }
-      // The DOM marker only shows in 2D, and only while the floor it belongs
-      // to is the one displayed (outdoor destinations show on a ground floor).
+      // The DOM marker shows in 2D while its floor is displayed (outdoor
+      // destinations on a ground floor), and also right after a route is
+      // planned so the user sees where they are headed.
       if (destinationMarker) {
         const onView = destinationFloor === null
           ? floorLevelOf(sel) === 1
           : destinationFloor === sel;
-        destinationMarker.getElement().style.display = (is3D || !onView) ? 'none' : '';
+        destinationMarker.getElement().style.display = (is3D || !(onView || destinationRevealed)) ? 'none' : '';
       }
     }
 
@@ -3697,14 +3701,21 @@
       const route = planRoute(startLL, room.ll,
         {startFloor, endFloor: room.floorId});
       searchDest = route ? dest : null;
-      // The room becomes the destination: marker + 3D pin on its floor.
+      // The room becomes the destination: marker + 3D pin on its floor. Reveal
+      // it now so the pin shows even when the destination is on another floor.
       destinationFloor = room.floorId;
+      destinationRevealed = true;
       if (destinationMarker) destinationMarker.setLngLat(room.ll);
       else destinationMarker = new maplibregl.Marker().setLngLat(room.ll).addTo(map);
-      const level = floorLevels.indexOf(room.floorId) + 1;
-      if (level > 0) setFloor(level);
+      // Deliberately do NOT switch floors when planning a route (distracting for
+      // a destination on another floor). Instead of zooming to the destination,
+      // frame the whole route so the user sees where they're going and from where.
       showRoute(route);
-      map.flyTo({center: room.ll, zoom: Math.max(map.getZoom(), 18.5), duration: 700});
+      if (route) {
+        map.fitBounds(routeBounds(route), {
+          padding: { top: 130, bottom: 180, left: 60, right: 60 }, duration: 800,
+        });
+      }
       searchInput.blur();
     }
 
@@ -5240,6 +5251,7 @@
     /** Move the display to a floor level (clamped), re-filtering and redrawing. */
     function setFloor(level) {
       floorLevel = Math.max(1, Math.min(floorLevels.length, level));
+      destinationRevealed = false;   // a manual floor change re-hides an off-floor pin
       floorLabel.textContent = floorLabelOf(currentFloorId());
       floorDown.disabled = floorLevel <= 1;
       floorUp.disabled = floorLevel >= floorLevels.length;
