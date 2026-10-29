@@ -208,8 +208,36 @@ id); it reports added/changed/removed buildings. This catches a wall change even
 when no config field was edited. "Download changed buildings (.zip)" builds a
 single ZIP with the full `buildings-config.json`, full `osm-paths.json` (or a
 freshly generated one if the cache is stale), and `.nvg.gz` files only for added
-or changed buildings. Unchanged bundles are not included. Floor JSONs are not
-put in this ZIP; upload those separately when a building's floor data is new.
+or changed buildings. Unchanged bundles are not included. In `import.html` v1,
+floor JSONs are not put in this ZIP; upload those separately.
+
+### `import-v2.html` — the step-based wizard
+
+A six-step redesign of the authoring tool:
+
+1. **Building** — select or create a building.
+2. **Floors** — import/attach floor JSONs and pick the working floor.
+3. **Placement** — drag/rotate, align to ground, fit/centre.
+4. **Walkable** — auto-runs the flood; seeds (multiple outdoor seeds for
+   disconnected outside areas), seals, outdoor-distance gradient and a blue
+   leak path with its wall-entry point.
+5. **Connections** — exterior doors, skybridges, portal cache; connection edits
+   re-run the walkable preview.
+6. **Artifacts** — preflight all affected floors, generate bundles, and download
+   one ZIP with `buildings-config.json`, `osm-paths.json`, changed `.nvg.gz`
+   bundles, **all floor JSONs for the affected buildings**, a manifest, and
+   apply instructions.
+
+Every step has an **Advanced** `<details>` block, so all v1 controls remain
+available. Navigation is soft-gated: steps can be inspected in any order, but
+artifact generation is blocked by specific issues (missing floor JSON, no walls,
+no placement, walkable leak, duplicate id, name collision). A missing exterior
+door is a warning on the **ground floor only**; upper floors do not need one.
+Warnings and errors can be ignored; “Go to step” also selects the affected
+building and floor before switching steps. Ignoring an error dismisses the
+preflight blocker, but hard generation failures (walkable leaks, missing walls)
+still stop the bundle. The tool shares the
+same `localStorage` config key as v1, so edits carry over.
 
 ## `import-progress.html` — import dashboard
 

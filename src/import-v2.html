@@ -1,0 +1,2981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Building import &amp; placement</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    html, body { margin: 0; height: 100%; }
+    #map { position: absolute; inset: 0; }
+    #panel {
+      position: absolute; top: 12px; left: 12px; width: 300px; max-height: calc(100% - 24px);
+      overflow: auto; background: rgba(255,255,255,.96); border-radius: 10px; padding: 14px;
+      box-shadow: 0 2px 14px rgba(0,0,0,.25); font-size: 13px;
+    }
+    #panel h1 { font-size: 15px; margin: 0 0 10px; }
+    #panel h2 { font-size: 13px; margin: 14px 0 6px; }
+    #panel label { display: block; margin: 6px 0; }
+    #panel input[type=text], #panel input[type=number], #panel select, #panel input[type=file] {
+      width: 100%; margin-top: 2px; padding: 4px; font-size: 12px;
+    }
+    #panel .row { display: flex; gap: 6px; margin: 8px 0; }
+    #panel .row > * { flex: 1; }
+    #panel .floor-label {
+      align-self: center; text-align: center;
+      font-size: 13px; font-weight: 600; color: #333333;
+      user-select: none;
+    }
+    #panel button { padding: 6px; font-size: 12px; cursor: pointer; }
+    #drop {
+      border: 2px dashed #999; border-radius: 8px; padding: 14px; text-align: center;
+      color: #666; margin: 8px 0;
+    }
+    #drop.over { border-color: #2980b9; background: #eaf4fb; }
+    #status { margin-top: 16px; padding-top: 4px; color: #555; white-space: pre-wrap; }
+    .hint { color: #888; font-size: 11px; margin: 8px 0 0; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
+
+    #panel button {
+      border: 1px solid #bbbbbb; border-radius: 6px; background: #ffffff;
+      color: #333333; padding: 6px; font-size: 12px; cursor: pointer;
+    }
+    #panel button:disabled { opacity: 0.45; cursor: default; }
+    #panel button.active { background: #2980b9; border-color: #2980b9; color: #ffffff; }
+    #panel .link-btn {
+      display: block; width: 100%; text-align: center; padding: 6px;
+      border: 1px solid #bbbbbb; border-radius: 6px; background: #ffffff;
+      color: #333333; text-decoration: none; font-size: 12px; font-weight: 600;
+    }
+    #panel .link-btn:hover { background: #f2f8ff; }
+
+    .section-doors {
+      background: #f2f8ff; border: 1px solid #cfe3f7; border-radius: 8px;
+      padding: 8px 10px; margin: 10px 0;
+    }
+    .section-doors h2 { margin-top: 0; }
+    .badge {
+      display: inline-block; min-width: 18px; text-align: center;
+      background: #2980b9; color: #ffffff; border-radius: 10px;
+      padding: 0 6px; font-size: 11px; font-weight: 600; vertical-align: middle;
+    }
+    #door-note { margin-top: 6px; }
+    .key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
+    .key.manual { background: #c0392b; }
+    .key.auto { background: #e67e22; }
+    .key.bridge { background: #8e44ad; }
+    .key.elevator { background: #8e44ad; }
+    .key.stairs { background: #e67e22; }
+    .key.shadow { background: #2f6fb5; opacity: .65; }
+    /* Selected building's name + code, above the plan's north edge. */
+    #map .building-label {
+      pointer-events: none;
+      text-align: center;
+      white-space: nowrap;
+      color: #2563eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 800;
+      font-size: 18px;
+      line-height: 1.15;
+      text-shadow: 0 0 4px #fff, 0 0 3px #fff, 0 1px 0 #fff;
+    }
+    #map .building-label .bl-code {
+      margin-top: 1px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #2563eb;
+    }
+
+    /* --- import v2 wizard ------------------------------------------------- */
+    .v2-badge {
+      display: inline-block; margin-left: 6px; padding: 1px 6px;
+      border-radius: 9px; background: #2980b9; color: #fff;
+      font-size: 10px; font-weight: 700; vertical-align: middle;
+    }
+    #wizard-head { margin-bottom: 8px; }
+    #wizard-steps {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 4px 0 8px;
+    }
+    .wiz-chip {
+      border: 1px solid #d0d7de; border-radius: 6px; background: #fff;
+      color: #555; padding: 4px 6px; font-size: 11px; text-align: left;
+      cursor: pointer;
+    }
+    .wiz-chip.active { background: #2980b9; border-color: #2980b9; color: #fff; }
+    .wiz-chip.done { border-color: #2ecc71; color: #1e8449; }
+    .wiz-chip.done.active { color: #fff; background: #2980b9; border-color: #2980b9; }
+    #wizard-context { font-size: 11px; color: #666; margin: 10px 0 4px; }
+    #wizard-issues { margin: 10px 0 6px; }
+    .issue {
+      border-radius: 6px; padding: 5px 7px; margin: 3px 0; font-size: 11px;
+      line-height: 1.35;
+    }
+    .issue.error { background: #fdecea; border: 1px solid #f5b7b1; color: #922b21; }
+    .issue.warn { background: #fef5e7; border: 1px solid #f8c471; color: #7e5109; }
+    .issue button {
+      margin-left: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer;
+    }
+    .wizard-step { display: none; }
+    .wizard-step.active { display: block; }
+    #wizard-foot {
+      position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px;
+      margin: 10px -14px 0; padding: 8px 14px;
+      background: rgba(255,255,255,.98); border-top: 1px solid #ddd;
+    }
+    #wizard-foot #wizStepLabel { flex: 1; text-align: center; font-size: 11px; color: #666; }
+    #wizard-foot button { min-width: 64px; }
+    details.adv {
+      margin: 8px 0; border: 1px solid #e1e5ea; border-radius: 6px;
+      padding: 5px 7px; background: #fafbfc;
+    }
+    details.adv summary { cursor: pointer; font-size: 11px; color: #555; font-weight: 600; }
+    details.adv[open] { background: #f7f9fb; }
+    #floor-list { margin: 6px 0; }
+    .floor-item {
+      display: flex; align-items: center; gap: 5px; width: 100%;
+      padding: 4px 6px; margin: 3px 0; border: 1px solid #e1e5ea;
+      border-radius: 6px; background: #fff; cursor: pointer; text-align: left;
+    }
+    .floor-item.active { border-color: #2980b9; background: #eaf4fb; }
+    .floor-item .fl-id { font-weight: 700; min-width: 34px; }
+    .floor-item .fl-chips { display: flex; gap: 3px; flex-wrap: wrap; }
+    .fl-chip {
+      display: inline-block; padding: 0 4px; border-radius: 7px;
+      font-size: 9px; line-height: 15px; background: #eef1f4; color: #666;
+    }
+    .fl-chip.ok { background: #e8f8f0; color: #1e8449; }
+    .fl-chip.warn { background: #fef5e7; color: #7e5109; }
+    .fl-chip.bad { background: #fdecea; color: #922b21; }
+    #walk-legend {
+      display: none; align-items: center; gap: 5px; margin: 6px 0;
+      font-size: 10px; color: #666;
+    }
+    #walk-legend.on { display: flex; }
+    #walk-legend .bar {
+      flex: 1; height: 8px; border-radius: 4px;
+      background: linear-gradient(90deg, #1e6fff, #00c8c8, #ffe000, #ff3b30);
+    }
+    #artifact-preflight { margin: 12px 0 6px; padding-top: 4px; }
+    .artifact-row {
+      display: flex; gap: 5px; align-items: baseline;
+      font-size: 11px; padding: 3px 0; border-bottom: 1px dashed #eee;
+    }
+    .artifact-row .ar-id { font-weight: 700; min-width: 52px; }
+    .artifact-row .ar-state { margin-left: auto; font-weight: 700; }
+    .artifact-row .ar-state.ok { color: #1e8449; }
+    .artifact-row .ar-state.warn { color: #b9770e; }
+    .artifact-row .ar-state.bad { color: #c0392b; }
+    #wizard-foot { z-index: 2; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <canvas id="walkable-canvas" width="1" height="1"
+    style="position:fixed;left:-10000px;top:0;width:1px;height:1px"></canvas>
+  <div id="panel">
+    <h1>Building import &amp; placement <span class="v2-badge">v2</span></h1>
+
+    <div id="wizard-head">
+      <div id="wizard-steps">
+        <button class="wiz-chip" data-step="1">1 · Building</button>
+        <button class="wiz-chip" data-step="2">2 · Floors</button>
+        <button class="wiz-chip" data-step="3">3 · Placement</button>
+        <button class="wiz-chip" data-step="4">4 · Walkable</button>
+        <button class="wiz-chip" data-step="5">5 · Connections</button>
+        <button class="wiz-chip" data-step="6">6 · Artifacts</button>
+      </div>
+      <div id="wizard-context"></div>
+      <div id="wizard-issues"></div>
+    </div>
+
+    <div id="wizard-body">
+      <section class="wizard-step" data-step="1">
+        <h2>Select or create a building</h2>
+        <div id="drop">Drop a building JSON here<br>(or use the picker)</div>
+        <input type="file" id="file" accept=".json,application/json" multiple />
+        <div class="row">
+          <a class="link-btn" href="/import-progress.html">Import progress &rarr;</a>
+        </div>
+        <label>Building <select id="building"></select></label>
+        <div class="row">
+          <button id="addBuildingBtn" title="Import a floor JSON as a NEW building">+ building</button>
+          <button id="removeBuildingBtn" title="Drop this whole building">− building</button>
+        </div>
+        <label>id <input type="text" id="id" /></label>
+        <label>ground floor <input type="text" id="groundFloor" /></label>
+        <details class="adv">
+          <summary>Advanced building options</summary>
+          <p class="hint" style="margin-top:6px">Drop/pick a JSON here to match an existing building by code or create one.
+            Use <b>+ building</b> to force a new building, or <b>+ floor</b> in the next step to attach floors.</p>
+        </details>
+      </section>
+
+      <section class="wizard-step" data-step="2">
+        <h2>Import floors</h2>
+        <p class="hint" style="margin-top:0">Each floor JSON becomes a floor on the selected building. Floor IDs come
+          from the JSON's <b>level</b>; URLs come from the filename.</p>
+        <input type="file" id="floorFile" accept=".json,application/json" multiple hidden />
+        <input type="file" id="buildingFile" accept=".json,application/json" multiple hidden />
+        <div class="row">
+          <button id="addFloorBtn" title="Attach another floor JSON to this building">+ floor</button>
+          <button id="removeFloorBtn" title="Detach the selected floor">− floor</button>
+        </div>
+        <div class="row">
+          <button id="floorPrevBtn" title="Floor below">&minus;</button>
+          <span id="floorLabel" class="floor-label">&mdash;</span>
+          <button id="floorNextBtn" title="Floor above">+</button>
+        </div>
+        <div id="floor-list"></div>
+        <div id="shadow-note" class="hint" style="margin:2px 0 8px">Shadow: none</div>
+        <details class="adv">
+          <summary>Advanced floor options</summary>
+          <label><input type="checkbox" id="showShadow" checked /> show topmost floor shadow</label>
+          <label><input type="checkbox" id="showRoomLabels" /> show room labels</label>
+          <label>wallLayerId override <input type="text" id="wallLayerId" placeholder="auto" /></label>
+          <label>roomLayerId override <input type="text" id="roomLayerId" placeholder="auto" /></label>
+          <p class="hint">Changing a layer override clears the portal cache and graph hashes for this floor.</p>
+        </details>
+      </section>
+
+      <section class="wizard-step" data-step="3">
+        <h2>Place the plan on the map</h2>
+        <p class="hint" style="margin-top:0">Drag the <b>red dot</b> to move the plan; drag the <b>blue ring</b>
+          to rotate about the dot. Arrow keys nudge 0.1&nbsp;m; <b>[</b>/<b>]</b> rotate 0.05&deg;.</p>
+        <div class="row">
+          <button id="alignBtn" title="Match the ground floor's rotation, then best-fit the position">align to ground</button>
+        </div>
+        <div class="row">
+          <button id="centerBtn" title="Move the plan so its centre lands on the view centre">centre in view</button>
+          <button id="fitBtn" title="Zoom the map to the plan">fit</button>
+        </div>
+        <details class="adv">
+          <summary>Advanced placement numbers</summary>
+          <label>origin lon <input type="text" id="originLon" /></label>
+          <label>origin lat <input type="text" id="originLat" /></label>
+          <label>datum x (in) <input type="text" id="datumX" /></label>
+          <label>datum y (in) <input type="text" id="datumY" /></label>
+          <label>rotation (deg) <input type="number" id="rotDeg" step="0.01" /></label>
+          <label><input type="checkbox" id="showLabels" /> draw room labels</label>
+        </details>
+      </section>
+
+      <section class="wizard-step" data-step="4">
+        <h2>Define the walkable area</h2>
+        <p class="hint" style="margin-top:0">The outside is flooded from a seed beyond the walls; doorways,
+          exits and skybridges are sealed. Everything the flood cannot reach inside the wall bbox is indoor.
+          Add one outdoor seed per disconnected outside area. The preview auto-runs when you open this
+          step and after seed/seal edits.</p>
+        <div class="row">
+          <button id="previewWalkBtn" title="Flood this floor and draw the walkable mask">Preview walkable</button>
+          <button id="clearWalkBtn" title="Remove seeds and seals on this floor">Clear seeds/seals</button>
+        </div>
+        <div class="row">
+          <button id="seedIndoorBtn" title="Tap an indoor room; the flood must not reach it">Seed indoors</button>
+          <button id="seedOutdoorBtn" title="Tap each disconnected outdoor area; repeat for more seeds">Seed outdoors</button>
+        </div>
+        <div class="row">
+          <button id="sealGapBtn" title="Tap two points across a leaking opening">Seal gap</button>
+        </div>
+        <div id="walk-note" class="hint"></div>
+        <div id="walk-legend"><span>seed</span><div class="bar"></div><span>dead end</span></div>
+        <details class="adv">
+          <summary>Advanced walkable options</summary>
+          <div class="row">
+            <button id="removeOutdoorSeedBtn" title="Remove the most recently added outdoor seed">Remove last outdoor seed</button>
+          </div>
+          <label><input type="checkbox" id="walkGradient" checked /> outdoor distance gradient</label>
+          <label><input type="checkbox" id="walkLeakPath" checked /> blue leak path + entry point</label>
+          <p class="hint">The gradient runs from the outdoor seed (blue) to the farthest outdoor cells
+            (red). A leak path is drawn in blue when the flood reaches the indoor label.
+            Add one outdoor seed per disconnected outside area.</p>
+        </details>
+      </section>
+
+      <section class="wizard-step" data-step="5">
+        <h2>Connections</h2>
+        <p class="hint" style="margin-top:0">Mark exterior doors and skybridges. These are routing portals
+          and also seal the walkable flood; the preview re-runs after each edit.</p>
+        <div id="conn-walk-note" class="hint"></div>
+
+        <div class="section-doors">
+          <h2>Exterior doors <span id="door-count" class="badge">0</span></h2>
+          <p class="hint" style="margin-top:0">Pick a mode, then <b>tap the map</b> at each doorway.
+            <span class="key manual"></span> manual &nbsp; <span class="key auto"></span> algorithm</p>
+          <div class="row">
+            <button id="doorPlaceBtn" title="Taps add a door">Place door</button>
+            <button id="doorRemoveBtn" title="Taps remove the nearest door">Remove door</button>
+          </div>
+          <div id="door-note" class="hint"></div>
+          <details class="adv">
+            <summary>Advanced door options</summary>
+            <div class="row">
+              <button id="doorSeedBtn" title="Copy the algorithm's exits as a starting point">Seed from algorithm</button>
+              <button id="doorClearBtn" title="Remove all manual doors on this floor">Clear</button>
+            </div>
+          </details>
+
+          <h2 style="margin-top:12px">Skybridges <span id="bridge-count" class="badge">0</span></h2>
+          <p class="hint" style="margin-top:0">Mark <b>each side</b> of a bridge, on the two floors it joins.
+            Only skybridges connect buildings at upper levels — ordinary rooftop doors stay isolated.
+            <span class="key bridge"></span> skybridge</p>
+          <div class="row">
+            <button id="bridgePlaceBtn" title="Taps add a skybridge portal">Place bridge</button>
+            <button id="bridgeRemoveBtn" title="Taps remove the nearest skybridge portal">Remove bridge</button>
+          </div>
+          <div id="bridge-note" class="hint"></div>
+          <details class="adv">
+            <summary>Advanced skybridge options</summary>
+            <label>destination <select id="bridgeTo"
+              title="Applied to newly placed bridges; use Set destination to change an existing one"></select></label>
+            <div class="row">
+              <button id="bridgeDestBtn" title="Tap a bridge portal to give it the selected destination">Set destination</button>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="wizard-step" data-step="6">
+        <h2>Generate &amp; download all changes</h2>
+        <p class="hint" style="margin-top:0">Preflight checks every affected floor, generates bundles with the
+          walkable mask, and downloads one ZIP with the config, OSM paths, changed bundles, and <b>floor JSONs</b>.</p>
+        <div id="artifact-preflight"></div>
+        <div class="row">
+          <button id="downloadChangedBtn">Generate &amp; download all changes</button>
+        </div>
+        <div id="diff-status" class="hint"></div>
+        <div id="graph-status" class="hint"></div>
+        <div id="osm-status" class="hint"></div>
+        <details class="adv">
+          <summary>Advanced artifact options</summary>
+          <div class="row">
+            <button id="downloadBtn">Download buildings-config.json</button>
+            <button id="downloadOsmBtn" title="Decode the campus OSM tiles into osm-paths.json">Download osm-paths.json</button>
+          </div>
+          <div class="row">
+            <button id="downloadGraphBtn">Download navgraph bundle (current building)</button>
+          </div>
+          <div class="row">
+            <button id="downloadAllGraphsBtn">Download all navgraph bundles</button>
+          </div>
+          <div class="row">
+            <button id="diffBtn">Refresh preflight</button>
+          </div>
+          <div class="row">
+            <button id="reloadBtn" title="Discard local edits and reload buildings-config.json from the server">reload config from server</button>
+          </div>
+          <p class="hint">Edits are cached in this browser until you press reload.</p>
+        </details>
+      </section>
+    </div>
+
+    <div id="wizard-foot">
+      <button id="wizBackBtn">Back</button>
+      <span id="wizStepLabel"></span>
+      <button id="wizNextBtn">Next</button>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    // Surface module/runtime failures in the panel instead of a silent blank.
+    const showImportError = (msg) => {
+      const el = document.getElementById('status');
+      if (el) el.textContent = `JS error: ${msg}`;
+      console.error(msg);
+    };
+    window.addEventListener('error', (e) => showImportError(e.message || String(e.error || e)));
+    window.addEventListener('unhandledrejection', (e) =>
+      showImportError(e.reason?.message || String(e.reason || e)));
+  </script>
+  <script type="module">
+    import * as maplibregl from '/maplibre-gl.mjs';
+    import { makeToLL, lonLatToDxf, metresPerDegree, DXF_SCALE } from './geo.mjs';
+    import { shapeSegments, extractPortals, cachePortals, portalsFromCache, isWallLayer }
+      from './campus.mjs';
+    import { buildGraphState } from './navgraph.mjs';
+    import { encodeFloorBlock, encodeBundleFromBlocks } from './navgraph-codec.mjs';
+    import { gzipBytes } from './navgraph-codec-io.mjs';
+    import { navGraphInputs, graphInputHash, graphFingerprint, linesBBox } from './navgraph-source.mjs';
+    import { doorwaysFromShapes } from './doorways.mjs';
+    import { floodIndoor } from './walkable.mjs';
+    import { makeZip } from './zip.mjs';
+    import { loadOsmShapes } from './osm.mjs';
+    import { hullSamples, bestFitTranslation } from './align.mjs';
+    maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
+
+    const protocol = new pmtiles.Protocol({ metadata: true });
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    const HANDLE_R = 300;            // rotation-handle distance from the datum, inches (~7.6m)
+    // Keep the plan clear of the 300px side panel when fitting.
+    const FIT_PADDING = { left: 340, top: 60, right: 60, bottom: 60 };
+    const LS_KEY = 'import-tool-config';
+    // OSM path cache inputs - must match index.html / gen-osm.mjs.
+    const OSM_ARCHIVE_URL = 'https://uaa-campus-map.net/scak.pmtiles';
+    const OSM_PAD_M = 200;
+    const OSM_ZOOM = 15;
+
+    const $ = id => document.getElementById(id);
+    const map = new maplibregl.Map({
+      container: 'map',
+      zoom: 18,
+      center: [-149.832240, 61.189856],
+      style: 'https://uaa-campus-map.net/style.json',
+    });
+
+    // --- state -------------------------------------------------------------
+    let config = [];            // the buildingsConfig array being edited
+    const floorData = new Map();// `${buildingId}/${floorId}` -> parsed building JSON
+    const floorRaw = new Map(); // same key -> original JSON text (artifact ZIP)
+    let selected = {building: 0, floor: 0};
+    // Boot/render guards: map writes wait for the style layers (setData),
+    // but the panel populates as soon as the config is loaded.
+    let mapReady = false;
+    let refreshing = false, refreshQueued = false;
+    let datumMarker = null, handleMarker = null;
+    let buildingLabelMarker = null;   // selected building name/code above the bbox
+    let didInitialFit = false;      // first load: fit the plan clear of the panel
+    let portalsDirty = false;       // a portal cache was computed since last persist
+    let previewRaf = 0;             // live drag redraw scheduled
+    let editMode = null;            // 'place-door' | ... | 'seed-indoor' | 'seed-outdoor' | 'seal-gap'
+    let sealFirst = null;           // first DXF point of a two-tap flood seal
+    let walkPreview = null;         // last flood result for the selected floor
+    let walkAutoPending = false;    // re-run the flood after the next refresh
+    let osmCacheBBox = null;        // bbox of the served osm-paths.json (undefined = none)
+    let graphBusy = false;          // a bundle generation run is in progress
+    let diffBusy = false;           // deploy-diff calculation/generation
+    let generatedOsmJson = null;    // osm-paths.json produced this session
+    let diffState = null;           // last computed added/changed/removed
+    let wizardStep = 1;             // 1..6
+    let artifactState = null;       // last preflight result
+    let preflightBusy = false;
+    const ignoredIssues = new Set();
+
+    const status = msg => { $('status').textContent = msg; };
+
+    const building = () => config[selected.building];
+    const floor = () => building()?.floors[selected.floor];
+    // Cache by URL: it stays put when a building id is renamed, whereas the
+    // old `${id}/${floorId}` key missed and silently blanked the plan.
+    const floorKey = (b, f) => f.url || `${b.id}/${f.floorId}`;
+
+    /** Numeric rank of a floor id; basements rank below 1, names rank 0. */
+    function floorRank(id) {
+      const s = String(id ?? '').trim().toUpperCase();
+      if (/^B\d+$/.test(s)) return -parseInt(s.slice(1), 10);
+      const n = parseInt(s, 10);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    /**
+     * The building's topmost floor other than the selected one. Used as the
+     * fixed shadow reference when stacking/aligning floors; when the selected
+     * floor is the current top, this is the floor directly below it.
+     */
+    function topmostOtherFloor(b, current) {
+      let best = null, bestRank = -Infinity;
+      for (const ff of b?.floors ?? []) {
+        if (ff === current) continue;
+        const rank = floorRank(ff.floorId);
+        if (rank > bestRank) { bestRank = rank; best = ff; }
+      }
+      return best;
+    }
+
+    // Exterior doors are placed by hand. floor.exits is the manual list; when
+    // absent the algorithm's exits (cached on floor.portals) are shown as a
+    // starting point / fallback.
+    const algorithmicDoors = f => f?.portals?.exits ?? [];
+    const manualDoors = f => f?.exits ?? null;
+    const effectiveDoors = f => manualDoors(f) ?? algorithmicDoors(f);
+    /** Only the ground floor is expected to have exterior doors. */
+    function isGroundFloor(b, f) {
+      const ground = normaliseFloorId(b?.groundFloor ?? '');
+      return !!ground && normaliseFloorId(f?.floorId) === ground;
+    }
+
+    /** Map lon/lat -> raw DXF for a floor (inverse of makeToLL). */
+    function toDxfAt(b, f, lngLat) {
+      const { origin, offset } = placementOf(b, f);
+      const [px, py] = lonLatToDxf(origin, lngLat.lng, lngLat.lat, offset.rot);
+      return [px + offset.x, py + offset.y];
+    }
+
+    function placementOf(b, f) {
+      const origin = f.origin ?? b.origin ?? { lon: 0, lat: 0 };
+      const offset = f.offset ?? b.offset ?? { x: 0, y: 0, rot: 0 };
+      return { origin, offset };
+    }
+
+    // --- OSM path cache (deploy artifact) ----------------------------------
+    // The app's coverage check is portal based: effective exits (manual doors
+    // win) plus cached stairs/elevators, padded by OSM_PAD_M. The import tool
+    // must cover BOTH the draft config and the deployed config (its
+    // localStorage copy can lag the server), and wall extents are included in
+    // the generated bbox so a floor whose portal cache is missing is still
+    // covered. gen-osm.mjs mirrors the portal part.
+    function bboxFromConfig(cfg, padM = OSM_PAD_M, includeWalls = false) {
+      let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      const bump = (lon, lat) => {
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      };
+      for (const b of cfg ?? []) {
+        for (const f of b.floors ?? []) {
+          const toLL = makeToLL(b, f);
+          const p = f.portals ? portalsFromCache(f.portals, toLL)
+                              : { elevators: [], stairs: [], exits: [] };
+          const exits = f.exits?.length
+            ? f.exits.map(e => toLL(e.dxf[0], e.dxf[1]))
+            : p.exits.map(e => e.ll);
+          for (const q of [...p.elevators.map(e => e.ll), ...p.stairs.map(e => e.ll), ...exits]) {
+            bump(q[0], q[1]);
+          }
+          if (includeWalls) {
+            if (Array.isArray(f.wallBBox) && f.wallBBox.length === 4) {
+              bump(f.wallBBox[0], f.wallBBox[1]);
+              bump(f.wallBBox[2], f.wallBBox[3]);
+            } else {
+              const data = floorData.get(floorKey(b, f));
+              if (data) {
+                const bb = floorBBox(data);
+                if (bb) {
+                  for (const [x, y] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
+                    const ll = toLL(x, y);
+                    bump(ll[0], ll[1]);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      if (!isFinite(minLon)) return null;
+      const m = metresPerDegree((minLat + maxLat) / 2);
+      return {
+        minLon: minLon - padM / m.lon, maxLon: maxLon + padM / m.lon,
+        minLat: minLat - padM / m.lat, maxLat: maxLat + padM / m.lat,
+      };
+    }
+
+    function campusBBox(padM = OSM_PAD_M) {
+      return bboxFromConfig(config, padM, false);
+    }
+
+    function unionBBox(a, b) {
+      if (!a) return b;
+      if (!b) return a;
+      return {
+        minLon: Math.min(a.minLon, b.minLon), maxLon: Math.max(a.maxLon, b.maxLon),
+        minLat: Math.min(a.minLat, b.minLat), maxLat: Math.max(a.maxLat, b.maxLat),
+      };
+    }
+
+    // The deployed config is what the live app computes its bbox from. Cache
+    // its bbox for status checks; reload invalidates it.
+    let deployedBBox;   // undefined = not fetched yet
+    async function fetchDeployedConfig() {
+      try {
+        const res = await fetch(`/buildings-config.json?t=${Date.now()}`, { cache: 'no-store' });
+        return res.ok ? await res.json() : null;
+      } catch { return null; }
+    }
+    async function deployedCampusBBox() {
+      if (deployedBBox !== undefined) return deployedBBox;
+      const cfg = await fetchDeployedConfig();
+      deployedBBox = cfg ? bboxFromConfig(cfg, OSM_PAD_M, false) : null;
+      return deployedBBox;
+    }
+
+    /**
+     * Build the bbox for a new osm-paths.json:
+     *  - load every draft floor (and its portal cache),
+     *  - cover the deployed config too (localStorage can lag the server),
+     *  - include wall extents, not just portals.
+     */
+    async function buildOsmBBox() {
+      for (const b of config) {
+        for (const f of b.floors ?? []) {
+          if (!f.url) continue;
+          const data = await loadFloorData(b, f);
+          if (data) ensurePortals(b, f, data);
+        }
+      }
+      const deployed = await fetchDeployedConfig();
+      for (const b of deployed ?? []) {
+        for (const f of b.floors ?? []) {
+          if (f.url) await loadFloorData(b, f);
+        }
+      }
+      const draft = bboxFromConfig(config, OSM_PAD_M, true);
+      const live = bboxFromConfig(deployed ?? [], OSM_PAD_M, true);
+      return unionBBox(draft, live);
+    }
+
+    // Generated bboxes are rounded in JSON; allow a sub-metre tolerance at the
+    // padded boundary so an exact-boundary portal is not reported stale.
+    const BBOX_EPS_DEG = 1e-7;
+    const bboxCovers = (outer, inner) => !!outer && !!inner &&
+      inner.minLon >= outer.minLon - BBOX_EPS_DEG &&
+      inner.maxLon <= outer.maxLon + BBOX_EPS_DEG &&
+      inner.minLat >= outer.minLat - BBOX_EPS_DEG &&
+      inner.maxLat <= outer.maxLat + BBOX_EPS_DEG;
+
+    // Informational only: does the osm-paths.json on the server cover the
+    // campus this tool describes AND the deployed config? Generation stays
+    // manual - the Download osm-paths.json button.
+    async function refreshOsmStatus() {
+      const el = $('osm-status');
+      if (!el) return;
+      if (osmCacheBBox === null) {
+        try {
+          const res = await fetch(`/osm-paths.json?t=${Date.now()}`, { cache: 'no-store' });
+          osmCacheBBox = res.ok ? (await res.json()).bbox : undefined;
+        } catch { osmCacheBBox = undefined; }
+      }
+      const required = unionBBox(campusBBox(), await deployedCampusBBox());
+      if (!required) {
+        el.textContent = 'OSM paths: add a building first';
+      } else if (osmCacheBBox === undefined) {
+        el.textContent = 'OSM paths: none on the server yet - press Download osm-paths.json';
+      } else if (bboxCovers(osmCacheBBox, required)) {
+        el.textContent = 'OSM paths: the server cache covers this campus';
+      } else {
+        el.textContent = 'OSM paths: stale (campus changed) - press Download osm-paths.json';
+      }
+    }
+
+    async function osmPathsStale() {
+      const required = unionBBox(campusBBox(), await deployedCampusBBox());
+      if (!required) return false;
+      if (osmCacheBBox === null) {
+        try {
+          const res = await fetch(`/osm-paths.json?t=${Date.now()}`, { cache: 'no-store' });
+          osmCacheBBox = res.ok ? (await res.json()).bbox : undefined;
+        } catch { osmCacheBBox = undefined; }
+      }
+      return osmCacheBBox === undefined || !bboxCovers(osmCacheBBox, required);
+    }
+
+    // --- map plumbing ------------------------------------------------------
+    const empty = { type: 'FeatureCollection', features: [] };
+    function addFillLayer(id, color, width, before) {
+      if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty });
+      map.addLayer({
+        id, type: 'line', source: id,
+        paint: { 'line-color': color, 'line-width': width },
+      }, before);
+    }
+    function addLabelLayer(id) {
+      if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty });
+      map.addLayer({
+        id, type: 'symbol', source: id,
+        layout: { 'text-field': ['get', 'text'], 'text-size': 11 },
+        paint: { 'text-color': '#1a5276' },
+      });
+    }
+
+    map.on('load', () => {
+      addFillLayer('imp-walls', '#c0392b', 1.6);
+      // Flood-fill walkable preview (canvas overlay, under the wall lines).
+      // Start with a tiny valid quad (a zero-area quad makes MapLibre's
+      // Mercator transform singular) and hide it until a preview is drawn.
+      if (!map.getSource('imp-walkable')) {
+        const c = map.getCenter();
+        const d = 0.0001;
+        map.addSource('imp-walkable', {
+          type: 'canvas',
+          canvas: $('walkable-canvas'),
+          coordinates: [
+            [c.lng - d, c.lat - d], [c.lng + d, c.lat - d],
+            [c.lng + d, c.lat + d], [c.lng - d, c.lat + d],
+          ],
+        });
+      }
+      if (!map.getLayer('imp-walkable')) {
+        map.addLayer({
+          id: 'imp-walkable', type: 'raster', source: 'imp-walkable',
+          paint: { 'raster-opacity': 0 },
+        }, 'imp-walls');
+      }
+      // Topmost-floor shadow: dashed blue, drawn UNDER the selected floor so
+      // the new plan can be aligned on top of it.
+      if (!map.getSource('imp-walls-shadow')) {
+        map.addSource('imp-walls-shadow', { type: 'geojson', data: empty });
+      }
+      map.addLayer({
+        id: 'imp-walls-shadow', type: 'line', source: 'imp-walls-shadow',
+        paint: {
+          'line-color': '#2f6fb5',
+          'line-width': 1.6,
+          'line-opacity': 0.6,
+          'line-dasharray': [2, 2],
+        },
+      }, 'imp-walls');
+      addFillLayer('imp-walls-ghost', '#999999', 1);
+      addFillLayer('imp-footprint', '#2980b9', 1.6);
+      addLabelLayer('imp-labels');
+      // Exterior door dots (manual red, algorithm orange).
+      if (!map.getSource('imp-exits')) map.addSource('imp-exits', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-exits', type: 'circle', source: 'imp-exits',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+      // Skybridge portals (purple).
+      if (!map.getSource('imp-skybridges')) map.addSource('imp-skybridges', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-skybridges', type: 'circle', source: 'imp-skybridges',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      });
+      // Destination text next to each bridge dot (auto / -> ASxxx).
+      if (!map.getSource('imp-skybridge-labels')) map.addSource('imp-skybridge-labels', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-skybridge-labels', type: 'symbol', source: 'imp-skybridge-labels',
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-size': 11,
+          'text-offset': [0, 1.1],
+          'text-anchor': 'top',
+        },
+        paint: { 'text-color': '#8e44ad', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+      });
+      // Elevator / stair portals from the floor's portal cache. Circles use
+      // the app's tier colours plus an E/S label, so they are visible at a
+      // glance and read differently from the purple skybridge dots.
+      const portalLayer = (id, color) => {
+        if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty });
+        map.addLayer({
+          id, type: 'circle', source: id,
+          paint: {
+            'circle-radius': 6,
+            'circle-color': color,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 2,
+          },
+        });
+      };
+      portalLayer('imp-elevators', '#8e44ad');
+      portalLayer('imp-stairs', '#e67e22');
+      if (!map.getSource('imp-portal-labels')) map.addSource('imp-portal-labels', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-portal-labels', type: 'symbol', source: 'imp-portal-labels',
+        layout: {
+          'text-field': ['get', 'text'],
+          'text-size': 9,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#ffffff' },
+      });
+      // Walkable preview: flood path, leak entry, and the two seed points.
+      if (!map.getSource('imp-leak-path')) map.addSource('imp-leak-path', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-leak-path', type: 'line', source: 'imp-leak-path',
+        paint: { 'line-color': '#0066ff', 'line-width': 4, 'line-opacity': 0.95 },
+      });
+      if (!map.getSource('imp-leak-entry')) map.addSource('imp-leak-entry', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-leak-entry', type: 'circle', source: 'imp-leak-entry',
+        paint: {
+          'circle-radius': 7, 'circle-color': '#0066ff',
+          'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
+        },
+      });
+      if (!map.getSource('imp-walk-seeds')) map.addSource('imp-walk-seeds', { type: 'geojson', data: empty });
+      map.addLayer({
+        id: 'imp-walk-seeds', type: 'circle', source: 'imp-walk-seeds',
+        paint: {
+          'circle-radius': 6, 'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
+        },
+      });
+      $('showLabels').addEventListener('change', refresh);
+      map.on('keydown', onKey);
+      map.getContainer().setAttribute('tabindex', '0');
+      mapReady = true;
+      refresh();                     // now the style layers exist
+    });
+
+    // Door / skybridge editing: taps place or remove a portal on the floor,
+    // or set the destination of the nearest bridge.
+    map.on('click', (e) => {
+      const b = building(), f = floor();
+      if (!b || !f || !editMode) return;
+      if (editMode === 'seed-indoor' || editMode === 'seed-outdoor') {
+        const mode = editMode;
+        const dxf = toDxfAt(b, f, e.lngLat);
+        if (mode === 'seed-indoor') {
+          f.indoorSeed = { dxf };
+        } else {
+          const list = f.outdoorSeeds ?? (f.outdoorSeed ? [f.outdoorSeed] : []);
+          list.push({ dxf });
+          f.outdoorSeeds = list;
+          delete f.outdoorSeed;
+        }
+        editMode = null;
+        persist();
+        invalidateGraph(b);
+        status(mode === 'seed-indoor' ? 'Indoor seed set' : 'Outdoor seed added');
+        syncPortalPanel();
+        previewWalkable();
+        return;
+      }
+      if (editMode === 'seal-gap') {
+        const dxf = toDxfAt(b, f, e.lngLat);
+        if (!sealFirst) {
+          sealFirst = dxf;
+          status('Seal: tap the second point across the gap');
+          return;
+        }
+        (f.floodSeals ??= []).push({ dxf: [sealFirst, dxf] });
+        sealFirst = null;
+        editMode = null;
+        persist();
+        invalidateGraph(b);
+        status('Flood seal added');
+        syncPortalPanel();
+        previewWalkable();
+        return;
+      }
+      if (editMode === 'dest-bridge') { setBridgeDest(b, f, e.lngLat); return; }
+      const [action, kind] = editMode.split('-');
+      const key = kind === 'door' ? 'exits' : 'skybridges';
+      if (action === 'place') placePortal(b, f, key, e.lngLat);
+      else removePortal(b, f, key, e.lngLat);
+    });
+
+    // --- geometry ----------------------------------------------------------
+    // Filtering/segmenting a floor's shapes is the expensive part of a redraw;
+    // cache it per floor JSON so live drag previews stay smooth.
+    const wallLinesCache = new WeakMap();
+    const wallLines = data => {
+      let lines = wallLinesCache.get(data);
+      if (!lines) {
+        lines = data.shapes.filter(s => isWallLayer(s.layer)).flatMap(shapeSegments);
+        wallLinesCache.set(data, lines);
+      }
+      return lines;
+    };
+
+    /** Wall features of one floor in lon/lat at its current placement. */
+    function floorFeatures(b, f, data, toLL) {
+      return wallLines(data).map(([a, c]) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [toLL(a[0], a[1]), toLL(c[0], c[1])] },
+      }));
+    }
+
+    /** DXF-space bbox of a floor's walls (for centring/fitting). */
+    function floorBBox(data) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [a, c] of wallLines(data)) {
+        x0 = Math.min(x0, a[0], c[0]); x1 = Math.max(x1, a[0], c[0]);
+        y0 = Math.min(y0, a[1], c[1]); y1 = Math.max(y1, a[1], c[1]);
+      }
+      return isFinite(x0) ? { x0, y0, x1, y1 } : null;
+    }
+
+    async function loadFloorData(b, f) {
+      const key = floorKey(b, f);
+      if (floorData.has(key)) return floorData.get(key);
+      try {
+        const res = await fetch(f.url);
+        if (!res.ok) return null;
+        const text = await res.text();
+        const data = JSON.parse(text);
+        floorData.set(key, data);
+        if (!floorRaw.has(key)) floorRaw.set(key, text);
+        return data;
+      } catch { return null; }
+    }
+
+    // Portals (exterior doorways, stairs, elevators) are expensive to extract
+    // at load time, so the tool caches them onto the floor entry. Only DXF
+    // positions are stored (id + dxf): they do not depend on the placement, so
+    // re-aligning a plan never invalidates them. Identity toLL is fine here -
+    // extractPortals only uses lon/lat for its discarded return values.
+    function ensurePortals(b, f, data) {
+      if (f.portals || !data) return f.portals;
+      f.portals = cachePortals(extractPortals(data.shapes, (x, y) => [x, y]));
+      portalsDirty = true;
+      return f.portals;
+    }
+
+    /** Draw the topmost other floor as a dashed reference under the plan. */
+    function renderShadow(b, f) {
+      const shadow = $('showShadow')?.checked ? topmostOtherFloor(b, f) : null;
+      const data = shadow ? floorData.get(floorKey(b, shadow)) : null;
+      const features = data ? floorFeatures(b, shadow, data, makeToLL(b, shadow)) : [];
+      setData('imp-walls-shadow', { type: 'FeatureCollection', features });
+      if ($('shadow-note')) {
+        $('shadow-note').textContent = shadow
+          ? `Shadow: ${b.id} ${shadow.floorId}${data ? '' : ' (loading…)'}`
+          : 'Shadow: none';
+      }
+    }
+
+    function hideBuildingLabel() {
+      if (buildingLabelMarker) buildingLabelMarker.getElement().hidden = true;
+    }
+
+    /**
+     * Selected building's name + code above the plan. Uses a DOM marker (not a
+     * symbol layer) for true bold text, and is repositioned on every render so
+     * it follows live drags/rotations.
+     */
+    function syncBuildingLabel(b, f) {
+      const data = floorData.get(floorKey(b, f));
+      const bb = data ? floorBBox(data) : null;
+      if (!bb) { hideBuildingLabel(); return; }
+      const toLL = makeToLL(b, f);
+      const corners = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]
+        .map(([x, y]) => toLL(x, y));
+      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const [lon, lat] of corners) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      const name = String(data.building_name ?? b.buildingName ?? '').trim();
+      const uaa = String(data.ID ?? '').trim();
+      const internal = String(b.id ?? '').trim();
+      // UAA code when present; fall back to the internal AS### id.
+      const code = uaa || internal;
+      const primary = name || code;
+      if (!primary) { hideBuildingLabel(); return; }
+
+      if (!buildingLabelMarker) {
+        const el = document.createElement('div');
+        el.className = 'building-label';
+        buildingLabelMarker = new maplibregl.Marker({
+          element: el, anchor: 'bottom', offset: [0, -8],
+        });
+        buildingLabelMarker.addTo(map);
+      }
+      const el = buildingLabelMarker.getElement();
+      el.hidden = false;
+      const nameEl = document.createElement('div');
+      nameEl.className = 'bl-name';
+      nameEl.textContent = primary;
+      el.replaceChildren(nameEl);
+      if (name && code) {
+        const codeEl = document.createElement('div');
+        codeEl.className = 'bl-code';
+        codeEl.textContent = code;
+        el.appendChild(codeEl);
+      }
+      // Centred east/west, anchored at the north edge (the marker's bottom
+      // anchor + pixel offset puts the text just above the bbox).
+      buildingLabelMarker.setLngLat([(minLon + maxLon) / 2, maxLat]);
+    }
+
+    /**
+     * Redraw everything that belongs to the selected floor at its CURRENT
+     * placement. Used by the full refresh and by the live drag preview.
+     */
+    function renderSelectedFloor(b, f) {
+      const toLL = makeToLL(b, f);
+      const data = floorData.get(floorKey(b, f));
+
+      // walls
+      setData('imp-walls', {
+        type: 'FeatureCollection',
+        features: data ? floorFeatures(b, f, data, toLL) : [],
+      });
+
+      // footprint outline: the wall bbox drawn as a rectangle at the placement
+      const fp = [];
+      if (data) {
+        const bb = floorBBox(data);
+        if (bb) {
+          const corners = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1], [bb.x0, bb.y0]];
+          fp.push({
+            type: 'Feature', properties: {},
+            geometry: { type: 'LineString', coordinates: corners.map(([x, y]) => toLL(x, y)) },
+          });
+        }
+      }
+      setData('imp-footprint', { type: 'FeatureCollection', features: fp });
+
+      // room labels of the selected floor
+      const labels = ($('showLabels').checked && data?.text_lines)
+        ? data.text_lines.map(t => ({
+            type: 'Feature', properties: { text: t.text },
+            geometry: { type: 'Point', coordinates: toLL(t.x, t.y) },
+          }))
+        : [];
+      setData('imp-labels', { type: 'FeatureCollection', features: labels });
+
+      // exterior doors: manual if present, else the algorithm's seed
+      const manual = manualDoors(f);
+      const doorFeats = (data ? effectiveDoors(f) : []).map((d) => ({
+        type: 'Feature',
+        properties: { color: manual ? '#c0392b' : '#e67e22' },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-exits', { type: 'FeatureCollection', features: doorFeats });
+
+      // skybridge portals (manual, purple; explicit destination shown)
+      const bridgeFeats = (data ? (f.skybridges ?? []) : []).map((d) => ({
+        type: 'Feature',
+        properties: { color: d.to ? '#8e44ad' : '#b07cc6' },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-skybridges', { type: 'FeatureCollection', features: bridgeFeats });
+      const bridgeLabels = (data ? (f.skybridges ?? []) : []).map((d) => ({
+        type: 'Feature',
+        properties: { text: d.to ? `→ ${d.to}` : 'auto' },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-skybridge-labels', { type: 'FeatureCollection', features: bridgeLabels });
+
+      // Elevators / stairs from the floor's portal cache. Unlike the doors,
+      // this does not need the floor JSON: the cache lives in the config, so
+      // connectors stay visible even before their plan uploads.
+      const elevators = f.portals?.elevators ?? [];
+      const stairs = f.portals?.stairs ?? [];
+      const portalFC = (list) => ({
+        type: 'FeatureCollection',
+        features: list.map((d) => ({
+          type: 'Feature', properties: {},
+          geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+        })),
+      });
+      setData('imp-elevators', portalFC(elevators));
+      setData('imp-stairs', portalFC(stairs));
+      const portalLabelFeats = [
+        ...elevators.map((d) => ['E', d]),
+        ...stairs.map((d) => ['S', d]),
+      ].map(([text, d]) => ({
+        type: 'Feature', properties: { text },
+        geometry: { type: 'Point', coordinates: toLL(d.dxf[0], d.dxf[1]) },
+      }));
+      setData('imp-portal-labels', { type: 'FeatureCollection', features: portalLabelFeats });
+
+      renderShadow(b, f);
+      syncBuildingLabel(b, f);
+    }
+
+    // --- refresh everything from state -------------------------------------
+    // Serialized: overlapping refreshes could race (one starting before the
+    // map layers exist, another after) and finish out of order. The panel is
+    // populated immediately; map writes are skipped until the style is ready
+    // and the map-load refresh fills them in.
+    function refresh() {
+      if (refreshing) { refreshQueued = true; return; }
+      refreshing = true;
+      refreshNow()
+        .catch((e) => console.warn('import refresh failed:', e))
+        .finally(() => {
+          refreshing = false;
+          if (refreshQueued) { refreshQueued = false; refresh(); }
+        });
+    }
+
+    async function refreshNow() {
+      const b = building(), f = floor();
+      refreshOsmStatus();   // fire-and-forget; fetches the server cache once
+      // panel selects
+      const bSel = $('building');
+      bSel.innerHTML = config.map((bb, i) =>
+        `<option value="${i}">${bb.id || '(new)'}</option>`).join('');
+      bSel.value = String(selected.building);
+      // Floor stepper: the label is the floorId; the buttons step within the
+      // selected building (disabled states set in syncPanel).
+      $('floorLabel').textContent = f ? f.floorId : '—';
+      // Bridge destination options: auto plus every OTHER building.
+      const bTo = $('bridgeTo');
+      const curTo = bTo.value;
+      bTo.innerHTML = '<option value="">auto (nearest)</option>' +
+        config.filter((_, i) => i !== selected.building).map(bb =>
+          `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
+      if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
+
+      if (!b || !f) {
+        // Clear every plan layer: otherwise deleting the last building/floor
+        // leaves the previous plan (and its ghost walls/doors) on the map.
+        for (const id of ['imp-walls', 'imp-walls-shadow', 'imp-walls-ghost',
+                          'imp-footprint', 'imp-labels', 'imp-exits', 'imp-skybridges',
+                          'imp-skybridge-labels', 'imp-elevators', 'imp-stairs',
+                          'imp-portal-labels']) {
+          setData(id, empty);
+        }
+        renderWalkable(null);
+        if ($('shadow-note')) $('shadow-note').textContent = 'Shadow: none';
+        hideBuildingLabel();
+        syncMarkers();
+        syncPanel();
+        syncPortalPanel();
+        syncWizard();
+        $('floorPrevBtn').disabled = true;
+        $('floorNextBtn').disabled = true;
+        return;
+      }
+      const data = await loadFloorData(b, f);
+      if (!data && f.url) {
+        status(`could not load ${f.url} - upload that JSON to the server (or re-import it)`);
+      }
+      if (data) ensurePortals(b, f, data);
+
+      // Preload the shadow reference so the first render includes it.
+      const shadow = topmostOtherFloor(b, f);
+      if ($('showShadow').checked && shadow) await loadFloorData(b, shadow);
+      renderSelectedFloor(b, f);
+      renderWalkable(null);   // a preview belongs to the floor it was computed for
+
+      // other buildings as ghosts
+      const ghost = [];
+      for (let i = 0; i < config.length; i++) {
+        if (i === selected.building) continue;
+        for (const ff of config[i].floors) {
+          const g = await loadFloorData(config[i], ff);
+          if (!g) continue;
+          ensurePortals(config[i], ff, g);
+          const gLL = makeToLL(config[i], ff);
+          ghost.push(...floorFeatures(config[i], ff, g, gLL));
+        }
+      }
+      setData('imp-walls-ghost', { type: 'FeatureCollection', features: ghost });
+
+      syncMarkers();
+      syncPanel();
+      syncPortalPanel();
+      syncWizard();
+      if (!didInitialFit && data && mapReady) {
+        didInitialFit = true;
+        const bb = floorBBox(data);
+        if (bb) {
+          const corners = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]
+            .map(([x, y]) => toLL(x, y));
+          map.fitBounds(corners.reduce((b2, [lon, lat]) => b2.extend([lon, lat]),
+            new maplibregl.LngLatBounds(corners[0], corners[0])),
+            FIT_PADDING);
+        }
+      }
+      if (portalsDirty) { portalsDirty = false; persist(); }
+      if (wizardStep === 4 || wizardStep === 5) {
+        walkAutoPending = false;
+        setTimeout(() => previewWalkable(), 0);
+      }
+    }
+
+    function setData(id, fc) {
+      if (!mapReady) return;            // layers don't exist until style load
+      const src = map.getSource(id);
+      if (src) src.setData(fc);
+    }
+
+    // --- exterior door / skybridge editing ---------------------------------
+    function setEditMode(mode) {
+      editMode = editMode === mode ? null : mode;
+      const label = mode.includes('bridge') ? 'skybridge' : 'door';
+      const verb = mode === 'dest-bridge' ? 'set the destination of the nearest'
+        : mode.startsWith('place') ? 'place' : 'remove';
+      status(editMode ? `Tap the map to ${verb} ${label}` : 'Editing off');
+      syncPortalPanel();
+    }
+
+    function setWalkMode(mode) {
+      editMode = editMode === mode ? null : mode;
+      sealFirst = null;
+      const msg = editMode === 'seed-indoor' ? 'Tap an indoor room'
+        : editMode === 'seed-outdoor' ? 'Tap an outdoor point'
+        : editMode === 'seal-gap' ? 'Tap the first point across the gap'
+        : 'Walkable editing off';
+      status(msg);
+      syncPortalPanel();
+    }
+
+    /**
+     * Pick a sensible indoor label: a room-number label in the 0.6–6 m wall
+     * band (farthest in the band), falling back to the closest label. Room
+     * numbers sit in rooms; roof/site/legend labels sit far out in the open and
+     * are excluded by the band. Used as the leak-validation seed.
+     */
+    function autoIndoorSeed(data, toLL) {
+      const labels = (data?.text_lines ?? [])
+        .filter((t) => Number.isFinite(t.x) && Number.isFinite(t.y) && String(t.text ?? '').trim());
+      if (!labels.length) return null;
+      const segs = (data.shapes ?? []).filter((s) => isWallLayer(s.layer)).flatMap(shapeSegments);
+      const info = labels.map((t) => {
+        let d2 = Infinity;
+        for (const [a, b] of segs) {
+          const dx = b[0] - a[0], dy = b[1] - a[1];
+          const l2 = dx * dx + dy * dy;
+          let u = l2 ? ((t.x - a[0]) * dx + (t.y - a[1]) * dy) / l2 : 0;
+          u = u < 0 ? 0 : u > 1 ? 1 : u;
+          const px = a[0] + u * dx, py = a[1] + u * dy;
+          const dd = (t.x - px) ** 2 + (t.y - py) ** 2;
+          if (dd < d2) d2 = dd;
+        }
+        return {
+          t,
+          wallM: Math.sqrt(d2) * DXF_SCALE,
+          roomNo: /^[A-Z]?\d+[A-Z]?\d*$/.test(String(t.text).trim()),
+        };
+      });
+      const room = info.filter((x) => x.roomNo);
+      const pool = room.length ? room : info;
+      const band = pool.filter((x) => x.wallM >= 0.6 && x.wallM <= 6);
+      const pick = band.length
+        ? band.reduce((a, b) => (b.wallM > a.wallM ? b : a))
+        : pool.reduce((a, b) => (b.wallM < a.wallM ? b : a));
+      return toLL(pick.t.x, pick.t.y);
+    }
+
+    /** Flood the selected floor: walls + same-level neighbours + doorways/seals. */
+    async function walkableMaskForFloor(b, f) {
+      const data = await loadFloorData(b, f);
+      if (!data) return { error: `no floor JSON for ${b.id} ${f.floorId}` };
+      if (!f.portals) ensurePortals(b, f, data);
+      const toLL = makeToLL(b, f);
+      const { lines } = navGraphInputs(b, f, data, toLL);
+      if (!lines.length) return { error: 'floor has no wall lines' };
+      const doorways = doorwaysFromShapes(data.shapes, toLL);
+      const bb = linesBBox(lines);
+      if (!bb) return { error: 'floor has no wall bbox' };
+      // Any same-level building whose wall bbox overlaps the flood grid
+      // (wall bbox + 2.0 m; the seed ring itself is 0.5 m).
+      const padM = 0.5;
+      const gridPadM = padM + 1.5;
+      const mpd = metresPerDegree((bb[1] + bb[3]) / 2);
+      const padLon = gridPadM / mpd.lon, padLat = gridPadM / mpd.lat;
+      const extraWallsLL = [];
+      for (const other of config) {
+        if (other === b) continue;
+        for (const ff of other.floors ?? []) {
+          if (!ff.url || floorRank(ff.floorId) !== floorRank(f.floorId)) continue;
+          const od = await loadFloorData(other, ff);
+          if (!od) continue;
+          const oLL = makeToLL(other, ff);
+          const { lines: ol } = navGraphInputs(other, ff, od, oLL);
+          const ob = linesBBox(ol);
+          if (!ob) continue;
+          if (ob[0] > bb[2] + padLon || ob[2] < bb[0] - padLon ||
+              ob[1] > bb[3] + padLat || ob[3] < bb[1] - padLat) continue;
+          extraWallsLL.push(...ol);
+        }
+      }
+      const seals = (f.floodSeals ?? []).map((s) => s.dxf.map(([x, y]) => toLL(x, y)));
+      // Exterior doors and skybridges are openings too: seal a disc around
+      // each portal so the outdoor flood cannot enter the building there.
+      const sealPoints = [];
+      const exitPortals = [...(f.exits ?? []), ...(f.portals?.exits ?? [])];
+      for (const d of exitPortals) {
+        if (d?.dxf) sealPoints.push([toLL(d.dxf[0], d.dxf[1]), 1.2]);
+      }
+      for (const d of f.skybridges ?? []) {
+        if (d?.dxf) sealPoints.push([toLL(d.dxf[0], d.dxf[1]), 1.2]);
+      }
+      const indoorSeed = f.indoorSeed?.dxf
+        ? toLL(f.indoorSeed.dxf[0], f.indoorSeed.dxf[1])
+        : autoIndoorSeed(data, toLL);
+      const outdoorSeeds = [
+        ...(f.outdoorSeeds ?? []).filter((s) => s?.dxf)
+          .map((s) => toLL(s.dxf[0], s.dxf[1])),
+        ...(f.outdoorSeed?.dxf ? [toLL(f.outdoorSeed.dxf[0], f.outdoorSeed.dxf[1])] : []),
+      ];
+      return floodIndoor({
+        wallsLL: lines, extraWallsLL, doorways, seals, sealPoints,
+        indoorSeed, outdoorSeeds, cell: 0.1, padM,
+      });
+    }
+
+    function hslToRgb(h, s, l) {
+      const f = (n) => {
+        const k = (n + h * 12) % 12;
+        const a = s * Math.min(l, 1 - l);
+        return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+      };
+      return [f(0), f(8), f(4)];
+    }
+    /** Blue at the seed -> cyan -> yellow -> red at the far/dead-end cells. */
+    function floodColor(t) {
+      return hslToRgb((1 - Math.max(0, Math.min(1, t))) * 220 / 360, 0.85, 0.5);
+    }
+
+    /** Draw a flood result on the canvas source; null hides it. */
+    function renderWalkable(result) {
+      walkPreview = result ?? null;
+      if (!mapReady) return;
+      const src = map.getSource('imp-walkable');
+      if (!src) return;
+      const canvas = $('walkable-canvas');
+      const clearOverlays = () => {
+        setData('imp-leak-path', { type: 'FeatureCollection', features: [] });
+        setData('imp-leak-entry', { type: 'FeatureCollection', features: [] });
+        setData('imp-walk-seeds', { type: 'FeatureCollection', features: [] });
+        $('walk-legend')?.classList.remove('on');
+      };
+      if (!result?.mask) {
+        if (map.getLayer('imp-walkable')) {
+          map.setPaintProperty('imp-walkable', 'raster-opacity', 0);
+        }
+        clearOverlays();
+        if ($('conn-walk-note')) $('conn-walk-note').textContent = '';
+        return;
+      }
+      const {
+        mask, wall, toLL, outdoor, outdoorDist = null,
+        leakPath = [], leakEntry = null, outdoorSeeds = [], outdoorSeed, indoorSeed,
+      } = result;
+      const { W, H, cell, x0, y0, data } = mask;
+      const showGradient = !!$('walkGradient')?.checked;
+      const showLeak = !!$('walkLeakPath')?.checked;
+      let maxDist = 0;
+      if (showGradient && outdoorDist) {
+        for (let k = 0; k < outdoorDist.length; k++) {
+          if (outdoorDist[k] > maxDist) maxDist = outdoorDist[k];
+        }
+      }
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(W, H);
+      for (let j = 0; j < H; j++) {
+        const row = (H - 1 - j) * W;          // canvas row 0 is north
+        for (let i = 0; i < W; i++) {
+          const k = j * W + i, p = (row + i) * 4;
+          if (wall[k]) { img.data[p + 3] = 0; continue; }
+          if (data[k]) {
+            img.data[p] = 46; img.data[p + 1] = 204; img.data[p + 2] = 113;
+          } else if (outdoor?.[k] && showGradient && outdoorDist && outdoorDist[k] >= 0) {
+            const [r, g, b] = floodColor(maxDist ? outdoorDist[k] / maxDist : 0);
+            img.data[p] = r; img.data[p + 1] = g; img.data[p + 2] = b;
+          } else {
+            img.data[p] = 127; img.data[p + 1] = 140; img.data[p + 2] = 141;
+          }
+          img.data[p + 3] = 170;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      const x1 = x0 + W * cell, y1 = y0 + H * cell;
+      // Canvas coordinates: top-left, top-right, bottom-right, bottom-left.
+      if (map.getLayer('imp-walkable')) {
+        map.setPaintProperty('imp-walkable', 'raster-opacity', 0.55);
+      }
+      src.setCoordinates([
+        toLL([x0, y1]), toLL([x1, y1]), toLL([x1, y0]), toLL([x0, y0]),
+      ]);
+
+      const features = [];
+      if (showLeak && leakPath?.length > 1) {
+        features.push({
+          type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: leakPath },
+        });
+      }
+      setData('imp-leak-path', { type: 'FeatureCollection', features });
+      setData('imp-leak-entry', {
+        type: 'FeatureCollection',
+        features: showLeak && leakEntry
+          ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: leakEntry } }]
+          : [],
+      });
+      const seedFeatures = [];
+      const outSeeds = outdoorSeeds.length ? outdoorSeeds : (outdoorSeed ? [outdoorSeed] : []);
+      for (const ll of outSeeds) {
+        seedFeatures.push({
+          type: 'Feature', properties: { color: '#1e6fff', kind: 'outdoor' },
+          geometry: { type: 'Point', coordinates: ll },
+        });
+      }
+      if (indoorSeed) seedFeatures.push({
+        type: 'Feature', properties: { color: '#2ecc71', kind: 'indoor' },
+        geometry: { type: 'Point', coordinates: indoorSeed },
+      });
+      setData('imp-walk-seeds', { type: 'FeatureCollection', features: seedFeatures });
+      $('walk-legend')?.classList.toggle('on', showGradient);
+      if ($('conn-walk-note')) {
+        $('conn-walk-note').textContent = result.leak
+          ? 'Walkable: LEAK — seal the opening or move the indoor seed.'
+          : 'Walkable: OK. Re-runs automatically after connection edits.';
+      }
+    }
+
+    async function previewWalkable() {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const key = floorKey(b, f);
+      let result;
+      try {
+        result = await walkableMaskForFloor(b, f);
+      } catch (err) {
+        if (floorKey(building(), floor()) !== key) return;
+        renderWalkable(null);
+        walkPreview = { error: String(err.message || err) };
+        $('walk-note').textContent = `Flood failed: ${err.message || err}`;
+        if ($('conn-walk-note')) $('conn-walk-note').textContent = `Walkable: ${err.message || err}`;
+        status(`walkable: ${err.message || err}`);
+        syncWizard();
+        return;
+      }
+      if (floorKey(building(), floor()) !== key) return;
+      if (result.error) {
+        renderWalkable(null);
+        walkPreview = { error: result.error };
+        $('walk-note').textContent = `Flood failed: ${result.error}`;
+        if ($('conn-walk-note')) $('conn-walk-note').textContent = `Walkable: ${result.error}`;
+        status(`walkable: ${result.error}`);
+        syncWizard();
+        return;
+      }
+      renderWalkable(result);
+      const pct = result.indoorCells + result.outdoorCells
+        ? Math.round(100 * result.indoorCells / (result.indoorCells + result.outdoorCells)) : 0;
+      $('walk-note').textContent =
+        `${result.leak ? 'LEAK - ' : ''}indoor ${result.indoorCells} cells (${pct}%), ` +
+        `outdoor ${result.outdoorCells}, ${Math.round(result.ms)}ms` +
+        (result.leak ? ' - add a seal or move the indoor seed' : '');
+      status(result.leak ? 'walkable flood leaked: refuse to generate bundles'
+        : 'walkable preview drawn');
+      syncWizard();
+    }
+
+    const portalLabel = key => key === 'exits' ? 'door' : 'skybridge';
+
+    function placePortal(b, f, key, lngLat) {
+      const dxf = toDxfAt(b, f, lngLat);
+      if (!f[key]) f[key] = [];   // first manual edit starts a fresh list
+      const portal = {id: `${key === 'exits' ? 'door' : 'bridge'}-${Date.now().toString(36)}`, dxf};
+      // Bridges take the destination currently selected in the panel.
+      if (key === 'skybridges' && $('bridgeTo').value) portal.to = $('bridgeTo').value;
+      f[key].push(portal);
+      invalidateGraph(b);
+      walkAutoPending = true;
+      persist(); refresh();
+      status(`placed ${portalLabel(key)}${portal.to ? ` → ${portal.to}` : ''} (${f[key].length} on ${b.id} ${f.floorId})`);
+    }
+
+    /** Give the nearest bridge portal on this floor the selected destination. */
+    function setBridgeDest(b, f, lngLat) {
+      const list = f.skybridges;
+      if (!list || !list.length) { status('no skybridge portals on this floor'); return; }
+      const [dx, dy] = toDxfAt(b, f, lngLat);
+      let best = -1, bestD = Infinity;
+      for (let i = 0; i < list.length; i++) {
+        const d = Math.hypot(list[i].dxf[0] - dx, list[i].dxf[1] - dy);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD * DXF_SCALE > 3) { status(`nearest is ${(bestD * DXF_SCALE).toFixed(1)} m - tap closer`); return; }
+      const to = $('bridgeTo').value;
+      if (to) list[best].to = to; else delete list[best].to;
+      invalidateGraph(b);
+      walkAutoPending = true;
+      persist(); refresh();
+      status(`skybridge destination → ${to || 'auto (nearest)'}`);
+    }
+
+    function removePortal(b, f, key, lngLat) {
+      const list = f[key];
+      if (!list || !list.length) { status(`no manual ${portalLabel(key)}s on this floor`); return; }
+      const [dx, dy] = toDxfAt(b, f, lngLat);
+      let best = -1, bestD = Infinity;
+      for (let i = 0; i < list.length; i++) {
+        const d = Math.hypot(list[i].dxf[0] - dx, list[i].dxf[1] - dy);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD * DXF_SCALE > 3) { status(`nearest is ${(bestD * DXF_SCALE).toFixed(1)} m - tap closer`); return; }
+      list.splice(best, 1);
+      invalidateGraph(b);
+      walkAutoPending = true;
+      persist(); refresh();
+      status(`removed ${portalLabel(key)} (${list.length} on ${b.id} ${f.floorId})`);
+    }
+
+    function syncPortalPanel() {
+      const f = floor();
+      const setActive = (id, on) => { const el = $(id); if (el) el.classList.toggle('active', on); };
+
+      const manual = manualDoors(f);
+      const doorN = effectiveDoors(f).length;
+      $('door-count').textContent = String(doorN);
+      $('door-note').innerHTML = !f ? 'Select a floor.'
+        : manual
+          ? `Manual: ${manual.length} door${manual.length === 1 ? '' : 's'}.`
+          : `Algorithm: ${doorN} door${doorN === 1 ? '' : 's'} (tap <b>Place door</b> or <b>Seed</b> to override).`;
+      $('doorSeedBtn').disabled = !f || !algorithmicDoors(f).length;
+      $('doorClearBtn').disabled = !manual || !manual.length;
+
+      const bridges = f?.skybridges ?? [];
+      $('bridge-count').textContent = String(bridges.length);
+      $('bridge-note').innerHTML = !f ? ''
+        : bridges.length
+          ? `Manual: ${bridges.length} skybridge portal${bridges.length === 1 ? '' : 's'} — ` +
+            bridges.map((d, i) => `${i + 1}: ${d.to ? d.to : 'auto'}`).join(', ') + '.'
+          : 'None. Mark each side of a bridge on the two floors it joins.';
+
+      setActive('doorPlaceBtn', editMode === 'place-door');
+      setActive('doorRemoveBtn', editMode === 'remove-door');
+      setActive('bridgePlaceBtn', editMode === 'place-bridge');
+      setActive('bridgeRemoveBtn', editMode === 'remove-bridge');
+      setActive('bridgeDestBtn', editMode === 'dest-bridge');
+      setActive('seedIndoorBtn', editMode === 'seed-indoor');
+      setActive('seedOutdoorBtn', editMode === 'seed-outdoor');
+      setActive('sealGapBtn', editMode === 'seal-gap');
+
+      const seeds = [];
+      if (f?.indoorSeed) seeds.push('indoor');
+      const outdoorCount = (f?.outdoorSeeds?.length ?? 0) + (f?.outdoorSeed ? 1 : 0);
+      if (outdoorCount) seeds.push(`outdoor${outdoorCount > 1 ? ` ×${outdoorCount}` : ''}`);
+      $('removeOutdoorSeedBtn').disabled = !f || outdoorCount === 0;
+      const nSeals = f?.floodSeals?.length ?? 0;
+      $('walk-note').textContent = !f ? ''
+        : `${seeds.length ? `Seeds: ${seeds.join(' + ')}` : 'Seeds: auto'} · ` +
+          `seals: ${nSeals}` +
+          (walkPreview?.leak ? ' · LEAK' : '');
+    }
+
+    // --- markers: datum (drag to move) + rotation handle --------------------
+    function syncMarkers() {
+      const b = building(), f = floor();
+      if (!b || !f) { datumMarker?.remove(); handleMarker?.remove(); datumMarker = handleMarker = null; return; }
+      const { origin, offset } = placementOf(b, f);
+      const toLL = makeToLL(b, f);
+      const datumLL = toLL(offset.x, offset.y);
+      const handleLL = toLL(offset.x + HANDLE_R, offset.y);
+
+      // NOTE: do not chain .on(...) with .addTo(...) - this MapLibre build's
+      // Evented.on() returns {unsubscribe}, not the marker.
+      if (!datumMarker) {
+        datumMarker = new maplibregl.Marker({ color: '#c0392b', draggable: true });
+        datumMarker.on('dragend', () => {
+          const { lng, lat } = datumMarker.getLngLat();   // LngLat is lng/lat
+          setPlacement({ origin: { lon: lng, lat } });
+        });
+        datumMarker.on('drag', () => {
+          const { lng, lat } = datumMarker.getLngLat();
+          previewPlacement({ origin: { lon: lng, lat } });
+          // Keep the rotation handle attached to the datum while moving.
+          const b2 = building(), f2 = floor();
+          if (b2 && f2 && handleMarker) {
+            const cur = placementOf(b2, f2);
+            handleMarker.setLngLat(makeToLL(b2, f2)(cur.offset.x + HANDLE_R, cur.offset.y));
+          }
+        });
+        datumMarker.setLngLat(datumLL);   // addTo() calls _update(), which reads _lngLat
+        datumMarker.addTo(map);
+      }
+      datumMarker.setLngLat(datumLL);
+
+      if (!handleMarker) {
+        handleMarker = new maplibregl.Marker({ color: '#2980b9', draggable: true });
+        handleMarker.on('dragend', () => {
+          // Read the placement at event time: the marker outlives any number
+          // of refreshes, so values captured at creation would go stale.
+          const { lng, lat } = handleMarker.getLngLat();   // LngLat is lng/lat
+          const cur = placementOf(building(), floor());
+          if (!cur) return;
+          const mpd = metresPerDegree(cur.origin.lat);
+          const east = (lng - cur.origin.lon) * mpd.lon;
+          const north = (lat - cur.origin.lat) * mpd.lat;
+          setPlacement({ offset: { ...cur.offset, rot: Math.atan2(north, east) } });
+        });
+        handleMarker.on('drag', () => {
+          const { lng, lat } = handleMarker.getLngLat();
+          const cur = placementOf(building(), floor());
+          if (!cur) return;
+          const mpd = metresPerDegree(cur.origin.lat);
+          const east = (lng - cur.origin.lon) * mpd.lon;
+          const north = (lat - cur.origin.lat) * mpd.lat;
+          previewPlacement({ offset: { ...cur.offset, rot: Math.atan2(north, east) } });
+        });
+        handleMarker.setLngLat(handleLL);  // addTo() calls _update(), which reads _lngLat
+        handleMarker.addTo(map);
+      }
+      handleMarker.setLngLat(handleLL);
+    }
+
+    function onKey(e) {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const { origin, offset } = placementOf(b, f);
+      const mpd = metresPerDegree(origin.lat);
+      const nudge = 0.1;                       // metres
+      let moved = false, rotated = 0;
+      if (e.key === 'ArrowUp') { origin.lat += nudge / mpd.lat; moved = true; }
+      if (e.key === 'ArrowDown') { origin.lat -= nudge / mpd.lat; moved = true; }
+      if (e.key === 'ArrowLeft') { origin.lon -= nudge / mpd.lon; moved = true; }
+      if (e.key === 'ArrowRight') { origin.lon += nudge / mpd.lon; moved = true; }
+      if (e.key === '[') rotated = -0.05 * Math.PI / 180;
+      if (e.key === ']') rotated = 0.05 * Math.PI / 180;
+      if (!moved && !rotated) return;
+      e.preventDefault();
+      if (moved) setPlacement({ origin });
+      if (rotated) setPlacement({ offset: { ...offset, rot: offset.rot + rotated } });
+    }
+
+    // --- placement edits ---------------------------------------------------
+    /**
+     * Live drag preview: write the placement in memory and redraw the selected
+     * floor on the next frame. Persisting and panel sync wait for dragend.
+     */
+    function previewPlacement(patch) {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const cur = placementOf(b, f);
+      f.origin = patch.origin ?? cur.origin;
+      f.offset = patch.offset ?? cur.offset;
+      if (previewRaf) return;
+      previewRaf = requestAnimationFrame(() => {
+        previewRaf = 0;
+        renderSelectedFloor(building(), floor());
+      });
+    }
+
+    /** Write origin/offset onto the floor (always floor-level) and refresh. */
+    function setPlacement(patch, skipSync = false) {
+      if (previewRaf) { cancelAnimationFrame(previewRaf); previewRaf = 0; }
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const cur = placementOf(b, f);
+      const next = {
+        origin: patch.origin ?? cur.origin,
+        offset: patch.offset ?? cur.offset,
+      };
+      f.origin = next.origin;
+      f.offset = next.offset;
+      invalidateGraph(b);
+      persist();
+      if (!skipSync) refresh();
+    }
+
+    // --- auto-align the selected floor to the ground floor ------------------
+    // Position-only alignment of the selected floor's exterior perimeter
+    // (convex hull of its wall endpoints, sampled every ALIGN_STEP_M) onto the
+    // building's ground floor. The floor's rotation is FORCED to the parent's
+    // rotation first, then only the translation is solved. See align.mjs.
+    const ALIGN_STEP_M = 1.5;
+
+    function placedWallPoints(b, f, data, frame) {
+      const toLL = makeToLL(b, f);
+      const out = [];
+      for (const [a, c] of wallLines(data)) {
+        const la = toLL(a[0], a[1]), lb = toLL(c[0], c[1]);
+        out.push([(la[0] - frame.lon) * frame.mLon, (la[1] - frame.lat) * frame.mLat]);
+        out.push([(lb[0] - frame.lon) * frame.mLon, (lb[1] - frame.lat) * frame.mLat]);
+      }
+      return out;
+    }
+
+    async function alignSelectedFloor() {
+      const b = building(), f = floor();
+      const refIdx = b ? b.floors.findIndex(ff => ff.floorId === b.groundFloor) : -1;
+      if (!b || !f || refIdx < 0 || selected.floor === refIdx) return;
+      const ref = b.floors[refIdx];
+      status('aligning...');
+      const [data, refData] = await Promise.all([loadFloorData(b, f), loadFloorData(b, ref)]);
+      if (!data || !refData) { status('missing floor JSON for this alignment'); return; }
+      // One shared metre frame anchored at the ground floor's origin.
+      const origin = placementOf(b, ref).origin;
+      const mpd = metresPerDegree(origin.lat);
+      const frame = { lon: origin.lon, lat: origin.lat, mLon: mpd.lon, mLat: mpd.lat };
+      const parentRot = placementOf(b, ref).offset.rot;
+
+      // Evaluate the floor as if it already had the parent's rotation; the
+      // fit below may then move it but must not rotate it.
+      const cur = placementOf(b, f);
+      const probe = { ...f, origin: cur.origin, offset: { ...cur.offset, rot: parentRot } };
+      const current = hullSamples(placedWallPoints(b, probe, data, frame), ALIGN_STEP_M);
+      const reference = hullSamples(placedWallPoints(b, ref, refData, frame), ALIGN_STEP_M);
+      if (current.length < 12 || reference.length < 12) {
+        status('not enough wall geometry to align'); return;
+      }
+
+      const best = bestFitTranslation(current, reference);
+      if (!best) { status('alignment failed'); return; }
+
+      const om = [(cur.origin.lon - frame.lon) * frame.mLon,
+                  (cur.origin.lat - frame.lat) * frame.mLat];
+      const nm = [om[0] + best.translation[0], om[1] + best.translation[1]];
+      f.origin = { lon: frame.lon + nm[0] / frame.mLon, lat: frame.lat + nm[1] / frame.mLat };
+      f.offset = { ...cur.offset, rot: parentRot };
+      invalidateGraph(b);
+      persist(); refresh();
+      const deg = ((parentRot * 180 / Math.PI) % 360 + 360) % 360;
+      status(`aligned ${f.floorId} to ${ref.floorId}: rotation locked at ${deg.toFixed(2)}°, ` +
+        `moved ${Math.hypot(best.translation[0], best.translation[1]).toFixed(2)} m, ` +
+        `residual ${best.residual.toFixed(2)} m`);
+    }
+
+    function syncPanel() {
+      const b = building(), f = floor();
+      const enabled = !!b && !!f;
+      for (const el of document.querySelectorAll('#panel input, #panel select, #panel button')) {
+        // File pickers and the add/stepper/align/reload buttons get their own
+        // states below; everything else needs a selected floor.
+        if (el.id === 'reloadBtn' || el.id === 'file' ||
+            el.id === 'floorFile' || el.id === 'buildingFile' ||
+            el.id === 'addBuildingBtn' || el.id === 'addFloorBtn' ||
+            el.id === 'alignBtn' ||
+            el.id === 'floorPrevBtn' || el.id === 'floorNextBtn' ||
+            el.id === 'wizBackBtn' || el.id === 'wizNextBtn' ||
+            el.id === 'removeBuildingBtn' ||
+            el.classList.contains('wiz-chip')) continue;
+        if (el.id === 'downloadGraphBtn' || el.id === 'downloadAllGraphsBtn') {
+          el.disabled = graphBusy;
+          continue;
+        }
+        if (el.id === 'id' || el.id === 'groundFloor') {
+          el.disabled = !b;
+          continue;
+        }
+        if (el.id === 'diffBtn' || el.id === 'downloadChangedBtn') {
+          el.disabled = graphBusy || diffBusy;
+          continue;
+        }
+        el.disabled = !enabled;
+      }
+      // "+ building" must work even with an empty config; "+ floor" needs only
+      // a building (a building may temporarily have zero floors).
+      $('addBuildingBtn').disabled = false;
+      $('addFloorBtn').disabled = !b;
+      // The building picker stays usable when the selected building has no
+      // floors (otherwise deleting the last floor stranded the user there).
+      $('building').disabled = !b;
+      $('removeBuildingBtn').disabled = !b;
+      const prevBtn = $('floorPrevBtn'), nextBtn = $('floorNextBtn');
+      prevBtn.disabled = !enabled || selected.floor <= 0;
+      nextBtn.disabled = !enabled || selected.floor >= (b?.floors.length ?? 0) - 1;
+      const refIdx = b ? b.floors.findIndex(ff => ff.floorId === b.groundFloor) : -1;
+      $('alignBtn').disabled = !enabled || refIdx < 0 || selected.floor === refIdx;
+      if (b) {
+        $('id').value = b.id ?? '';
+        $('groundFloor').value = b.groundFloor ?? '';
+      }
+      if (!b || !f) return;
+      const { origin, offset } = placementOf(b, f);
+      $('id').value = b.id ?? '';
+      $('groundFloor').value = b.groundFloor ?? '';
+      $('showRoomLabels').checked = !!f.showRoomLabels;
+      $('wallLayerId').value = f.wallLayerId ?? '';
+      $('roomLayerId').value = f.roomLayerId ?? '';
+      $('originLon').value = origin.lon.toFixed(8);
+      $('originLat').value = origin.lat.toFixed(8);
+      $('datumX').value = String(offset.x);
+      $('datumY').value = String(offset.y);
+      const deg = ((offset.rot * 180 / Math.PI) % 360 + 360) % 360;
+      $('rotDeg').value = deg.toFixed(2);
+      const graphStatus = $('graph-status');
+      if (graphStatus) {
+        graphStatus.textContent = b
+          ? (b.graphUrl
+              ? `navgraph: ${b.graphUrl}`
+              : 'navgraph: not generated for this building')
+          : '';
+      }
+    }
+
+    // --- wizard -------------------------------------------------------------
+    const WIZARD_STEPS = [
+      'Building', 'Floors', 'Placement', 'Walkable', 'Connections', 'Artifacts',
+    ];
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+
+    function goStep(n) {
+      wizardStep = Math.max(1, Math.min(WIZARD_STEPS.length, n));
+      editMode = null;
+      sealFirst = null;
+      syncPortalPanel();
+      syncWizard();
+      if ((wizardStep === 4 || wizardStep === 5) && building() && floor()) previewWalkable();
+      if (wizardStep === 6) preflightArtifacts();
+    }
+
+    /** Select the issue's building/floor, then jump to its step. */
+    function gotoIssue(issue) {
+      if (!issue) return;
+      const bi = Number.isInteger(issue.buildingIndex) ? issue.buildingIndex : -1;
+      if (bi >= 0 && config[bi]) {
+        const b = config[bi];
+        selected.building = bi;
+        const fi = Number.isInteger(issue.floorIndex) ? issue.floorIndex : -1;
+        selected.floor = fi >= 0 && b.floors?.[fi] ? fi : 0;
+        editMode = null;
+        sealFirst = null;
+        refresh();
+      }
+      goStep(issue.step ?? 1);
+    }
+
+    function syncWizard() {
+      const b = building(), f = floor();
+      document.querySelectorAll('.wizard-step').forEach((el) => {
+        el.classList.toggle('active', +el.dataset.step === wizardStep);
+      });
+      const done = {
+        1: !!b,
+        2: !!b && (b.floors?.length ?? 0) > 0,
+        3: !!b && !!f && (() => {
+          const has = !!(f.origin || b.origin) && !!(f.offset || b.offset);
+          const p = placementOf(b, f);
+          return has && Number.isFinite(p.origin?.lon) && Number.isFinite(p.origin?.lat);
+        })(),
+        4: !!f && !!walkPreview && !walkPreview.error && !walkPreview.leak,
+        5: !!f && effectiveDoors(f).length > 0,
+        6: !!artifactState && !artifactState.issues.some((x) => x.level === 'error' && !ignoredIssues.has(issueKey(x))),
+      };
+      document.querySelectorAll('.wiz-chip').forEach((el) => {
+        const n = +el.dataset.step;
+        el.classList.toggle('active', n === wizardStep);
+        el.classList.toggle('done', !!done[n] && n !== wizardStep);
+      });
+      $('wizard-context').textContent = b
+        ? `${b.id || '(no id)'}${f ? ` · floor ${f.floorId}` : ' · no floor selected'}`
+        : 'No building selected';
+      $('wizStepLabel').textContent = `${wizardStep}/${WIZARD_STEPS.length} · ${WIZARD_STEPS[wizardStep - 1]}`;
+      $('wizBackBtn').disabled = wizardStep === 1;
+      $('wizNextBtn').disabled = wizardStep === WIZARD_STEPS.length;
+      $('wizNextBtn').textContent = wizardStep === WIZARD_STEPS.length ? 'Done' : 'Next';
+      $('removeBuildingBtn').disabled = !b;
+      syncFloorList();
+      renderWizardIssues();
+      const blocked = !!artifactState?.issues?.some((x) => x.level === 'error' && !ignoredIssues.has(issueKey(x)));
+      $('downloadChangedBtn').disabled = graphBusy || diffBusy || preflightBusy || blocked;
+    }
+
+    function syncFloorList() {
+      const el = $('floor-list');
+      if (!el) return;
+      const b = building();
+      if (!b) { el.innerHTML = ''; return; }
+      el.innerHTML = (b.floors ?? []).map((ff, i) => {
+        const data = floorData.get(floorKey(b, ff));
+        const placed = (() => {
+          const has = !!(ff.origin || b.origin) && !!(ff.offset || b.offset);
+          const p = placementOf(b, ff);
+          return has && Number.isFinite(p.origin?.lon) && Number.isFinite(p.origin?.lat);
+        })();
+        const walk = i === selected.floor && walkPreview
+          ? (walkPreview.error ? 'bad' : walkPreview.leak ? 'bad' : 'ok') : '';
+        const walkLabel = i === selected.floor && walkPreview
+          ? (walkPreview.error ? 'walk error' : walkPreview.leak ? 'LEAK' : 'walk ok') : 'walk ?';
+        const graph = b.graphUrl
+          ? (ff.graphHash ? 'bundle' : 'stale')
+          : 'no bundle';
+        return `<button class="floor-item${i === selected.floor ? ' active' : ''}" data-floor="${i}">
+          <span class="fl-id">${esc(ff.floorId)}</span>
+          <span class="fl-chips">
+            <span class="fl-chip ${data ? 'ok' : 'warn'}">${data ? 'json' : 'no json'}</span>
+            <span class="fl-chip ${placed ? 'ok' : 'warn'}">${placed ? 'placed' : 'no place'}</span>
+            <span class="fl-chip ${walk}">${walkLabel}</span>
+            <span class="fl-chip ${graph === 'bundle' ? 'ok' : graph === 'stale' ? 'warn' : ''}">${graph}</span>
+          </span>
+        </button>`;
+      }).join('') || '<div class="hint">No floors yet. Press + floor.</div>';
+    }
+
+    /** Stable key so an ignored issue survives stepIssues -> preflight text changes. */
+    function issueKey(x) {
+      const t = String(x.text ?? '');
+      let code = 'other';
+      if (/name collision/i.test(t)) code = 'name-collision';
+      else if (/collides with an artifact/i.test(t)) code = 'name-clash';
+      else if (/no building selected/i.test(t)) code = 'no-building';
+      else if (/no buildings in the draft/i.test(t)) code = 'no-buildings';
+      else if (/building id is empty|empty id/i.test(t)) code = 'empty-id';
+      else if (/duplicate building id/i.test(t)) code = 'duplicate-id';
+      else if (/no floors/i.test(t)) code = 'no-floors';
+      else if (/ground floor/i.test(t)) code = 'ground-floor';
+      else if (/no json url/i.test(t)) code = 'no-url';
+      else if (/floor json/i.test(t)) code = 'missing-floor-json';
+      else if (/no wall segments/i.test(t)) code = 'no-walls';
+      else if (/no placement/i.test(t)) code = 'no-placement';
+      else if (/flood leaked/i.test(t)) code = 'leak';
+      else if (/flood failed/i.test(t)) code = 'flood-error';
+      else if (/no exterior doors/i.test(t)) code = 'no-doors';
+      else if (/skybridge destination/i.test(t)) code = 'bad-bridge';
+      else if (/deployed buildings-config/i.test(t)) code = 'deployed-config';
+      else if (/osm-paths.*stale/i.test(t)) code = 'osm-stale';
+      else code = t.replace(/^[^:]+:\s*/, '').replace(/[.;].*$/, '').trim().toLowerCase();
+      return `${code}:${x.buildingIndex ?? -1}:${x.floorIndex ?? -1}`;
+    }
+
+    function stepIssues() {
+      const issues = [];
+      const b = building(), f = floor();
+      if (!b) {
+        issues.push({level: 'warn', step: 1, text: 'No building selected. Choose one or import a floor JSON.'});
+        return issues;
+      }
+      const bi = config.indexOf(b);
+      const fi = f ? b.floors.indexOf(f) : -1;
+      if (!String(b.id ?? '').trim()) {
+        issues.push({level: 'error', step: 1, text: 'Building id is empty.', buildingIndex: bi, floorIndex: -1});
+      }
+      if (!(b.floors?.length)) {
+        issues.push({level: 'error', step: 2, text: `${b.id}: no floors yet.`, buildingIndex: bi, floorIndex: -1});
+      }
+      if (f) {
+        const data = floorData.get(floorKey(b, f));
+        if (!data) {
+          issues.push({level: 'warn', step: 2, text: `${b.id}/${f.floorId}: floor JSON is not loaded yet.`, buildingIndex: bi, floorIndex: fi});
+        } else if (!wallLines(data).length) {
+          issues.push({level: 'error', step: 3, text: `${b.id}/${f.floorId}: no wall segments found.`, buildingIndex: bi, floorIndex: fi});
+        }
+        const p = placementOf(b, f);
+        if (!(f.origin || b.origin) || !(f.offset || b.offset) ||
+            !Number.isFinite(p.origin?.lon) || !Number.isFinite(p.origin?.lat)) {
+          issues.push({level: 'error', step: 3, text: `${b.id}/${f.floorId}: no placement origin.`, buildingIndex: bi, floorIndex: fi});
+        }
+        if (walkPreview?.error) {
+          issues.push({level: 'error', step: 4, text: `${b.id}/${f.floorId}: walkable flood failed: ${walkPreview.error}`, buildingIndex: bi, floorIndex: fi});
+        } else if (walkPreview?.leak) {
+          issues.push({level: 'error', step: 4, text: `${b.id}/${f.floorId}: walkable flood leaked. Seal the opening or move the indoor seed.`, buildingIndex: bi, floorIndex: fi});
+        }
+        if (isGroundFloor(b, f) && !effectiveDoors(f).length) {
+          issues.push({level: 'warn', step: 5, text: `${b.id}/${f.floorId}: no exterior doors; routing may fail.`, buildingIndex: bi, floorIndex: fi});
+        }
+      }
+      return issues;
+    }
+
+    function renderWizardIssues() {
+      const el = $('wizard-issues');
+      if (!el) return;
+      let issues = stepIssues();
+      if (wizardStep === 6 && artifactState?.issues) {
+        for (const x of artifactState.issues) {
+          if (!issues.some((y) => y.text === x.text)) issues.push(x);
+        }
+      }
+      issues = issues.filter((x) => !ignoredIssues.has(issueKey(x)));
+      issues = issues.slice(0, 6);
+      el.innerHTML = issues.map((x) => {
+        const bi = Number.isInteger(x.buildingIndex) ? x.buildingIndex : -1;
+        const fi = Number.isInteger(x.floorIndex) ? x.floorIndex : -1;
+        const key = issueKey(x);
+        return `<div class="issue ${x.level}">${esc(x.text)}` +
+          `<button data-goto="${x.step}" data-building="${bi}" data-floor="${fi}">Go to step ${x.step}</button>` +
+          `<button class="ignore" data-ignore="${esc(key)}">Ignore</button>` +
+          `</div>`;
+      }).join('');
+    }
+
+
+    /** A bundle is stale as soon as its geometry or placement changes. */
+    function invalidateGraph(b) {
+      if (!b) return;
+      delete b.graphUrl;
+      delete b.graphFingerprint;
+      for (const f of b.floors ?? []) {
+        delete f.graphHash;
+        delete f.wallBBox;
+      }
+    }
+
+    function persist() {
+      localStorage.setItem(LS_KEY, JSON.stringify(config));
+      if (!preflightBusy) artifactState = null;
+    }
+
+    /** Fetch the deployed config, bypassing both the HTTP and local caches.
+     *  Returns false (leaving `config` untouched) when the server is unreachable. */
+    async function loadServerConfig() {
+      try {
+        const res = await fetch(`/buildings-config.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return false;
+        config = await res.json();
+        return true;
+      } catch { return false; }
+    }
+
+    async function loadInitial() {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) {
+        try { config = JSON.parse(saved); selected = { building: 0, floor: 0 }; return; } catch { /* fall through */ }
+      }
+      await loadServerConfig();
+    }
+
+    /**
+     * Explicit "reload config from server": throw away local edits (the
+     * localStorage copy, in-memory floor JSON and portal caches) and replace
+     * the config with the deployed buildings-config.json. Without this, a
+     * temporary edit persisted silently across every page reload.
+     */
+    async function reloadFromServer() {
+      const ok = await loadServerConfig();
+      if (!ok) { status('reload failed - could not fetch buildings-config.json'); return; }
+      localStorage.removeItem(LS_KEY);
+      floorData.clear();
+      floorRaw.clear();
+      osmCacheBBox = null;
+      deployedBBox = undefined;
+      selected = { building: 0, floor: 0 };
+      editMode = null;
+      didInitialFit = false;
+      portalsDirty = false;
+      generatedOsmJson = null;
+      diffState = null;
+      artifactState = null;
+      wizardStep = 1;
+      refresh();
+      refreshDeployDiff();
+      status(`reloaded ${config.length} building${config.length === 1 ? '' : 's'} from server`);
+    }
+
+    // --- uploads -----------------------------------------------------------
+    // mode: 'auto'     match an existing building by code, else create one
+    //       'floor'    attach every file to the selected building
+    //       'building' always create a new building (batch files by code)
+    async function ingestFiles(files, opts = {}) {
+      const mode = opts.mode ?? 'auto';
+      const attachTo = opts.attachTo ?? null;
+      if (!files.length) return;
+      if (mode === 'floor' && !attachTo) {
+        status('select a building before adding a floor');
+        return;
+      }
+      const created = new Map();       // building_code -> new building in this batch
+      for (const file of files) {
+        let data, text;
+        try { text = await file.text(); data = JSON.parse(text); }
+        catch { status(`✗ ${file.name}: not JSON`); continue; }
+        if (!Array.isArray(data.shapes)) {
+          status(`✗ ${file.name}: not a floor JSON (no shapes array)`);
+          continue;
+        }
+        const code = data.building_code ?? file.name.replace(/\.json$/i, '');
+        const name = data.building_name ?? '';
+        let b = mode === 'floor' ? attachTo
+              : mode === 'building' ? created.get(code)
+              : config.find(x => x.id === code);
+        if (!b) {
+          // A brand-new building gets a placement immediately, centred on the
+          // current view. Without origin/offset its walls used to fail to
+          // render (makeToLL saw undefined), which looked like "the building
+          // wasn't added at all".
+          b = {
+            id: mode === 'building' ? uniqueBuildingId(code) : code,
+            buildingName: name,
+            groundFloor: normaliseFloorId(data.level ?? '01'),
+            floors: [],
+            ...newBuildingPlacement(data),
+          };
+          config.push(b);
+          if (mode === 'building') created.set(code, b);
+        }
+        // A building from an older config (or a previous buggy import) may
+        // still have no placement at all; give it one before it renders.
+        if (!b.origin && !b.offset &&
+            !b.floors.some(fl => fl.origin || fl.offset)) {
+          Object.assign(b, newBuildingPlacement(data));
+        }
+        const floorId = normaliseFloorId(data.level ?? (b.floors.length + 1));
+        const url = '/' + encodeURIComponent(file.name);
+        const existing = b.floors.find(f => normaliseFloorId(f.floorId) === floorId);
+        const entry = existing ?? { floorId };
+        entry.url = url;
+        entry.showRoomLabels = true;
+        delete entry.portals;         // fresh JSON: recompute the portal cache
+        delete entry.graphHash;       // the floor geometry changed
+        delete entry.wallBBox;
+        delete b.graphUrl;
+        delete b.graphFingerprint;
+        b.groundFloor = b.groundFloor ?? floorId;
+        if (!existing) b.floors.push(entry);
+        floorData.set(floorKey(b, entry), data);
+        floorRaw.set(floorKey(b, entry), text);
+        ensurePortals(b, entry, data);
+        status(`✓ ${file.name} → ${b.id} ${floorId} (${data.shapes?.length ?? 0} shapes)`);
+        selected = { building: config.indexOf(b), floor: b.floors.indexOf(entry) };
+      }
+      didInitialFit = false;          // bring the imported plan into view
+      editMode = null;
+      persist();
+      refresh();
+    }
+
+    /** Floor ids are strings in the config; keep numeric levels 2-digit ("01"). */
+    function normaliseFloorId(value) {
+      const s = String(value);
+      return /^\d+$/.test(s) ? s.padStart(2, '0') : s;
+    }
+
+    /** A free building id: code, or code-2, code-3, ... (explicit + building). */
+    function uniqueBuildingId(base) {
+      const taken = new Set(config.map(b => b.id));
+      if (!taken.has(base)) return base;
+      let n = 2;
+      while (taken.has(`${base}-${n}`)) n++;
+      return `${base}-${n}`;
+    }
+
+    /**
+     * Placement for a building created by an upload: put its plan centre on
+     * the current map centre, so it is immediately visible and can be dragged
+     * to its real position. (origin = plan centre, offset = DXF plan centre.)
+     */
+    function newBuildingPlacement(data) {
+      const bb = floorBBox(data);
+      const c = map.getCenter();
+      return {
+        origin: { lon: c.lng, lat: c.lat },
+        offset: {
+          x: bb ? (bb.x0 + bb.x1) / 2 : 0,
+          y: bb ? (bb.y0 + bb.y1) / 2 : 0,
+          rot: 0,
+        },
+      };
+    }
+
+    // --- UI wiring ---------------------------------------------------------
+    function wire(id, ev, fn) { $(id).addEventListener(ev, fn); }
+
+    // Wizard chrome: chips/back/next, floor rail, and issue "go to step" links.
+    document.querySelectorAll('.wiz-chip').forEach((el) => {
+      el.addEventListener('click', () => goStep(+el.dataset.step));
+    });
+    wire('wizBackBtn', 'click', () => goStep(wizardStep - 1));
+    wire('wizNextBtn', 'click', () => goStep(wizardStep + 1));
+    $('floor-list').addEventListener('click', (e) => {
+      const item = e.target.closest('[data-floor]');
+      if (!item) return;
+      selected.floor = +item.dataset.floor;
+      editMode = null;
+      refresh();
+    });
+    $('wizard-issues').addEventListener('click', (e) => {
+      const ignore = e.target.closest('[data-ignore]');
+      if (ignore) {
+        ignoredIssues.add(ignore.dataset.ignore);
+        syncWizard();
+        if (artifactState) renderArtifactPreflight(artifactState);
+        return;
+      }
+      const btn = e.target.closest('[data-goto]');
+      if (btn) {
+        gotoIssue({
+          step: +btn.dataset.goto,
+          buildingIndex: btn.dataset.building === '' ? -1 : +btn.dataset.building,
+          floorIndex: btn.dataset.floor === '' ? -1 : +btn.dataset.floor,
+        });
+      }
+    });
+
+    // Each action owns its own file input: "+ building" can never leak an
+    // attach intent into a later pick, which used to make new buildings get
+    // swallowed by the selected one.
+    const chosen = (e) => {
+      const files = [...e.target.files];
+      e.target.value = '';             // re-picking the same file must fire change
+      return files;
+    };
+    wire('addBuildingBtn', 'click', () => $('buildingFile').click());
+    wire('addFloorBtn', 'click', () => $('floorFile').click());
+    wire('file', 'change', e => ingestFiles(chosen(e), { mode: 'auto' }));
+    wire('floorFile', 'change', e => ingestFiles(chosen(e), { mode: 'floor', attachTo: building() }));
+    wire('buildingFile', 'change', e => ingestFiles(chosen(e), { mode: 'building' }));
+    wire('building', 'change', e => { selected = { building: +e.target.value, floor: 0 }; editMode = null; refresh(); });
+    // Floor stepper (replaces the old floor/floorId/url inputs: floorId comes
+    // from the JSON's metadata and the URL from the uploaded filename, so
+    // neither needs editing).
+    function stepFloor(delta) {
+      const b = building();
+      if (!b) return;
+      selected.floor = Math.max(0, Math.min(b.floors.length - 1, selected.floor + delta));
+      editMode = null;
+      refresh();
+    }
+    wire('floorPrevBtn', 'click', () => stepFloor(-1));
+    wire('floorNextBtn', 'click', () => stepFloor(1));
+    wire('alignBtn', 'click', () => alignSelectedFloor());
+    wire('id', 'change', e => { const b = building(); b.id = e.target.value; invalidateGraph(b); persist(); refresh(); });
+    wire('groundFloor', 'change', e => { building().groundFloor = e.target.value; persist(); refresh(); });
+    wire('showRoomLabels', 'change', e => { floor().showRoomLabels = e.target.checked; persist(); });
+    wire('showShadow', 'change', () => refresh());
+    wire('wallLayerId', 'change', e => { setOpt(floor(), 'wallLayerId', e.target.value); });
+    wire('roomLayerId', 'change', e => { setOpt(floor(), 'roomLayerId', e.target.value); });
+    wire('doorPlaceBtn', 'click', () => setEditMode('place-door'));
+    wire('doorRemoveBtn', 'click', () => setEditMode('remove-door'));
+    wire('bridgePlaceBtn', 'click', () => setEditMode('place-bridge'));
+    wire('bridgeRemoveBtn', 'click', () => setEditMode('remove-bridge'));
+    wire('bridgeDestBtn', 'click', () => setEditMode('dest-bridge'));
+    wire('seedIndoorBtn', 'click', () => setWalkMode('seed-indoor'));
+    wire('seedOutdoorBtn', 'click', () => setWalkMode('seed-outdoor'));
+    wire('sealGapBtn', 'click', () => setWalkMode('seal-gap'));
+    wire('previewWalkBtn', 'click', () => { previewWalkable(); });
+    wire('walkGradient', 'change', () => renderWalkable(walkPreview));
+    wire('walkLeakPath', 'change', () => renderWalkable(walkPreview));
+    wire('clearWalkBtn', 'click', () => {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      delete f.indoorSeed;
+      delete f.outdoorSeed;
+      delete f.outdoorSeeds;
+      delete f.floodSeals;
+      editMode = null;
+      sealFirst = null;
+      persist();
+      invalidateGraph(b);
+      renderWalkable(null);
+      refresh();
+      status('walkable seeds/seals cleared');
+    });
+    wire('removeOutdoorSeedBtn', 'click', () => {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      const list = f.outdoorSeeds ?? (f.outdoorSeed ? [f.outdoorSeed] : []);
+      if (!list.length) { status('no outdoor seeds on this floor'); return; }
+      list.pop();
+      delete f.outdoorSeed;
+      if (list.length) f.outdoorSeeds = list;
+      else delete f.outdoorSeeds;
+      invalidateGraph(b);
+      persist(); refresh();
+      status(list.length ? `outdoor seed removed (${list.length} left)` : 'outdoor seeds cleared');
+    });
+    wire('doorSeedBtn', 'click', () => {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      f.exits = algorithmicDoors(f).map((e, i) => ({id: e.id ?? `exits-${i}`, dxf: e.dxf.slice()}));
+      invalidateGraph(b);
+      walkAutoPending = true;
+      persist(); refresh();
+      status(`seeded ${f.exits.length} doors on ${b.id} ${f.floorId}`);
+    });
+    wire('doorClearBtn', 'click', () => {
+      const b = building(), f = floor();
+      if (!b || !f) return;
+      f.exits = [];
+      invalidateGraph(b);
+      walkAutoPending = true;
+      persist(); refresh();
+      status('cleared manual doors');
+    });
+    wire('originLon', 'change', e => setPlacement({ origin: { ...placementOf(building(), floor()).origin, lon: +e.target.value } }));
+    wire('originLat', 'change', e => setPlacement({ origin: { ...placementOf(building(), floor()).origin, lat: +e.target.value } }));
+    wire('datumX', 'change', e => setPlacement({ offset: { ...placementOf(building(), floor()).offset, x: +e.target.value } }));
+    wire('datumY', 'change', e => setPlacement({ offset: { ...placementOf(building(), floor()).offset, y: +e.target.value } }));
+    wire('rotDeg', 'change', e => setPlacement({ offset: { ...placementOf(building(), floor()).offset, rot: (+e.target.value || 0) * Math.PI / 180 } }));
+    wire('centerBtn', 'click', () => {
+      const b = building(), f = floor();
+      const data = floorData.get(floorKey(b, f));
+      if (!data) return;
+      const bb = floorBBox(data);
+      const { origin, offset } = placementOf(b, f);
+      const c = map.getCenter();
+      // Where the view centre lands in DXF space, then shift the datum so the
+      // plan's own centre lands exactly there.
+      const [cxf, cyf] = lonLatToDxf(origin, c.lng, c.lat, offset.rot);
+      const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+      setPlacement({ origin, offset: { ...offset, x: cx - cxf, y: cy - cyf } });
+    });
+    wire('fitBtn', 'click', () => {
+      const b = building(), f = floor();
+      const data = floorData.get(floorKey(b, f));
+      if (!data) return;
+      const bb = floorBBox(data);
+      const toLL = makeToLL(b, f);
+      const corners = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]].map(([x, y]) => toLL(x, y));
+      map.fitBounds(corners.reduce((bb2, [lon, lat]) => bb2.extend([lon, lat]),
+        new maplibregl.LngLatBounds(corners[0], corners[0])), FIT_PADDING);
+    });
+    wire('removeFloorBtn', 'click', () => {
+      const b = building();
+      invalidateGraph(b);
+      b.floors.splice(selected.floor, 1);
+      selected.floor = Math.max(0, b.floors.length - 1);
+      persist(); refresh();
+    });
+    wire('removeBuildingBtn', 'click', () => {
+      config.splice(selected.building, 1);
+      selected = { building: Math.max(0, config.length - 1), floor: 0 };
+      persist(); refresh();
+    });
+    wire('reloadBtn', 'click', reloadFromServer);
+
+    // --- navGraph bundle generation (deploy artifact) ----------------------
+    // One bundle contains every floor of one building. The bundle generator
+    // intentionally omits weights/passages; the app recomputes the former and
+    // lazily rebuilds the latter.
+    let graphSeq = 0;
+
+    function graphFileName(b) {
+      const base = String(b?.id || 'building').replace(/[^A-Za-z0-9._-]/g, '_') || 'building';
+      return `${base}.nvg.gz`;
+    }
+
+    function downloadBytes(bytes, filename, type = 'application/octet-stream') {
+      const blob = new Blob([bytes], { type });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }
+
+    function setGraphBusy(busy) {
+      graphBusy = busy;
+      $('downloadGraphBtn').disabled = busy;
+      $('downloadAllGraphsBtn').disabled = busy;
+      $('diffBtn').disabled = busy;
+      $('downloadChangedBtn').disabled = busy;
+    }
+
+    function setDiffBusy(busy) {
+      diffBusy = busy;
+      $('diffBtn').disabled = busy || graphBusy;
+      $('downloadChangedBtn').disabled = busy || graphBusy;
+    }
+
+    function makeGraphWorker() {
+      try { return new Worker('/navgraph-bundle-worker.mjs', { type: 'module' }); }
+      catch { return null; }
+    }
+
+    /** Ask the bundle worker for one encoded floor block. */
+    function requestGraphBlock(worker, floorId, walls, doors, sourceHash, mask) {
+      return new Promise((resolve, reject) => {
+        const id = ++graphSeq;
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('navgraph bundle worker timeout'));
+        }, 120000);
+        const cleanup = () => {
+          clearTimeout(timer);
+          worker.removeEventListener('message', onMessage);
+          worker.removeEventListener('error', onError);
+        };
+        const onMessage = (e) => {
+          const d = e.data;
+          if (!d || d.id !== id) return;
+          cleanup();
+          if (d.error) reject(new Error(d.error));
+          else resolve({ floorId: d.floorId, meta: d.meta, block: new Uint8Array(d.block) });
+        };
+        const onError = (e) => {
+          cleanup();
+          reject(e instanceof Error ? e : new Error(e?.message || 'navgraph bundle worker error'));
+        };
+        worker.addEventListener('message', onMessage);
+        worker.addEventListener('error', onError, { once: true });
+        worker.postMessage({ id, floorId, walls, doors, sourceHash, mask });
+      });
+    }
+
+    async function generateBuildingBundle(b) {
+      if (!b?.floors?.length) throw new Error('building has no floors');
+      const blocks = [];
+      let worker = makeGraphWorker();
+      try {
+        for (let i = 0; i < b.floors.length; i++) {
+          const f = b.floors[i];
+          if (!f.url) throw new Error(`${b.id} ${f.floorId} has no floor URL`);
+          status(`building navgraph ${b.id} ${f.floorId} (${i + 1}/${b.floors.length})...`);
+          const data = await loadFloorData(b, f);
+          if (!data) throw new Error(`could not load floor JSON for ${b.id} ${f.floorId}`);
+          const toLL = makeToLL(b, f);
+          const { lines, doors } = navGraphInputs(b, f, data, toLL);
+          const sourceHash = graphInputHash({ lines, doors });
+          f.graphHash = sourceHash;
+          f.wallBBox = linesBBox(lines);
+
+          // Walkability must be settled *before* the navGraph raster: flood the
+          // outside, seal the doors, keep only the indoor cells. Refuse the
+          // bundle on a leak rather than shipping an outdoor-connected graph.
+          const flood = await walkableMaskForFloor(b, f);
+          if (flood.error) {
+            throw new Error(`walkable flood failed for ${b.id} ${f.floorId}: ${flood.error}`);
+          }
+          if (flood.leak) {
+            throw new Error(`walkable flood leaked for ${b.id} ${f.floorId}: ` +
+              'seed indoors / seal the opening, then regenerate');
+          }
+
+          let encoded = null;
+          if (worker) {
+            try {
+              encoded = await requestGraphBlock(worker, f.floorId, lines, doors, sourceHash, flood.mask);
+            } catch (err) {
+              console.warn('bundle worker failed; building synchronously:', err);
+              worker.terminate();
+              worker = null;
+            }
+          }
+          if (!encoded) {
+            // Yield first so the status line can paint before a synchronous build.
+            await new Promise((r) => setTimeout(r));
+            const state = buildGraphState(lines, doors, { passages: false, mask: flood.mask });
+            const { block, meta } = encodeFloorBlock(state, { sourceHash });
+            encoded = { floorId: f.floorId, meta, block };
+          }
+          blocks.push(encoded);
+        }
+      } finally {
+        worker?.terminate();
+      }
+
+      const raw = encodeBundleFromBlocks({ buildingId: b.id, floors: blocks });
+      const gz = await gzipBytes(raw);
+      b.graphFingerprint = graphFingerprint(b.floors.map((f) => ({ floorId: f.floorId, hash: f.graphHash })));
+      return { filename: graphFileName(b), raw, gz, floors: blocks.length };
+    }
+
+    async function downloadBuildingGraph(b) {
+      if (!b) return;
+      const out = await generateBuildingBundle(b);
+      downloadBytes(out.gz, out.filename);
+      b.graphUrl = '/' + out.filename;
+      persist();
+      refresh();
+      status(`downloaded ${out.filename}: ${out.floors} floors, ` +
+        `${(out.raw.length / 1048576).toFixed(1)}MB raw, ` +
+        `${(out.gz.length / 1048576).toFixed(2)}MB gzip - upload it to the server`);
+    }
+
+    // --- deploy diff + single ZIP artifact --------------------------------
+    function canonical(value) {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (value && typeof value === 'object') {
+        const out = {};
+        for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
+        return out;
+      }
+      return value;
+    }
+
+    const buildingKey = (b) => JSON.stringify(canonical(b));
+
+    async function computeDeployDiff() {
+      // Portal caches are part of a building's config entry. Fill any missing
+      // caches first so a cache-only difference is not reported as a changed
+      // building (and so the full config in the ZIP is complete).
+      await ensureAllPortals();
+      await refreshGraphFingerprints();
+      const deployed = await fetchDeployedConfig();
+      if (!deployed) {
+        diffState = null;
+        $('diff-status').textContent = 'Could not fetch the deployed buildings-config.json';
+        return null;
+      }
+      const oldById = new Map(deployed.map((b) => [b.id, b]));
+      const localIds = new Set(config.map((b) => b.id));
+      const added = [], changed = [], removed = [];
+      for (const b of config) {
+        if (!oldById.has(b.id)) added.push(b.id);
+        else if (buildingKey(b) !== buildingKey(oldById.get(b.id))) changed.push(b.id);
+      }
+      for (const b of deployed) if (!localIds.has(b.id)) removed.push(b.id);
+      diffState = {added, changed, removed, deployed};
+      return diffState;
+    }
+
+    function renderDeployDiff(diff) {
+      if (!diff) return;
+      const fmt = (list) => list.length ? list.join(', ') : 'none';
+      $('diff-status').textContent =
+        `+${diff.added.length} added · ~${diff.changed.length} changed · -${diff.removed.length} removed` +
+        ` — added: ${fmt(diff.added)}; changed: ${fmt(diff.changed)}; removed: ${fmt(diff.removed)}`;
+    }
+
+    function floorJsonName(f) {
+      const base = String(f.url ?? '').split('/').pop() || `${f.floorId}.json`;
+      let name = base;
+      try { name = decodeURIComponent(base); } catch { /* keep encoded */ }
+      name = name.replace(/[\\/]/g, '_');
+      return name.toLowerCase().endsWith('.json') ? name : `${name}.json`;
+    }
+
+    async function floorJsonText(b, f) {
+      const key = floorKey(b, f);
+      if (floorRaw.has(key)) return floorRaw.get(key);
+      const data = await loadFloorData(b, f);
+      if (!data) return null;
+      const text = floorRaw.get(key) ?? JSON.stringify(data, null, 2) + '\n';
+      floorRaw.set(key, text);
+      return text;
+    }
+
+    function renderArtifactPreflight(state) {
+      const el = $('artifact-preflight');
+      if (!el) return;
+      if (!state) { el.innerHTML = ''; return; }
+      const active = state.issues.filter((x) => !ignoredIssues.has(issueKey(x)));
+      const errors = active.filter((x) => x.level === 'error');
+      const warns = active.filter((x) => x.level === 'warn');
+      const ignored = state.issues.length - active.length;
+      const head = !state.diff
+        ? 'Could not read the deployed config.'
+        : `${state.diff.added.length} added, ${state.diff.changed.length} changed, ` +
+          `${state.diff.removed.length} removed · ${state.rows.length} floor(s) checked · ` +
+          `${errors.length} blocker(s), ${warns.length} warning(s)` +
+          (ignored ? `, ${ignored} ignored` : '');
+      const rows = state.rows.map((r) =>
+        `<div class="artifact-row"><span class="ar-id">${esc(r.id)}/${esc(r.floor)}</span>` +
+        `<span>${esc(r.note)}</span><span class="ar-state ${r.level}">${esc(r.label)}</span></div>`).join('');
+      el.innerHTML = `<div class="hint">${esc(head)}</div>` + rows;
+    }
+
+    /** Preflight the changed buildings: floor JSON, walls, walkable, exits. */
+    async function preflightArtifacts() {
+      if (preflightBusy) return;
+      preflightBusy = true;
+      syncWizard();
+      $('artifact-preflight').innerHTML = '<div class="hint">Checking floors and walkable masks…</div>';
+      status('preflight: checking affected buildings...');
+      try {
+        const diff = await computeDeployDiff();
+        renderDeployDiff(diff);
+        const issues = [], rows = [];
+        if (!config.length) {
+          issues.push({level: 'error', step: 1, text: 'No buildings in the draft config.'});
+        }
+        if (!diff) {
+          issues.push({level: 'error', step: 6, text: 'Could not fetch the deployed buildings-config.json.'});
+          artifactState = {diff: null, issues, rows};
+          renderArtifactPreflight(artifactState);
+          return;
+        }
+        if (await osmPathsStale()) {
+          issues.push({level: 'warn', step: 6, text: 'osm-paths.json is stale; it will be regenerated in the ZIP.'});
+        }
+        const seenIds = new Map();
+        for (const b of config) {
+          const id = String(b.id ?? '').trim();
+          const bi = config.indexOf(b);
+          if (!id) {
+            issues.push({level: 'error', step: 1, text: 'A building has an empty id.', buildingIndex: bi, floorIndex: -1});
+          } else if (seenIds.has(id)) {
+            issues.push({level: 'error', step: 1, text: `Duplicate building id "${id}".`, buildingIndex: bi, floorIndex: -1});
+          }
+          seenIds.set(id, b);
+        }
+        const seenFloorNames = new Map();
+        const affected = [...diff.added, ...diff.changed];
+        for (const id of affected) {
+          const b = config.find((x) => x.id === id);
+          if (!b) continue;
+          const bi = config.indexOf(b);
+          if (!(b.floors?.length)) {
+            issues.push({level: 'error', step: 2, text: `${id}: no floors to deploy.`, buildingIndex: bi, floorIndex: -1});
+            rows.push({id, floor: '—', level: 'bad', label: 'no floors', note: ''});
+            continue;
+          }
+          if (b.groundFloor && !b.floors.some((ff) => ff.floorId === b.groundFloor)) {
+            issues.push({level: 'warn', step: 2, text: `${id}: ground floor "${b.groundFloor}" is not one of its floors.`, buildingIndex: bi, floorIndex: -1});
+          }
+          for (const f of b.floors ?? []) {
+            const fi = b.floors.indexOf(f);
+            let level = 'ok', label = 'ok', note = '';
+            if (!f.url) {
+              level = 'bad'; label = 'no URL'; note = 'floor has no JSON URL';
+              issues.push({level: 'error', step: 2, text: `${id}/${f.floorId}: floor has no JSON URL.`, buildingIndex: bi, floorIndex: fi});
+              rows.push({id, floor: f.floorId, level, label, note});
+              continue;
+            }
+            const data = await loadFloorData(b, f);
+            if (!data) {
+              level = 'bad'; label = 'missing JSON';
+              note = `not reachable at ${f.url}`;
+              issues.push({level: 'error', step: 2, text: `${id}/${f.floorId}: floor JSON missing at ${f.url}.`, buildingIndex: bi, floorIndex: fi});
+            } else {
+              const toLL = makeToLL(b, f);
+              const { lines } = navGraphInputs(b, f, data, toLL);
+              const p = placementOf(b, f);
+              if (!(f.origin || b.origin) || !(f.offset || b.offset) ||
+                  !Number.isFinite(p.origin?.lon) || !Number.isFinite(p.origin?.lat)) {
+                issues.push({level: 'error', step: 3, text: `${id}/${f.floorId}: no placement origin.`, buildingIndex: bi, floorIndex: fi});
+                if (level === 'ok') { level = 'bad'; label = 'no placement'; }
+              }
+              if (!lines.length) {
+                level = 'bad'; label = 'no walls'; note = 'no wall segments';
+                issues.push({level: 'error', step: 3, text: `${id}/${f.floorId}: no wall segments.`, buildingIndex: bi, floorIndex: fi});
+              } else {
+                const flood = await walkableMaskForFloor(b, f);
+                if (flood.error) {
+                  level = 'bad'; label = 'flood error'; note = flood.error;
+                  issues.push({level: 'error', step: 4, text: `${id}/${f.floorId}: walkable flood failed: ${flood.error}.`, buildingIndex: bi, floorIndex: fi});
+                } else if (flood.leak) {
+                  level = 'bad'; label = 'LEAK'; note = 'walkable flood leaked';
+                  issues.push({level: 'error', step: 4, text: `${id}/${f.floorId}: walkable flood leaked; seal it or move the indoor seed.`, buildingIndex: bi, floorIndex: fi});
+                } else {
+                  note = `${flood.indoorCells} indoor cells`;
+                }
+              }
+              const doors = effectiveDoors(f).length;
+              if (isGroundFloor(b, f) && !doors) {
+                issues.push({level: 'warn', step: 5, text: `${id}/${f.floorId}: no exterior doors; routing may fail.`, buildingIndex: bi, floorIndex: fi});
+                if (level === 'ok') { level = 'warn'; label = 'no doors'; }
+              }
+              for (const sb of f.skybridges ?? []) {
+                if (sb.to && !config.some((x) => x.id === sb.to)) {
+                  issues.push({level: 'warn', step: 5, text: `${id}/${f.floorId}: skybridge destination "${sb.to}" is not a building.`, buildingIndex: bi, floorIndex: fi});
+                  if (level === 'ok') { level = 'warn'; label = 'bad bridge'; }
+                }
+              }
+              const name = floorJsonName(f);
+              if (['buildings-config.json', 'osm-paths.json', 'manifest.json', 'APPLY.txt'].includes(name)) {
+                issues.push({level: 'error', step: 6, text: `${id}/${f.floorId}: floor JSON name "${name}" collides with an artifact.`, buildingIndex: bi, floorIndex: fi});
+                level = 'bad'; label = 'name clash';
+              }
+              if (seenFloorNames.has(name) && seenFloorNames.get(name) !== `${id}/${f.floorId}`) {
+                issues.push({level: 'error', step: 6, text: `Floor JSON name collision: ${name} is used by ${seenFloorNames.get(name)} and ${id}/${f.floorId}.`, buildingIndex: bi, floorIndex: fi});
+                level = 'bad'; label = 'name clash';
+              }
+              seenFloorNames.set(name, `${id}/${f.floorId}`);
+            }
+            rows.push({id, floor: f.floorId, level, label, note});
+          }
+        }
+        artifactState = {diff, issues, rows, affected};
+        renderArtifactPreflight(artifactState);
+        status(errorsText(issues));
+      } catch (err) {
+        artifactState = {diff: null, issues: [{level: 'error', step: 6, text: `Preflight failed: ${err.message || err}`}], rows: []};
+        renderArtifactPreflight(artifactState);
+        status(`preflight failed: ${err.message || err}`);
+      } finally {
+        preflightBusy = false;
+        syncWizard();
+      }
+    }
+
+    function errorsText(issues) {
+      const active = issues.filter((x) => !ignoredIssues.has(issueKey(x)));
+      const errors = active.filter((x) => x.level === 'error').length;
+      const warns = active.filter((x) => x.level === 'warn').length;
+      const ignored = issues.length - active.length;
+      return errors || warns
+        ? `preflight: ${errors} blocker(s), ${warns} warning(s)` + (ignored ? `, ${ignored} ignored` : '')
+        : (ignored ? `preflight: all clear (${ignored} ignored)` : 'preflight: all clear');
+    }
+
+    async function refreshDeployDiff() {
+      if (diffBusy) return;
+      setDiffBusy(true);
+      try {
+        renderDeployDiff(await computeDeployDiff());
+      } catch (err) {
+        $('diff-status').textContent = `diff failed: ${err.message || err}`;
+      } finally {
+        setDiffBusy(false);
+      }
+    }
+
+    /** Recompute each building's graph fingerprint from the local floor data. */
+    async function refreshGraphFingerprints() {
+      for (const b of config) {
+        const hashes = [];
+        let ok = true;
+        for (const f of b.floors ?? []) {
+          if (!f.url) { ok = false; break; }
+          const data = await loadFloorData(b, f);
+          if (!data) { ok = false; break; }
+          const toLL = makeToLL(b, f);
+          const { lines, doors } = navGraphInputs(b, f, data, toLL);
+          const hash = graphInputHash({ lines, doors });
+          f.graphHash = hash;
+          f.wallBBox = linesBBox(lines);
+          hashes.push({ floorId: f.floorId, hash });
+        }
+        if (ok && hashes.length) b.graphFingerprint = graphFingerprint(hashes);
+        else delete b.graphFingerprint;
+      }
+      persist();
+    }
+
+    async function ensureAllPortals() {
+      for (const b of config) {
+        for (const f of b.floors ?? []) {
+          if (f.portals || !f.url) continue;
+          const data = await loadFloorData(b, f);
+          if (data) ensurePortals(b, f, data);
+        }
+      }
+    }
+
+    async function generateOsmPaths() {
+      const bbox = await buildOsmBBox();
+      if (!bbox) throw new Error('add a building before generating OSM paths');
+      const osm = await loadOsmShapes({ url: OSM_ARCHIVE_URL, bbox, zoom: OSM_ZOOM });
+      const out = { bbox, zoom: OSM_ZOOM, stats: osm.stats, shapes: osm.shapes };
+      generatedOsmJson = new TextEncoder().encode(JSON.stringify(out));
+      return {json: generatedOsmJson, bbox, stats: osm.stats, shapes: osm.shapes};
+    }
+
+    async function getOsmPathsForDeploy() {
+      const required = await buildOsmBBox();
+      if (!required) throw new Error('add a building before deploying OSM paths');
+      if (generatedOsmJson) {
+        try {
+          const cache = JSON.parse(new TextDecoder().decode(generatedOsmJson));
+          if (bboxCovers(cache.bbox, required)) return generatedOsmJson;
+        } catch { /* regenerate below */ }
+        generatedOsmJson = null;
+      }
+      try {
+        const res = await fetch(`/osm-paths.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const cache = await res.json();
+          if (bboxCovers(cache.bbox, required)) {
+            generatedOsmJson = new TextEncoder().encode(JSON.stringify(cache));
+            return generatedOsmJson;
+          }
+        }
+      } catch { /* generate below */ }
+      status('osm-paths cache is stale; generating a fresh one...');
+      const out = await generateOsmPaths();
+      return out.json;
+    }
+
+    function deployStamp() {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+    }
+
+    async function downloadChangedZip() {
+      if (!artifactState) await preflightArtifacts();
+      const blockers = (artifactState?.issues ?? []).filter((x) => x.level === 'error' && !ignoredIssues.has(issueKey(x)));
+      if (blockers.length) {
+        status(`artifacts blocked: ${blockers[0].text}${blockers.length > 1 ? ` (+${blockers.length - 1} more)` : ''}`);
+        gotoIssue(blockers[0]);
+        return;
+      }
+      const diff = await computeDeployDiff();
+      renderDeployDiff(diff);
+      if (!diff) return;
+      const osmOutdated = await osmPathsStale();
+      if (!diff.added.length && !diff.changed.length && !diff.removed.length && !osmOutdated) {
+        status('No building or OSM changes since the deployed config');
+        return;
+      }
+
+      setDiffBusy(true);
+      try {
+        await ensureAllPortals();
+        const affected = [...diff.added, ...diff.changed];
+        const nvgFiles = [];
+        const bundleNames = new Map();
+        for (const id of affected) {
+          const b = config.find((x) => x.id === id);
+          if (!b) continue;
+          status(`building ${id} navgraph for deploy...`);
+          const out = await generateBuildingBundle(b);
+          b.graphUrl = '/' + out.filename;
+          nvgFiles.push({name: out.filename, data: out.gz, compress: false});
+          bundleNames.set(id, out.filename);
+        }
+        persist();
+
+        // Floor JSONs are part of the artifact now: a new floor is never
+        // deployed without the file the app fetches.
+        const floorFiles = [];
+        const usedNames = new Map([
+          ['buildings-config.json', 'reserved'],
+          ['osm-paths.json', 'reserved'],
+          ['manifest.json', 'reserved'],
+          ['APPLY.txt', 'reserved'],
+        ]);
+        for (const id of affected) {
+          const b = config.find((x) => x.id === id);
+          if (!b) continue;
+          for (const f of b.floors ?? []) {
+            const text = await floorJsonText(b, f);
+            if (!text) throw new Error(`${id}/${f.floorId}: no floor JSON to include`);
+            const name = floorJsonName(f);
+            const owner = `${id}/${f.floorId}`;
+            if (usedNames.has(name) && usedNames.get(name) !== owner) {
+              throw new Error(`floor JSON name collision: ${name} (${usedNames.get(name)} and ${owner})`);
+            }
+            usedNames.set(name, owner);
+            floorFiles.push({name, data: new TextEncoder().encode(text), compress: true});
+          }
+        }
+
+        const osmJson = await getOsmPathsForDeploy();
+        osmCacheBBox = null;   // refresh status after the download
+        refreshOsmStatus();
+        const configJson = new TextEncoder().encode(JSON.stringify(config, null, 2) + '\n');
+        const manifest = {
+          generatedAt: new Date().toISOString(),
+          buildings: affected.map((id) => {
+            const b = config.find((x) => x.id === id);
+            return {
+              id,
+              bundle: bundleNames.get(id) ?? null,
+              floors: (b?.floors ?? []).map((f) => ({
+                floorId: f.floorId,
+                json: floorJsonName(f),
+                graphHash: f.graphHash ?? null,
+              })),
+            };
+          }),
+          removed: diff.removed,
+          files: [
+            'buildings-config.json',
+            'osm-paths.json',
+            ...nvgFiles.map((x) => x.name),
+            ...floorFiles.map((x) => x.name),
+            'manifest.json',
+            'APPLY.txt',
+          ],
+        };
+        const manifestJson = new TextEncoder().encode(JSON.stringify(manifest, null, 2) + '\n');
+        const applyText = new TextEncoder().encode(
+          'Oropendula deploy artifact\n' +
+          '=========================\n\n' +
+          '1. Copy every file in this ZIP to /usr/share/nginx/html/.\n' +
+          '2. Floor JSONs are included here; no separate upload is needed.\n' +
+          '3. Hard-reload the app (Ctrl+Shift+R) so it fetches the new config/bundles.\n\n' +
+          'Files are listed in manifest.json.\n');
+        const zip = await makeZip([
+          {name: 'buildings-config.json', data: configJson, compress: true},
+          {name: 'osm-paths.json', data: osmJson, compress: true},
+          ...nvgFiles,
+          ...floorFiles,
+          {name: 'manifest.json', data: manifestJson, compress: true},
+          {name: 'APPLY.txt', data: applyText, compress: true},
+        ]);
+        downloadBytes(zip, `oropendula-deploy-${deployStamp()}.zip`, 'application/zip');
+        status(`downloaded deploy zip: +${diff.added.length}, ~${diff.changed.length}, ` +
+          `-${diff.removed.length}; ${nvgFiles.length} bundle(s), ${floorFiles.length} floor JSON(s)` +
+          (osmOutdated ? ', osm-paths refreshed' : ''));
+      } finally {
+        setDiffBusy(false);
+      }
+    }
+
+    function wireDiffButtons() {
+      wire('diffBtn', 'click', () => preflightArtifacts());
+      wire('downloadChangedBtn', 'click', async () => {
+        if (diffBusy || graphBusy || preflightBusy) return;
+        try {
+          if (!artifactState) await preflightArtifacts();
+          const blockers = (artifactState?.issues ?? []).filter((x) => x.level === 'error' && !ignoredIssues.has(issueKey(x)));
+          if (blockers.length) {
+            status(`artifacts blocked: ${blockers[0].text}`);
+            gotoIssue(blockers[0]);
+            return;
+          }
+          await downloadChangedZip();
+          await preflightArtifacts();
+        } catch (err) {
+          status(`deploy zip failed: ${err.message || err}`);
+        }
+      });
+    }
+
+    function wireGraphButtons() {
+      wire('downloadGraphBtn', 'click', async () => {
+        if (graphBusy) return;
+        const b = building();
+        if (!b) { status('select a building first'); return; }
+        setGraphBusy(true);
+        try {
+          await downloadBuildingGraph(b);
+        } catch (err) {
+          status(`navgraph bundle failed: ${err.message || err}`);
+        } finally {
+          setGraphBusy(false);
+        }
+      });
+
+      wire('downloadAllGraphsBtn', 'click', async () => {
+        if (graphBusy) return;
+        if (!config.length) { status('no buildings to generate'); return; }
+        setGraphBusy(true);
+        let ok = 0, failed = 0;
+        try {
+          for (const b of config) {
+            try {
+              await downloadBuildingGraph(b);
+              ok++;
+            } catch (err) {
+              failed++;
+              console.warn(`navgraph bundle failed for ${b.id}:`, err);
+              status(`navgraph ${b.id} failed: ${err.message || err}`);
+            }
+            // Browsers may block several automatic downloads; this gives each
+            // one a separate turn and lets the user grant permission.
+            await new Promise((r) => setTimeout(r, 350));
+          }
+        } finally {
+          setGraphBusy(false);
+        }
+        status(`navgraph bundles: ${ok} downloaded, ${failed} failed` +
+          (failed ? ' - check the status for the first error' : ''));
+      });
+    }
+
+    wire('downloadBtn', 'click', async () => {
+      // Make sure every configured floor carries its portal cache before we
+      // serialize, so the app never has to extract them at load time.
+      status('collecting portals...');
+      await ensureAllPortals();
+      persist();
+      const blob = new Blob([JSON.stringify(config, null, 2) + '\n'], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'buildings-config.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      status(`downloaded ${config.length} buildings`);
+    });
+    wire('downloadOsmBtn', 'click', async () => {
+      // Manual generation: decode the z15 PMTiles tiles covering the campus
+      // and download osm-paths.json, the exact schema gen-osm.mjs writes.
+      status('preparing campus extents...');
+      try {
+        const out = await generateOsmPaths();
+        downloadBytes(out.json, 'osm-paths.json', 'application/json');
+        // Treat it as the campus cache from here on; upload it to the server.
+        osmCacheBBox = out.bbox;
+        refreshOsmStatus();
+        status(`downloaded osm-paths.json: ${out.shapes.length} shapes, ` +
+          `${out.stats.tiles} tiles - upload it to the server`);
+      } catch (e) {
+        status(`OSM fetch failed: ${e.message || e}`);
+      }
+    });
+
+    function setOpt(f, key, value) {
+      if (value) f[key] = value; else delete f[key];
+      // Layer overrides change wall/door extraction: drop the portal cache and
+      // force the bundle (and walkable preview) to be rebuilt.
+      delete f.portals;
+      invalidateGraph(building());
+      walkAutoPending = true;
+      persist(); refresh();
+    }
+
+    // drag-and-drop
+    const drop = $('drop');
+    for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); });
+    for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); });
+    drop.addEventListener('drop', e => ingestFiles([...e.dataTransfer.files], { mode: 'auto' }));
+
+    wireGraphButtons();
+    wireDiffButtons();
+    loadInitial().then(() => { refresh(); refreshDeployDiff(); });
+
+    // Console debugging, same spirit as index.html's window.campusRouter.
+    window.importTool = {
+      map, floorData,
+      get config() { return config; },
+      get selected() { return selected; },
+      refresh,
+    };
+  </script>
+</body>
+</html>

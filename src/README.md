@@ -6,9 +6,9 @@ modules in this directory.
 
 - **Production entry point:** `app.html` → https://uaa-campus-map.net
 - **Demo / tools:** `index.html` (original demo), `import.html` (building
-  authoring + deploy), `places.html` (place nicknames), `locate-test.html`
-  (positioning testbed), `watershed.html` (room/watershed visualiser),
-  `import-progress.html`.
+  authoring + deploy), `import-v2.html` (step-based authoring wizard),
+  `places.html` (place nicknames), `locate-test.html` (positioning testbed),
+  `watershed.html` (room/watershed visualiser), `import-progress.html`.
 - **Data in this directory:** `buildings-config.json` (registrations, portal
   cache, `graphUrl`/hashes), per-floor `*.json`, per-building `*.nvg.gz` navGraph
   bundles, `places.json`, `osm-paths.json`, `style.json`.

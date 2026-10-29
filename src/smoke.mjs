@@ -3305,14 +3305,32 @@ const wallsB = [
 const doorB = { ll: ll(4.5, 0), barrier: [ll(4, 0), ll(5, 0)] };
 const open = floodIndoor({ wallsLL: wallsB, indoorSeed: ll(5, 5) });
 check('an open door floods the room (leak)', !open.error && open.leak);
+check('a leak has a seed-to-room path', !open.error && open.leakPath.length > 1);
+check('a leak marks the wall entry point', !open.error && !!open.leakEntry);
+check('the outdoor flood has a distance field', !open.error && open.outdoorDist.some((d) => d > 0));
 const sealed = floodIndoor({ wallsLL: wallsB, doorways: [doorB], indoorSeed: ll(5, 5) });
 check('a doorway seal stops the flood', !sealed.error && !sealed.leak);
+check('a sealed room has no leak path', !sealed.error && sealed.leakPath.length === 0);
 check('the sealed room is walkable', !sealed.error && at(sealed, 5, 5) === 1);
 check('the doorway threshold stays walkable', !sealed.error && at(sealed, 4.5, 0) === 1);
 const manual = floodIndoor({
   wallsLL: wallsB, seals: [[ll(4, 0), ll(5, 0)]], indoorSeed: ll(5, 5),
 });
 check('a manual seal stops the flood', !manual.error && !manual.leak);
+// A wall across the outer margin splits the outside band; each side needs a
+// seed. Auto-picking must find one per component, and manual seeds must add.
+const splitWall = [[ll(-3, -1), ll(13, -1)]];
+const split = floodIndoor({
+  wallsLL: wallsB, extraWallsLL: splitWall, indoorSeed: ll(5, 5),
+});
+check('a split outside band gets multiple auto seeds',
+  !split.error && split.outdoorSeeds.length >= 2, `${split.outdoorSeeds?.length ?? 0} seed(s)`);
+const multi = floodIndoor({
+  wallsLL: wallsB, extraWallsLL: splitWall,
+  outdoorSeeds: [ll(5, -1.5), ll(5, 11)], indoorSeed: ll(5, 5),
+});
+check('manual multiple outdoor seeds are kept',
+  !multi.error && multi.outdoorSeeds.length === 2, `${multi.outdoorSeeds?.length ?? 0} seed(s)`);
 const autoLeak = floodIndoor({ wallsLL: wallsB });
 check('a fully flooded floor is refused', !!autoLeak.error, autoLeak.error ?? '');
 }
