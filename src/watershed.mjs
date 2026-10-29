@@ -183,15 +183,16 @@ export function watershed({
     const id = labels[k];
     if (id > 0) regions.get(id).area++;
   }
-  const adjacency = new Map();   // "a|b" -> {a,b,maxDT,boundaryCell}
+  const adjacency = new Map();   // "a|b#n" -> {a,b,maxDT,boundaryCell,widthM}
   const boundary = new Uint8Array(N);
+  const byPair = new Map();      // "a|b" -> Set(boundary cell)
   const pair = (a, b, k) => {
     if (!a || !b || a === b) return;
     const lo = Math.min(a, b), hi = Math.max(a, b);
     const key = lo + '|' + hi;
-    let e = adjacency.get(key);
-    if (!e) { e = { a: lo, b: hi, maxDT: 0, boundaryCell: k }; adjacency.set(key, e); }
-    if (DT[k] > e.maxDT) { e.maxDT = DT[k]; e.boundaryCell = k; }
+    let cells = byPair.get(key);
+    if (!cells) { cells = new Set(); byPair.set(key, cells); }
+    cells.add(k);
   };
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const k = j * W + i;
@@ -200,7 +201,35 @@ export function watershed({
     if (i + 1 < W) { const n = k + 1; if (!blocked[n] && labels[n] !== id) { boundary[k] = 1; pair(id, labels[n], k); } }
     if (j + 1 < H) { const n = k + W; if (!blocked[n] && labels[n] !== id) { boundary[k] = 1; pair(id, labels[n], k); } }
   }
-  for (const e of adjacency.values()) e.widthM = e.maxDT * 2 * cell;
+  // Split each region pair's boundary into connected components: two separate
+  // openings between the same two regions are two doors, not one.
+  let edgeSeq = 0;
+  for (const [key, cells] of byPair) {
+    const [a, b] = key.split('|').map(Number);
+    const seen = new Set();
+    for (const start of cells) {
+      if (seen.has(start)) continue;
+      const comp = [];
+      const q = [start];
+      seen.add(start);
+      while (q.length) {
+        const k = q.pop();
+        comp.push(k);
+        const i = k % W, j = (k - i) / W;
+        for (const [di, dj] of DIRS) {
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+          const n = nj * W + ni;
+          if (cells.has(n) && !seen.has(n)) { seen.add(n); q.push(n); }
+        }
+      }
+      let best = comp[0];
+      for (const k of comp) if (DT[k] > DT[best]) best = k;
+      adjacency.set(`${key}#${edgeSeq++}`, {
+        a, b, maxDT: DT[best], boundaryCell: best, widthM: DT[best] * 2 * cell,
+      });
+    }
+  }
 
   // --- greedy colouring (4 by default) --------------------------------------
   const deg = new Map();

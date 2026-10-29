@@ -73,21 +73,22 @@ The right-edge **Locate by room** button places a manual PDR anchor just
 outside a room in the current building. It accepts either a bare room number
 (`211`, defaulting to the current building) or a building code plus room
 (`AS124 211` / `LIB 211`), using the same longest-code matching as the search
-bar. It requires an exact, unique room match. The room's door is found by
+bar. It requires an exact, unique room match. The room's door comes from
+**watershed connectivity** (`watershed.mjs`): the floor is partitioned into room
+and corridor territories from the labels + connector/exit seeds, and a room's
+**doors are the throats (region boundaries)** on its territory. A throat narrower
+than a body (`0.6 m`) is not a door, and doors into rooms smaller than `8 m²`
+(closets/shafts) do not count; **more than one door is refused**
+(`has multiple doors`), and two separate openings between the same two regions
+count separately. The user is placed **0.5 m beyond that throat** into the
+neighbouring region, continuing the line from the room's label through the throat;
+if that line hits a wall it falls back to the nearest walkable point. The pin is
+always walkable.
+
+When a floor cannot be segmented (no walls/labels), Room Pin falls back to
 **routing** from the label to **6 seeded-random other rooms on the same floor**
-and taking the **first doorway each route crosses**; every door is assumed to
-open onto circulation space, so there is no geometric hallway test. The door
-must lie within 15 m of the label. Probes that cross **no** door (same open
-space) are ignored. The **majority first hop door** (the door most probes leave
-through; ties break on distance) is used. "Multiple doors" is reported when two
-probes leave through first doors **≥ 2 m apart** (different openings); doors
-closer than that are one entrance (double door / two leaves). It also refuses
-ambiguous rooms and a floor where the room is the only label. The user is placed
-**0.5 m beyond that door**, continuing the line from the room's label through the
-door into the hallway; when that line runs into a wall (a far, off-axis door,
-e.g. RH 210) it falls back to the barrier normal (away from the label), then the
-route direction, then the nearest walkable point to the door. The pin is always a
-walkable point, backed off toward the door if needed.
+and taking the **first doorway each route crosses** (majority first hop; distinct
+first doors ≥ 2 m apart are multiple doors; the door must be within 15 m).
 
 Door *crossing* is tolerant (`geo.crossBarrier` + `geo.nearestApproach`): a
 doorway's barrier is the wall gap, but the navGraph passage is carved at the

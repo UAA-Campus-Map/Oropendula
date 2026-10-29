@@ -21,6 +21,8 @@ import { watershed } from './watershed.mjs';
 const DOOR_CLUSTER_M = 1.4;   // fallback clustering when a floor has no doorways
 const DOOR_MAX_M = 15;        // label -> door proximity guard
 const DOOR_PASS_M = 0.815;    // route this close to a barrier "goes through" it (ADA 32 in clear)
+const MIN_DOOR_M = 0.6;       // a throat narrower than a body is not a door
+const MIN_ROOM_M2 = 8;        // ignore doors to closets/shafts smaller than this
 const DOOR_APART_M = 2;       // distinct first-doors this far apart = multiple doors
 const PLACE_M = 0.5;          // how far past the door to place the user
 const PROBES = 6;             // random same-floor probe rooms per lookup
@@ -258,16 +260,18 @@ function watershedPin(floor, hit) {
     candidates.push({ edge: e, other, boundaryLL: ll, d });
   }
   if (!candidates.length) return null;
-  // Prefer a connector-seeded corridor; otherwise the largest adjacent region
-  // (a lobby / suite) is the more corridor-like side. Ties: nearest throat.
-  candidates.sort((a, b) => {
-    const ab = a.other.kind === 'background' ? 0 : 1;
-    const bb = b.other.kind === 'background' ? 0 : 1;
-    if (ab !== bb) return ab - bb;
-    if (a.other.area !== b.other.area) return b.other.area - a.other.area;
-    return a.d - b.d;
+  // A door is a real opening (at least a body wide). Doors into tiny rooms
+  // (closets, comms, shafts < 8 m2) do not count. More than one door on the
+  // room's territory is genuinely ambiguous: refuse rather than guess.
+  const areaOf = (r) => (r ? r.area * ws.cell * ws.cell : 0);
+  const doors = candidates.filter((c) => {
+    if (c.edge.widthM < MIN_DOOR_M) return false;
+    if (c.other.kind === 'room' && areaOf(c.other) < MIN_ROOM_M2) return false;
+    return true;
   });
-  const chosen = candidates[0];
+  if (doors.length > 1) return { error: 'multiple', count: doors.length };
+  if (!doors.length) return null;
+  const chosen = doors[0];
 
   // Outward direction = label -> throat, then 0.5 m into the corridor side.
   const p = g.toM(chosen.boundaryLL), lb = g.toM(hit.labelLL);
@@ -298,6 +302,7 @@ export function resolveRoomPin(building, hit, campusRouter) {
   const floor = hit.floor;
   // Primary: watershed room territory -> the throat shared with the corridor.
   const ws = watershedPin(floor, hit);
+  if (ws?.error === 'multiple') return { error: `Room ${hit.text} has multiple doors.` };
   if (ws) return { building, floor, room: hit.text, doorLL: ws.doorLL, ll: ws.ll };
   // Fallback: route probes + first-door crossing (the previous method).
   const candidates = sampleTargets(floor, hit.labelLL,

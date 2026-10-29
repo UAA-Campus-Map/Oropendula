@@ -17,45 +17,43 @@ the tests: `floorDoorways`, `firstDoorCrossing`, `sampleTargets`,
 
 An exact room's **door** is not the room's number label and not simply the
 nearest doorway — for a large or suite room the nearest doorway may belong to a
-neighbour. The door is found by **routing**:
+neighbour. The door is found from **watershed connectivity**:
 
 1. **Exact, unique room.** `findRoomExact` (from `places.mjs`); a label drawn on
-   more than one floor is refused. No other same-floor room label →
-   `Room X is the only room on its floor.`
-2. **Probe the floor.** Route from the label to **6 seeded-random other rooms on
-   the same floor**. The seed is `building|floor|room`, so a room's probe set is
-   deterministic across runs. Each probe contributes its **first door** crossed.
-3. **Tolerant crossing** (`geo.crossBarrier` + `geo.nearestApproach`): a door
-   counts as crossed when the route crosses its barrier line (±0.4 m past the
-   jamb) **or passes within 0.815 m** (ADA 32 in clear width) of the barrier. This
-   is essential because the navGraph passage is carved at the DOOR leaf midpoint,
-   offset from the wall-gap barrier by ~0.3–0.5 m, so a strict in-segment test
-   misses real doors (most of SU-02).
-4. **Majority first hop wins** (ties break on distance). Probes that cross no door
-   (same open space) are ignored. A door farther than 15 m from the label is not
-   the room's. `Room X has multiple doors.` is reported only when two probes leave
-   through first doors **≥ 2 m apart** (different openings); closer doors are one
-   entrance (a double door / two leaves).
-5. **Placement.** 0.5 m beyond the chosen door, continuing the **label → door**
-   line (the label is a stable inside-the-room reference). When that line runs
-   into a wall (a far, off-axis door — RH 210), it falls back to the **barrier
-   normal away from the label**, then the **route direction**, then the **nearest
-   walkable point** to the door. The pin is always a walkable point, backed off
-   toward the door (0.5 / 0.4 / 0.3 / 0.2 m) if needed.
+   more than one floor is refused.
+2. **Watershed territories.** `watershed.mjs` partitions the floor from the room
+   labels + connector/exit seeds. A room's **doors are the throats (region
+   boundaries)** on its territory. A throat narrower than a body (`0.6 m`) is not
+   a door, and doors into rooms smaller than `8 m²` (closets/shafts) do not count.
+   Two separate openings between the same two regions are counted
+   separately (boundary cells split into connected components). **More than one
+   door → `Room X has multiple doors.`**; one door is used.
+3. **Placement.** 0.5 m beyond the throat into the neighbouring region,
+   continuing the **label → throat** line (the label is a stable inside-the-room
+   reference). If that line hits a wall, fall back to the **nearest walkable point**
+   to the throat. The pin is always walkable.
+4. **Fallback (no watershed).** When the floor cannot be segmented (no
+   walls/labels), route from the label to **6 seeded-random other rooms on the
+   same floor** and take each probe's **first door** crossed (tolerant crossing:
+   barrier line ±0.4 m past a jamb, or within 0.815 m / ADA 32 in of it, because
+   the navGraph passage is offset from the wall-gap barrier). Majority first hop
+   wins; distinct first doors ≥ 2 m apart are multiple doors.
 
 ## Errors
 
-- `Room X is the only room on its floor.` — no other same-floor label to probe.
-- `Room X has no nearby doors.` — no probe crossed a door within the 15 m guard.
-- `Room X has multiple doors.` — two probes' first doors are ≥ 2 m apart.
+- `Room X is the only room on its floor.` — no other same-floor label to probe
+  (fallback path only).
+- `Room X has no nearby doors.` — no door found (fallback: no probe crossed one).
+- `Room X has multiple doors.` — more than one watershed throat ≥ 0.6 m (fallback:
+  two probes' first doors ≥ 2 m apart).
 - `Room X: couldn't find a spot outside the door.` — a door was found but no
-  walkable placement point (distinct from "no nearby doors").
+  walkable placement point.
 
 ## Hard-won notes
 
 - The **old** approach (probe an 8 m-away door and prove no other doorway is
-  crossed) rejected most rooms; every door is now assumed to open onto
-  circulation space, so the geometric "hallway" test is gone.
+  crossed) rejected most rooms; doors now come from watershed connectivity, so an
+  opening wide enough to walk through is a door regardless of the DXF leaf.
 - The placement side was once derived from the **route tangent**, which is
   meaningless for a parallel graze (`n · dir ≈ 0` gives a coin flip). The room
   **label** is the reliable side reference.

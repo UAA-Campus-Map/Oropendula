@@ -1126,29 +1126,29 @@ outside the room's door. `resolveRoomPin(building, hit, campusRouter)`:
 
 1. **Exact, unique room** (`findRoomExact`); a duplicate label across floors is
    refused. No other same-floor room label -> `is the only room on its floor`.
-2. **Probe the floor.** Route from the label to **6 seeded-random other rooms on
-   the same floor** (seeded from `building|floor|room`, so a room's probe set is
-   stable across runs). Each probe contributes its **first door** crossed.
-3. **Tolerant crossing** (`geo.crossBarrier` + `geo.nearestApproach`): a door
-   counts as crossed when the route crosses its **barrier line** (±0.4 m past the
-   jamb) **or passes within 0.815 m** (ADA 32 in clear width) of the barrier.
-   This matters because the navGraph passage is carved at the DOOR leaf midpoint,
-   offset from the wall-gap barrier by ~0.3-0.5 m, so a strict in-segment
-   intersection misses real doors (most of SU-02).
-4. **Majority first hop** wins (ties break on distance). Probes that cross no
-   door are ignored. `multiple doors` is reported only when two probes leave
-   through first doors **>= 2 m apart** (different openings); closer doors are one
-   entrance (double door / two leaves). A door farther than 15 m from the label is
-   not the room's.
-5. **Placement**: 0.5 m beyond the door, continuing the **label -> door** line
-   (the label is a stable inside-the-room reference). Fallbacks when that line
-   runs into a wall (a far, off-axis door - RH 210): the **barrier normal** away
-   from the label, then the route direction, then the nearest walkable point to
-   the door. The pin is a walkable point, backed off toward the door if needed.
+2. **Watershed territories (primary).** `watershed.mjs` partitions the floor
+   from the room labels + connector/exit seeds. A room's **doors are the throats
+   (region boundaries)** on its territory; a throat narrower than a body
+   (`0.6 m`) is not a door, and doors into rooms smaller than `8 m²`
+   (closets/shafts) do not count. **More than one door -> `has multiple doors`**;
+   one door is used. Two separate openings between the same two regions are counted
+   separately (boundary cells are split into connected components).
+3. **Placement**: 0.5 m beyond the throat into the neighbouring region,
+   continuing the **label -> throat** line (the label is a stable
+   inside-the-room reference). Fallbacks when that line runs into a wall: the
+   nearest walkable point to the throat. The pin is always a walkable point.
+4. **Fallback** when the watershed cannot segment (no walls/labels): route
+   probes to **6 seeded-random other rooms on the same floor** (seeded from
+   `building|floor|room`, stable across runs) and take each probe's **first door**
+   via the tolerant crossing (`geo.crossBarrier` + `geo.nearestApproach`: the
+   barrier line ±0.4 m past a jamb, or within 0.815 m / ADA 32 in of it, because
+   the navGraph passage is offset from the wall-gap barrier). Majority first hop
+   wins; distinct first doors >= 2 m apart are multiple doors.
 
 Hard-won notes:
 - The old approach (probe an 8 m-away door and prove no other doorway is crossed)
-  rejected most rooms; every door is now assumed to open onto circulation space.
+  rejected most rooms; doors now come from watershed connectivity, so an opening
+  wide enough to walk through is a door regardless of the DXF leaf.
 - **SU floor 02 is special**: its raster is one open ~1000 m2 blob (wall gaps not
   covered by door leaves), so room/door reasoning there is approximate. We tried a
   `buildGraphState` **gap-seal pass** (bridge wall ends < 1 m with no door leaf)

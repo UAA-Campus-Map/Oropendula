@@ -3179,29 +3179,35 @@ const building = { id: cfg.id, sourceId: data.ID, groundFloor: cfg.groundFloor, 
 const router = buildCampusRouter([building]);
 const hit = findRoomExact(building, '208');
 check('exact room lookup finds ECB 208', !hit.error && hit.floor.floorId === '02', hit.error ?? '');
-const pin = hit.error ? hit : resolveRoomPin(building, hit, router);
-check('ECB 208 resolves to one door', !pin.error, pin.error ?? '');
+const multi = hit.error ? hit : resolveRoomPin(building, hit, router);
+check('a multi-door room is refused', multi.error === 'Room 208 has multiple doors.', multi.error ?? '');
+
+const hit1 = findRoomExact(building, '200A1');
+check('exact room lookup finds a single-door room', !hit1.error && hit1.floor.floorId === '02', hit1.error ?? '');
+const pin = hit1.error ? hit1 : resolveRoomPin(building, hit1, router);
+check('a single-door room resolves', !pin.error, pin.error ?? '');
 check('pin point is outside the doorway', !pin.error &&
   Math.hypot((pin.ll[0] - pin.doorLL[0]) * metresPerDegree(pin.ll[1]).lon,
              (pin.ll[1] - pin.doorLL[1]) * metresPerDegree(pin.ll[1]).lat) > 0.3,
   pin.error ?? '');
 check('unknown exact room is rejected', !!findRoomExact(building, 'ZZZ').error);
 
-// The door comes from the first doorway a route to a random same-floor room
-// crosses; probes are seeded so a room's set is stable across runs.
-const seed = `ECB|02|208`;
-const targets = sampleTargets(floor, hit.labelLL, seed);
+// The door comes from the watershed room territory / corridor throat (the
+// route-probe first-door method is the fallback). Probes are seeded so a room's
+// set is stable across runs.
+const seed = `ECB|02|200A1`;
+const targets = sampleTargets(floor, hit1.labelLL, seed);
 check('probes are stable for a room (seeded)',
-  JSON.stringify(targets) === JSON.stringify(sampleTargets(floor, hit.labelLL, seed)));
+  JSON.stringify(targets) === JSON.stringify(sampleTargets(floor, hit1.labelLL, seed)));
 check('probes are other same-floor rooms',
   targets.length === 6 && !targets.some((ll) =>
-    ll[0] === hit.labelLL[0] && ll[1] === hit.labelLL[1]), `${targets.length} probes`);
+    ll[0] === hit1.labelLL[0] && ll[1] === hit1.labelLL[1]), `${targets.length} probes`);
 let nearCross = null;
 for (const ll of targets) {
-  const c = firstDoorCrossing(router.route(hit.labelLL, ll,
+  const c = firstDoorCrossing(router.route(hit1.labelLL, ll,
     { startFloor: '02', endFloor: '02' }), floor);
-  if (c && Math.hypot((c.door.ll[0] - hit.labelLL[0]) * metresPerDegree(hit.labelLL[1]).lon,
-                      (c.door.ll[1] - hit.labelLL[1]) * metresPerDegree(hit.labelLL[1]).lat) <= 15) {
+  if (c && Math.hypot((c.door.ll[0] - hit1.labelLL[0]) * metresPerDegree(hit1.labelLL[1]).lon,
+                      (c.door.ll[1] - hit1.labelLL[1]) * metresPerDegree(hit1.labelLL[1]).lat) <= 15) {
     nearCross = c;
     break;
   }
@@ -3209,8 +3215,8 @@ for (const ll of targets) {
 check('a first-crossed door is found near the room', !!nearCross,
   nearCross ? `${nearCross.door.id} @${nearCross.at.toFixed(1)}m` : 'none');
 check('the resolved pin door is near the room', !pin.error && pin.doorLL &&
-  Math.hypot((pin.doorLL[0] - hit.labelLL[0]) * metresPerDegree(hit.labelLL[1]).lon,
-             (pin.doorLL[1] - hit.labelLL[1]) * metresPerDegree(hit.labelLL[1]).lat) <= 15,
+  Math.hypot((pin.doorLL[0] - hit1.labelLL[0]) * metresPerDegree(hit1.labelLL[1]).lon,
+             (pin.doorLL[1] - hit1.labelLL[1]) * metresPerDegree(hit1.labelLL[1]).lat) <= 15,
   pin.error ?? '');
 
 // A floor where the room is the only label has nothing to route to.
