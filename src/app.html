@@ -4015,8 +4015,10 @@
       return best;
     }
 
-    const SKYBRIDGE_LINK_M = 120;
-    const SKYBRIDGE_TRIGGER_M = 3.0;
+    const SKYBRIDGE_LINK_M = 120;       // pairing cap for unmarked portals
+    const SKYBRIDGE_TRIGGER_M = 5.0;    // activation radius from the portal pair
+    const SKYBRIDGE_MID_T = 0.45;       // switch after this fraction of the link
+    const SKYBRIDGE_NEAR_T = 0.25;      // near-destination fallback threshold
 
     /**
      * Portal pairs joining two floors. Explicit `to` marks win (and may cross
@@ -4250,7 +4252,11 @@
         const { t, dist } = skybridgeProjection(ll, n.from, n.to);
         // Cross the midpoint of the portal pair; the reverse link projects
         // back to < 0.5, so this cannot ping-pong at an overlapping landing.
-        if (t <= 0.55 || dist > SKYBRIDGE_TRIGGER_M) continue;
+        // Also accept a point close to the destination portal even if PDR
+        // drift put it a little off the short portal-to-portal segment.
+        const nearDest = lonLatDistM(ll, n.to) <= SKYBRIDGE_TRIGGER_M;
+        if (!(t > SKYBRIDGE_MID_T && dist <= SKYBRIDGE_TRIGGER_M) &&
+            !(nearDest && t > SKYBRIDGE_NEAR_T)) continue;
         if (!n.floor.navGraph?.isWalkable?.(ll)) continue;
         const level = floorLevels.indexOf(n.floor.floorId) + 1;
         if (level > 0) setFloor(level);
