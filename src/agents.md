@@ -221,15 +221,19 @@ other, then mark a **skybridge** portal on each side (see below).
 
 A skybridge is its own manually-placed portal type, **not** an exit. The import
 tool's **Place bridge / Remove bridge** modes write
-`floor.skybridges: [{id, dxf, to?}]`; the **destination** select marks `to`
-(another building's id) on newly placed bridges and **Set destination**
-re-marks an existing dot (with "auto (nearest)" selected it clears the mark).
-The map labels each dot with its destination.
+`floor.skybridges: [{id, dxf, to?, toFloor?}]`; the **destination building**
+select marks `to` (another building's id) and the **destination floor** select
+marks `toFloor` on newly placed bridges; **Set destination** re-marks an
+existing dot (with "auto" selected it clears the marks). `toFloor` pins the
+pair to one floor when a building has several skybridge portals (ECB has two
+to the same building on different floors). The map labels each dot with its
+destination.
 
 Pairing (`buildCampusRouter`): **explicit destinations first** — candidate
-pairs where either side's `to` names the other's building: mutual marks, then
-one-sided, each shortest-first, one partner per portal. Explicit links ignore
-both `SKYBRIDGE_MAX_M` and the floor number — the marks say exactly which
+pairs where either side's `to` names the other's building and any `toFloor`
+matches the other floor: mutual marks, then one-sided, each shortest-first,
+one partner per portal. Explicit links ignore `SKYBRIDGE_MAX_M` and the floor
+number unless `toFloor` pins it — the marks say exactly which
 bridge goes where (AS121-01 ↔ AS119-02 is ~126 m and crosses a grade change;
 the earlier same-floor rule and the 120 m cap both blocked it). Unmarked
 bridges then fall back to greedy min-distance matching within the cap, preferring

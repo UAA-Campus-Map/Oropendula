@@ -1148,7 +1148,7 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
   for (const b of buildings) {
     for (const f of b.floors) {
       for (const e of f.exits) nodes.push({building: b, floor: f, ll: e.ll, kind: 'door', id: e.id});
-      for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id, to: s.to ?? null});
+      for (const s of f.skybridges ?? []) nodes.push({building: b, floor: f, ll: s.ll, kind: 'bridge', id: s.id, to: s.to ?? null, toFloor: s.toFloor ?? null});
       for (const c of b._connectors ?? []) {
         const stop = c.stops.get(f.floorId);
         if (stop) nodes.push({building: b, floor: f, ll: stop, kind: 'connector', connector: c, id: `${c.id}-${f.floorId}`});
@@ -1350,9 +1350,15 @@ export function buildCampusRouter(buildings, outdoorShapes = null, ignorePortals
       const i = bridgeIdx[a], j = bridgeIdx[b];
       const A = nodes[i], B = nodes[j];
       if (A.building === B.building) continue;
-      const aWants = A.to === B.building.id, bWants = B.to === A.building.id;
-      // An explicit destination that names a different building must never be
-      // paired here, even if the other side wants this building.
+      // A destination floor is only meaningful with a destination building.
+      if (A.toFloor && !A.to) continue;
+      if (B.toFloor && !B.to) continue;
+      const aWants = A.to === B.building.id &&
+        (!A.toFloor || A.toFloor === B.floor.floorId);
+      const bWants = B.to === A.building.id &&
+        (!B.toFloor || B.toFloor === A.floor.floorId);
+      // An explicit destination that names a different building/floor must
+      // never be paired here, even if the other side wants this one.
       if (A.to && !aWants) continue;
       if (B.to && !bWants) continue;
       if (!A.to && !B.to) {

@@ -327,8 +327,10 @@
           <div id="bridge-note" class="hint"></div>
           <details class="adv">
             <summary>Advanced skybridge options</summary>
-            <label>destination <select id="bridgeTo"
+            <label>destination building <select id="bridgeTo"
               title="Applied to newly placed bridges; use Set destination to change an existing one"></select></label>
+            <label>destination floor <select id="bridgeToFloor"
+              title="Optional: pin the bridge to one floor in the destination building"></select></label>
             <div class="row">
               <button id="bridgeDestBtn" title="Tap a bridge portal to give it the selected destination">Set destination</button>
             </div>
@@ -1107,6 +1109,7 @@
         config.filter((_, i) => i !== selected.building).map(bb =>
           `<option value="${bb.id ?? ''}">${bb.id ?? '(new)'}</option>`).join('');
       if ([...bTo.options].some(o => o.value === curTo)) bTo.value = curTo;
+      syncBridgeFloorOptions();
 
       if (!b || !f) {
         // Clear every plan layer: otherwise deleting the last building/floor
@@ -1454,8 +1457,12 @@
       const dxf = toDxfAt(b, f, lngLat);
       if (!f[key]) f[key] = [];   // first manual edit starts a fresh list
       const portal = {id: `${key === 'exits' ? 'door' : 'bridge'}-${Date.now().toString(36)}`, dxf};
-      // Bridges take the destination currently selected in the panel.
-      if (key === 'skybridges' && $('bridgeTo').value) portal.to = $('bridgeTo').value;
+      // Bridges take the destination building/floor selected in the panel.
+      if (key === 'skybridges' && $('bridgeTo').value) {
+        portal.to = $('bridgeTo').value;
+        const toFloor = $('bridgeToFloor').value;
+        if (toFloor) portal.toFloor = toFloor;
+      }
       f[key].push(portal);
       invalidateGraph(b);
       walkAutoPending = true;
@@ -1475,7 +1482,15 @@
       }
       if (bestD * DXF_SCALE > 3) { status(`nearest is ${(bestD * DXF_SCALE).toFixed(1)} m - tap closer`); return; }
       const to = $('bridgeTo').value;
-      if (to) list[best].to = to; else delete list[best].to;
+      const toFloor = $('bridgeToFloor').value;
+      if (to) {
+        list[best].to = to;
+        if (toFloor) list[best].toFloor = toFloor;
+        else delete list[best].toFloor;
+      } else {
+        delete list[best].to;
+        delete list[best].toFloor;
+      }
       invalidateGraph(b);
       walkAutoPending = true;
       persist(); refresh();
@@ -1499,6 +1514,20 @@
       status(`removed ${portalLabel(key)} (${list.length} on ${b.id} ${f.floorId})`);
     }
 
+    function syncBridgeFloorOptions() {
+      const sel = $('bridgeToFloor');
+      if (!sel) return;
+      const to = $('bridgeTo')?.value ?? '';
+      const cur = sel.value;
+      const dest = config.find((b) => b.id === to);
+      sel.innerHTML = '<option value="">auto (any floor)</option>' +
+        (dest?.floors ?? []).map((f) =>
+          `<option value="${esc(f.floorId)}">${esc(f.floorId)}</option>`).join('');
+      sel.disabled = !dest || !floor();
+      if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+      else sel.value = '';
+    }
+
     function syncPortalPanel() {
       const f = floor();
       const setActive = (id, on) => { const el = $(id); if (el) el.classList.toggle('active', on); };
@@ -1518,7 +1547,7 @@
       $('bridge-note').innerHTML = !f ? ''
         : bridges.length
           ? `Manual: ${bridges.length} skybridge portal${bridges.length === 1 ? '' : 's'} — ` +
-            bridges.map((d, i) => `${i + 1}: ${d.to ? d.to : 'auto'}`).join(', ') + '.'
+            bridges.map((d, i) => `${i + 1}: ${d.to ? `${d.to}${d.toFloor ? '/' + d.toFloor : ''}` : 'auto'}`).join(', ') + '.'
           : 'None. Mark each side of a bridge on the two floors it joins.';
 
       setActive('doorPlaceBtn', editMode === 'place-door');
@@ -1726,6 +1755,7 @@
             el.id === 'alignBtn' ||
             el.id === 'floorPrevBtn' || el.id === 'floorNextBtn' ||
             el.id === 'wizBackBtn' || el.id === 'wizNextBtn' ||
+            el.id === 'bridgeToFloor' ||
             el.id === 'removeBuildingBtn' ||
             el.classList.contains('wiz-chip')) continue;
         if (el.id === 'downloadGraphBtn' || el.id === 'downloadAllGraphsBtn') {
@@ -2209,6 +2239,7 @@
     wire('doorRemoveBtn', 'click', () => setEditMode('remove-door'));
     wire('bridgePlaceBtn', 'click', () => setEditMode('place-bridge'));
     wire('bridgeRemoveBtn', 'click', () => setEditMode('remove-bridge'));
+    wire('bridgeTo', 'change', syncBridgeFloorOptions);
     wire('bridgeDestBtn', 'click', () => setEditMode('dest-bridge'));
     wire('seedIndoorBtn', 'click', () => setWalkMode('seed-indoor'));
     wire('seedOutdoorBtn', 'click', () => setWalkMode('seed-outdoor'));

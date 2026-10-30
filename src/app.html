@@ -4029,8 +4029,12 @@
         if (!s.ll) continue;
         for (const t of b.skybridges ?? []) {
           if (!t.ll) continue;
+          if (s.toFloor && !s.to) continue;
+          if (t.toFloor && !t.to) continue;
           if (s.to && s.to !== bBuilding.id) continue;
           if (t.to && t.to !== aBuilding.id) continue;
+          if (s.toFloor && s.toFloor !== b.floorId) continue;
+          if (t.toFloor && t.toFloor !== a.floorId) continue;
           const d = lonLatDistM(s.ll, t.ll);
           if (!(s.to || t.to) && d > SKYBRIDGE_LINK_M) continue;
           out.push({ from: s.ll, to: t.ll, d });
@@ -5217,6 +5221,7 @@
         ll: toLL(e.dxf[0], e.dxf[1]),
         dxf: e.dxf,
         to: e.to ?? null,
+        toFloor: e.toFloor ?? null,
       }));
       return {
         floorId: floor.floorId,

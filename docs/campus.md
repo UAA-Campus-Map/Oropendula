@@ -98,9 +98,10 @@ same-floor trips short-circuit to a single indoor leg.
   0.815 m — the ADA 32 in clear width — of the barrier), because the navGraph
   passage is offset from the wall-gap barrier.
 - Skybridge pairing: explicit `to` marks win and may join different floor
-  numbers. Unmarked bridges auto-pair by proximity within `SKYBRIDGE_MAX_M`,
-  preferring the same floor but allowing a cross-floor pair when no same-floor
-  candidate exists. `bridgeUsed` gives each bridge node at most one connection,
+  numbers; an optional `toFloor` pins the link to one destination floor (ECB
+  has two portals to the same building on different floors). Unmarked bridges
+  auto-pair by proximity within `SKYBRIDGE_MAX_M`, preferring the same floor
+  but allowing a cross-floor pair when no same-floor candidate exists. `bridgeUsed` gives each bridge node at most one connection,
   so one node per bridge end/building is sufficient.
 - A `skybridge` route segment carries both `fromFloor` and `toFloor`; the app
   draws it on both 2D floors and shows the floor change in the route step.

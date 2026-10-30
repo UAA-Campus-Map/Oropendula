@@ -225,8 +225,8 @@ A six-step redesign of the authoring tool:
 1. **Building** — select or create a building.
 2. **Floors** — import/attach floor JSONs and pick the working floor.
 3. **Placement** — drag/rotate, align to ground, fit/centre.
-4. **Connections** — exterior doors, skybridges, portal cache; connection edits
-   re-run the walkable preview.
+4. **Connections** — exterior doors, skybridges (destination building **and**
+   floor), portal cache; connection edits re-run the walkable preview.
 5. **Walkable** — auto-runs the flood; seeds (multiple outdoor seeds for
    disconnected outside areas), seals, outdoor-distance gradient and a blue
    leak path with its wall-entry point.

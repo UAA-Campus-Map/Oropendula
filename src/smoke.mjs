@@ -1911,6 +1911,38 @@ console.log('\nExplicit skybridge destination (synthetic):');
     routerXF.stats.skybridgeEdges === 1 &&
     !!rXF && rXF.segments.some(s => s.tier === 'skybridge') &&
     !rXF.segments.some(s => s.tier === 'outdoor'));
+
+  // A destination floor disambiguates two portals to the same building.
+  // XP/02 explicitly wants YP/03; YP also has a portal on 02. Only XP/02
+  // <-> YP/03 may pair.
+  const mkPin = (id, cx, bridges) => {
+    const floors = ['01', '02', '03'].map((fid) => ({
+      floorId: fid, ...square(cx, lat0), elevators: [],
+      stairs: [{ id: `s${fid}`, ll: [cx, lat0] }], exits: [], skybridges: [],
+    }));
+    for (const [fid, b] of Object.entries(bridges)) {
+      floors.find((f) => f.floorId === fid).skybridges = [{ id: 'b', ...b }];
+    }
+    return { id, groundFloor: '01', floors };
+  };
+  const yxPin = lon0 + 40 / mpd.lon;
+  const XP = mkPin('XP', lon0, {
+    '02': { ll: [lon0 + dx * 0.9, lat0], to: 'YP', toFloor: '03' },
+  });
+  const YP = mkPin('YP', yxPin, {
+    '02': { ll: [yxPin - dx * 0.9, lat0], to: 'XP' },
+    '03': { ll: [yxPin - dx * 0.9, lat0], to: 'XP' },
+  });
+  const routerPin = buildCampusRouter([XP, YP]);
+  const rPin = routerPin.route([lon0, lat0], [yxPin, lat0], { startFloor: '02', endFloor: '03' });
+  showRoute('XP f02 -> YP f03 (destination floor pin)', rPin);
+  check('destination floor pins the skybridge to the requested floor',
+    routerPin.stats.skybridgeEdges === 1 &&
+    !!rPin && rPin.segments.some((s) => s.tier === 'skybridge' &&
+      s.fromFloor === '02' && s.toFloor === '03'));
+  const rPinWrong = routerPin.route([lon0, lat0], [yxPin, lat0], { startFloor: '02', endFloor: '02' });
+  check('destination floor does not link the other portal floor',
+    !rPinWrong?.segments.some((s) => s.tier === 'skybridge' && s.toFloor === '02'));
 }
 
 if (want('multifloor')) {
