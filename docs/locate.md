@@ -104,7 +104,7 @@ the belief does *not* collapse on its own.)
 - Fixed particle count (`DEFAULT_COUNT = 1000`, also the constructor default);
   arrays are sized once and the resample is allocation-free (ping-pong buffers).
   Per-step defaults: `headingJitterDeg = 35`, `distanceNoise = 0.22`,
-  `lateralNoiseM = 0.30`, `roughenM = 0.20`. `predict` is O(N).
+  `lateralNoiseM = 0.25`, `roughenM = 0.20`. `predict` is O(N).
 
 ## See also
 
