@@ -52,9 +52,12 @@ in code, docs, deployment, and import-tool settings.
 - `import-v2.html` — the six-step authoring wizard (Building → Floors →
   Placement → Connections → Walkable → Artifacts). It shares `import.html`'s
   config key and modules; all v1 controls live in per-step Advanced blocks. The
-  artifact step preflights changed buildings and downloads one ZIP with the
-  config, OSM paths, changed bundles, and **all floor JSONs for affected
-  buildings** (no separate floor upload). See `docs/apps.md`.
+  Building step's advanced **floor offset** shifts effective floor ids by N
+  levels (`sourceFloorId` preserves the original), which is how an elevated
+  skybridge plan labelled `01` can display at picker level 2. The artifact step
+  preflights changed buildings and downloads one ZIP with the config, OSM paths,
+  changed bundles, and **all floor JSONs for affected buildings** (no separate
+  floor upload). See `docs/apps.md`.
 - `geo.mjs` — the registration math, shared by everything: `DXF_SCALE`,
   `metresPerDegree`, `dxfCoordsToLonLat`, `lonLatToDxf` (inverse),
   `makeToLL(building, floor)` (floor-level origin/offset wins, AS106 style).

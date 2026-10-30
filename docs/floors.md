@@ -17,6 +17,11 @@ tool. Exports `floorRank`, `isBasement`, `floorLabelOf` and `floorLevelOf`.
 Basements sort below ground, never as upper floors. Non-numeric ids rank 0 and
 render as themselves.
 
+The import tool's advanced **floor offset** rewrites a building's effective
+floor ids by N levels (e.g. `B1`→`01`, `01`→`02`, `02`→`03`). The original
+level is kept as `sourceFloorId`, so the offset can be changed later. This is
+how an elevated skybridge whose plan is labelled `01` can sit at level 2.
+
 ## Where it matters
 
 - the app's floor picker starts on the ground floor, not the lowest basement;

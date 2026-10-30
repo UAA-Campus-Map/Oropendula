@@ -207,7 +207,10 @@
         <label>ground floor <input type="text" id="groundFloor" /></label>
         <details class="adv">
           <summary>Advanced building options</summary>
-          <p class="hint" style="margin-top:6px">Drop/pick a JSON here to match an existing building by code or create one.
+          <label>floor offset (levels) <input type="number" id="floorOffset" step="1" placeholder="0" /></label>
+          <p class="hint" style="margin-top:6px">Shift every floor in this building by N levels. Use +1 for a
+            skybridge whose floor 01 is physically at level 2 (so B1 shows at picker 1 and 01 at picker 2).
+            Drop/pick a JSON here to match an existing building by code or create one.
             Use <b>+ building</b> to force a new building, or <b>+ floor</b> in the next step to attach floors.</p>
         </details>
       </section>
@@ -394,6 +397,7 @@
   <script type="module">
     import * as maplibregl from '/maplibre-gl.mjs';
     import { makeToLL, lonLatToDxf, metresPerDegree, DXF_SCALE } from './geo.mjs';
+    import { floorLevelOf } from './floors.mjs';
     import { shapeSegments, extractPortals, cachePortals, portalsFromCache, isWallLayer }
       from './campus.mjs';
     import { buildGraphState } from './navgraph.mjs';
@@ -1762,7 +1766,7 @@
           el.disabled = graphBusy;
           continue;
         }
-        if (el.id === 'id' || el.id === 'groundFloor') {
+        if (el.id === 'id' || el.id === 'groundFloor' || el.id === 'floorOffset') {
           el.disabled = !b;
           continue;
         }
@@ -1788,6 +1792,7 @@
       if (b) {
         $('id').value = b.id ?? '';
         $('groundFloor').value = b.groundFloor ?? '';
+        $('floorOffset').value = String(b.floorOffset ?? 0);
       }
       if (!b || !f) return;
       const { origin, offset } = placementOf(b, f);
@@ -2063,6 +2068,51 @@
       status(`reloaded ${config.length} building${config.length === 1 ? '' : 's'} from server`);
     }
 
+    // --- floor offset -------------------------------------------------------
+    /** Shift a floor id by N absolute levels (B1=0, 01=1, 02=2 ...). */
+    function offsetFloorId(id, offset) {
+      const s = String(id ?? '').trim();
+      const n = Number(offset) || 0;
+      if (!n || !/^(?:\d+|B\d+)$/i.test(s)) return s;
+      const level = floorLevelOf(s) + n;
+      if (level <= 0) return `B${1 - level}`;
+      return String(level).padStart(2, '0');
+    }
+
+    /**
+     * Apply an advanced building-level floor offset. The source level is kept
+     * on each floor; changing the offset recomputes the effective floorId and
+     * rewrites any skybridge toFloor references to this building.
+     */
+    function applyFloorOffset(b, value) {
+      if (!b) return;
+      b.floorOffset = Math.round(Number(value) || 0);
+      const moved = new Map();
+      for (const f of b.floors ?? []) {
+        const source = normaliseFloorId(f.sourceFloorId ?? f.floorId);
+        const old = f.floorId;
+        const next = offsetFloorId(source, b.floorOffset);
+        f.sourceFloorId = source;
+        f.floorId = next;
+        if (old !== next) moved.set(old, next);
+      }
+      if (moved.size) {
+        if (b.groundFloor && moved.has(b.groundFloor)) b.groundFloor = moved.get(b.groundFloor);
+        for (const other of config) {
+          for (const ff of other.floors ?? []) {
+            for (const s of ff.skybridges ?? []) {
+              if (s.to === b.id && s.toFloor && moved.has(s.toFloor)) {
+                s.toFloor = moved.get(s.toFloor);
+              }
+            }
+          }
+        }
+      }
+      invalidateGraph(b);
+      persist(); refresh();
+      status(`${b.id}: floor offset ${b.floorOffset >= 0 ? '+' : ''}${b.floorOffset}`);
+    }
+
     // --- uploads -----------------------------------------------------------
     // mode: 'auto'     match an existing building by code, else create one
     //       'floor'    attach every file to the selected building
@@ -2110,10 +2160,14 @@
             !b.floors.some(fl => fl.origin || fl.offset)) {
           Object.assign(b, newBuildingPlacement(data));
         }
-        const floorId = normaliseFloorId(data.level ?? (b.floors.length + 1));
+        const sourceFloorId = normaliseFloorId(data.level ?? (b.floors.length + 1));
+        const floorId = offsetFloorId(sourceFloorId, b.floorOffset ?? 0);
         const url = '/' + encodeURIComponent(file.name);
-        const existing = b.floors.find(f => normaliseFloorId(f.floorId) === floorId);
-        const entry = existing ?? { floorId };
+        const existing = b.floors.find((f) =>
+          normaliseFloorId(f.sourceFloorId ?? f.floorId) === sourceFloorId);
+        const entry = existing ?? { floorId, sourceFloorId };
+        entry.floorId = floorId;
+        entry.sourceFloorId = sourceFloorId;
         entry.url = url;
         entry.showRoomLabels = true;
         delete entry.portals;         // fresh JSON: recompute the portal cache
@@ -2231,6 +2285,7 @@
     wire('alignBtn', 'click', () => alignSelectedFloor());
     wire('id', 'change', e => { const b = building(); b.id = e.target.value; invalidateGraph(b); persist(); refresh(); });
     wire('groundFloor', 'change', e => { building().groundFloor = e.target.value; persist(); refresh(); });
+    wire('floorOffset', 'change', e => applyFloorOffset(building(), e.target.value));
     wire('showRoomLabels', 'change', e => { floor().showRoomLabels = e.target.checked; persist(); });
     wire('showShadow', 'change', () => refresh());
     wire('wallLayerId', 'change', e => { setOpt(floor(), 'wallLayerId', e.target.value); });

@@ -2604,12 +2604,13 @@
             ]
           },
           {
-            "id": "bridge-mvu5ysal",
+            "id": "bridge-mvu96urt",
             "dxf": [
-              2407.5744971844706,
-              1135.0869951251116
+              2410.8671340099804,
+              1105.8867595139477
             ],
-            "to": "AS120"
+            "to": "AS120",
+            "toFloor": "02"
           }
         ],
         "portals": {
@@ -3029,13 +3030,13 @@
         "exits": [],
         "skybridges": [
           {
-            "id": "bridge-mvu84n8p",
+            "id": "bridge-mvu92rc7",
             "dxf": [
-              1100.540407033231,
-              -864.2866941436582
+              1109.800421059482,
+              -874.0373414398863
             ],
             "to": "AS120",
-            "toFloor": "01"
+            "toFloor": "02"
           }
         ],
         "floodSeals": [
@@ -3202,13 +3203,13 @@
         ],
         "skybridges": [
           {
-            "id": "bridge-mvu851ve",
+            "id": "bridge-mvu92h0m",
             "dxf": [
-              1097.866314625648,
-              31.443694536678155
+              1101.6796852207149,
+              24.690964746212668
             ],
             "to": "AS120",
-            "toFloor": "02"
+            "toFloor": "03"
           }
         ],
         "graphHash": "lfgv6a",
@@ -5214,12 +5215,13 @@
             "to": "AS150"
           },
           {
-            "id": "bridge-mvu63bmz",
+            "id": "bridge-mvu94z0j",
             "dxf": [
-              461.7635783386701,
-              2002.1804756538108
+              448.9330437070131,
+              1993.9960620897077
             ],
-            "to": "AS120"
+            "to": "AS120",
+            "toFloor": "03"
           }
         ],
         "floodSeals": [
@@ -12319,10 +12321,10 @@
   {
     "id": "AS120",
     "buildingName": "Arcade and Bridge Lounge",
-    "groundFloor": "01",
+    "groundFloor": "02",
     "floors": [
       {
-        "floorId": "01",
+        "floorId": "02",
         "url": "/AS120-01.json",
         "showRoomLabels": true,
         "portals": {
@@ -12473,6 +12475,7 @@
             "toFloor": "02"
           }
         ],
+        "sourceFloorId": "01",
         "graphHash": "zwcyn5",
         "wallBBox": [
           -149.82574077929007,
@@ -12482,7 +12485,7 @@
         ]
       },
       {
-        "floorId": "02",
+        "floorId": "03",
         "url": "/AS120-02.json",
         "showRoomLabels": true,
         "portals": {
@@ -12592,6 +12595,7 @@
             ]
           }
         ],
+        "sourceFloorId": "02",
         "graphHash": "1pyem6s",
         "wallBBox": [
           -149.82550367154835,
@@ -12601,7 +12605,7 @@
         ]
       },
       {
-        "floorId": "B1",
+        "floorId": "01",
         "url": "/AS120-B1.json",
         "showRoomLabels": true,
         "portals": {
@@ -12665,6 +12669,7 @@
             ]
           }
         ],
+        "sourceFloorId": "B1",
         "graphHash": "1o6f3k9",
         "wallBBox": [
           -149.82353147542045,
@@ -12683,7 +12688,8 @@
       "y": 1381.75,
       "rot": 0
     },
-    "graphFingerprint": "ul0pcn",
+    "floorOffset": 1,
+    "graphFingerprint": "1cp4tkb",
     "graphUrl": "/AS120.nvg.gz"
   }
 ]

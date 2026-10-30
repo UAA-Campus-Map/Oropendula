@@ -236,7 +236,10 @@ A six-step redesign of the authoring tool:
    apply instructions.
 
 Every step has an **Advanced** `<details>` block, so all v1 controls remain
-available. Navigation is soft-gated: steps can be inspected in any order, but
+available. The Building step's advanced **floor offset** shifts a building's
+effective floor ids by N levels (for example an elevated skybridge whose plan
+says `01` but sits at level 2: set `+1` so its basement shows at picker 1 and
+its `01` plan at picker 2). Navigation is soft-gated: steps can be inspected in any order, but
 artifact generation is blocked by specific issues (missing floor JSON, no walls,
 no placement, walkable leak, duplicate id, name collision). A missing exterior
 door is a warning on the **ground floor only**; upper floors do not need one.
