@@ -4,7 +4,14 @@
     "names": ["Subway"],
     "category": "food",
     "building": "SU",
-    "room": "Subway"
+    "room": "112"
+  },
+  {
+    "id": "su-seawolf-marketplace",
+    "names": ["Seawolf Marketplace", "Marketplace"],
+    "category": "food",
+    "building": "SU",
+    "room": "111"
   },
   {
     "id": "su-enrollment-services",
