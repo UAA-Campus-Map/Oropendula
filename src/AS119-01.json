@@ -8,7 +8,7 @@
   "rotation": 0,
   "likely_scanned": false,
   "likely_vector_text": false,
-  "text_line_count": 83,
+  "text_line_count": 84,
   "shape_count": 1210,
   "shapes_filtered": 0,
   "shapes_dashed_dropped": 1998,
@@ -576,11 +576,11 @@
     },
     {
       "text": "Subway",
-      "x": 1279.49,
-      "y": -200.51,
-      "size": 96.0,
-      "font": "stylus bt",
-      "layer": "SUBWAY_TEXT"
+      "x": 1473.36,
+      "y": 858.74,
+      "size": 24.0,
+      "font": "ARIALNAR",
+      "layer": "LABEL_FIX"
     },
     {
       "text": "100S2",
@@ -677,6 +677,14 @@
       "size": 12.0,
       "font": "ARIALNAR",
       "layer": "TEXT"
+    },
+    {
+      "text": "Seawolf Marketplace",
+      "x": 1841.56,
+      "y": 872.66,
+      "size": 24.0,
+      "font": "ARIALNAR",
+      "layer": "LABEL_FIX"
     }
   ],
   "shapes": [
@@ -21604,5 +21612,6 @@
   ],
   "source": "AS119-01.dxf",
   "page": 1,
-  "format": "dxf"
+  "format": "dxf",
+  "label_fixes_applied": 2
 }

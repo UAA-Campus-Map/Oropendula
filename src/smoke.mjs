@@ -1060,8 +1060,8 @@ check('every multi-floor building has a vertical connector',
   const as111cfg = CONFIG.find(c => c.id === 'AS111');
   check('AS111 cached portals include the floor-01 elevators',
     !!as111cfg && (as111cfg.floors[0].portals?.elevators?.length ?? 0) === 2);
-check('wall layers accept singular and plural forms',
-  ['wall', 'walls', 'WALL', 'Walls', 'window', 'windows', 'WINDOWS'].every(isWallLayer) &&
+check('wall layers accept singular and plural forms, and Glass',
+  ['wall', 'walls', 'WALL', 'Walls', 'window', 'windows', 'WINDOWS', 'Glass'].every(isWallLayer) &&
   !isWallLayer('doors') && !isWallLayer(undefined));
 check('door layers accept DOOR and DOORS',
   ['door', 'doors', 'DOOR', 'Doors'].every(isDoorLayer) &&
@@ -1073,7 +1073,7 @@ check('door layers accept DOOR and DOORS',
 // either wall, hence the allowance.
 {
   let offenders = [];
-  const FOOT = new Set(['wall', 'walls', 'window', 'windows', 'panels', 'partition', 'partitions']);
+  const FOOT = new Set(['wall', 'walls', 'window', 'windows', 'glass', 'panels', 'partition', 'partitions']);
   for (const cfg of BUILDING_CONFIGS) {
     const data = JSON.parse(readFileSync(new URL(cfg.file, import.meta.url), 'utf8'));
     const wallSegs = data.shapes

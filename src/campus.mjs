@@ -131,14 +131,15 @@ const PORTAL_LAYERS = {
 };
 
 /**
- * Wall/window layers, singular or plural, any case. Plans are inconsistent:
- * AS106 writes WINDOWS, while HSB (AS156) uses WALL/window on floor 01 and
- * Walls/WINDOWS on floor 02. The app, import tool and tests share this so a
+ * Wall/window/glass layers, singular or plural, any case. Plans are
+ * inconsistent: AS106 writes WINDOWS, while HSB (AS156) uses WALL/window on
+ * floor 01 and Walls/WINDOWS on floor 02. SU floor 01 (AS119) draws its
+ * food-court storefront (Subway, Seawolf Marketplace) on 'Glass'. The app, import tool and tests share this so a
  * floor can never render in one and be blank in the other.
  */
 export function isWallLayer(layer) {
   const l = String(layer ?? '').toLowerCase();
-  return l === 'wall' || l === 'walls' || l === 'window' || l === 'windows';
+  return l === 'wall' || l === 'walls' || l === 'window' || l === 'windows' || l === 'glass';
 }
 
 /** Door-leaf layers, singular or plural, any case (DOOR / DOORS). */
@@ -290,10 +291,10 @@ export function extractPortals(shapes, toLL) {
   const isLayer = (s, names) => names.has(s.layer.toLowerCase());
   // Window layers are part of the floor's wall graph in the viewer, so they
   // count toward the clearance check too.
-  const CLEAR_NAMES = new Set(['wall', 'walls', 'window', 'windows']);
+  const CLEAR_NAMES = new Set(['wall', 'walls', 'window', 'windows', 'glass']);
   // Extra solid layers that enclose space without being in the navgraph
   // (AS102 draws part of its envelope on 'Panels').
-  const FLOOD_NAMES = new Set(['wall', 'walls', 'window', 'windows', 'panels', 'partition', 'partitions']);
+  const FLOOD_NAMES = new Set(['wall', 'walls', 'window', 'windows', 'glass', 'panels', 'partition', 'partitions']);
   const clearSegs = shapes
     .filter(s => isLayer(s, CLEAR_NAMES))
     .flatMap(shapeSegments);
