@@ -25,9 +25,10 @@ neighbour. The door is found from **watershed connectivity**:
    labels + connector/exit seeds. A room's **doors are the throats (region
    boundaries)** on its territory. A throat narrower than a body (`0.6 m`) is not
    a door, and doors into rooms smaller than `8 m²` (closets/shafts) do not count.
-   Two separate openings between the same two regions are counted
-   separately (boundary cells split into connected components). **More than one
-   door → `Room X has multiple doors.`**; one door is used.
+   Boundary cells are 8-connected and bridged across one free cell, so a
+   diagonal stair-step fragment of one opening counts once; two openings
+   separated by a wall still count separately. **More than one door →
+   `Room X has multiple doors.`**; one door is used.
 3. **Placement.** 0.5 m beyond the throat into the neighbouring region,
    continuing the **label → throat** line (the label is a stable inside-the-room
    reference). If that line hits a wall, fall back to the **nearest walkable point**
@@ -54,6 +55,10 @@ neighbour. The door is found from **watershed connectivity**:
 - The **old** approach (probe an 8 m-away door and prove no other doorway is
   crossed) rejected most rooms; doors now come from watershed connectivity, so an
   opening wide enough to walk through is a door regardless of the DXF leaf.
+- A **4-connected** boundary split falsely turns one diagonal stair-step throat
+  into two doors. The watershed now bridges one free cell before labelling, so
+  `200U2` (one 0.8 m opening) resolves while ECB `208` (three real doors) and
+  AS101-02 `210` (two real openings) still refuse.
 - The placement side was once derived from the **route tangent**, which is
   meaningless for a parallel graze (`n · dir ≈ 0` gives a coin flip). The room
   **label** is the reliable side reference.

@@ -17,6 +17,13 @@
  */
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+// A watershed boundary can stair-step diagonally, splitting one physical
+// opening into several 4-connected fragments. Bridge each pair's boundary
+// cells across one layer of free cells before labelling components, so a
+// stair-step throat is one door while a wall still keeps real openings apart.
+const BOUNDARY_BRIDGE_CELLS = 1;
 
 /** Max-heap of (dt, cell); ties prefer the smaller cell index. */
 function makeHeap() {
@@ -201,11 +208,33 @@ export function watershed({
     if (i + 1 < W) { const n = k + 1; if (!blocked[n] && labels[n] !== id) { boundary[k] = 1; pair(id, labels[n], k); } }
     if (j + 1 < H) { const n = k + W; if (!blocked[n] && labels[n] !== id) { boundary[k] = 1; pair(id, labels[n], k); } }
   }
-  // Split each region pair's boundary into connected components: two separate
-  // openings between the same two regions are two doors, not one.
+  // Split each region pair's boundary into components: two separate openings
+  // between the same two regions are two doors, not one. Bridge one free cell
+  // first so a diagonal stair-step from one opening does not become two.
   let edgeSeq = 0;
   for (const [key, cells] of byPair) {
     const [a, b] = key.split('|').map(Number);
+    // Free cells one bridge layer around the boundary. Only unblocked cells
+    // join the set, so a wall cannot be crossed.
+    const bridge = new Set(cells);
+    let frontier = [...cells];
+    for (let layer = 0; layer < BOUNDARY_BRIDGE_CELLS; layer++) {
+      const next = [];
+      for (const k of frontier) {
+        const i = k % W, j = (k - i) / W;
+        for (const [di, dj] of DIRS8) {
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+          const n = nj * W + ni;
+          if (blocked[n] || bridge.has(n)) continue;
+          bridge.add(n);
+          next.push(n);
+        }
+      }
+      frontier = next;
+    }
+    // Label the bridged set with 8-connectivity. A component may include
+    // bridge cells; the throat is still chosen from real boundary cells.
     const seen = new Set();
     for (const start of cells) {
       if (seen.has(start)) continue;
@@ -216,15 +245,18 @@ export function watershed({
         const k = q.pop();
         comp.push(k);
         const i = k % W, j = (k - i) / W;
-        for (const [di, dj] of DIRS) {
+        for (const [di, dj] of DIRS8) {
           const ni = i + di, nj = j + dj;
           if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
           const n = nj * W + ni;
-          if (cells.has(n) && !seen.has(n)) { seen.add(n); q.push(n); }
+          if (bridge.has(n) && !seen.has(n)) { seen.add(n); q.push(n); }
         }
       }
-      let best = comp[0];
-      for (const k of comp) if (DT[k] > DT[best]) best = k;
+      let best = -1;
+      for (const k of comp) {
+        if (cells.has(k) && (best < 0 || DT[k] > DT[best])) best = k;
+      }
+      if (best < 0) continue;
       adjacency.set(`${key}#${edgeSeq++}`, {
         a, b, maxDT: DT[best], boundaryCell: best, widthM: DT[best] * 2 * cell,
       });

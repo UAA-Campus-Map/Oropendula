@@ -84,8 +84,9 @@ and corridor territories from the labels + connector/exit seeds, and a room's
 **doors are the throats (region boundaries)** on its territory. A throat narrower
 than a body (`0.6 m`) is not a door, and doors into rooms smaller than `8 m²`
 (closets/shafts) do not count; **more than one door is refused**
-(`has multiple doors`), and two separate openings between the same two regions
-count separately. The user is placed **0.5 m beyond that throat** into the
+(`has multiple doors`). Diagonal stair-step fragments of one opening are bridged
+and count once; two openings separated by a wall count separately. The user is
+placed **0.5 m beyond that throat** into the
 neighbouring region, continuing the line from the room's label through the throat;
 if that line hits a wall it falls back to the nearest walkable point. The pin is
 always walkable.

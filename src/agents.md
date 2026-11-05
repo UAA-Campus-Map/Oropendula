@@ -1154,8 +1154,9 @@ outside the room's door. `resolveRoomPin(building, hit, campusRouter)`:
    (region boundaries)** on its territory; a throat narrower than a body
    (`0.6 m`) is not a door, and doors into rooms smaller than `8 m²`
    (closets/shafts) do not count. **More than one door -> `has multiple doors`**;
-   one door is used. Two separate openings between the same two regions are counted
-   separately (boundary cells are split into connected components).
+   one door is used. Boundary cells are 8-connected and bridged across one free
+   cell, so a diagonal stair-step fragment of one opening counts once; two
+   openings separated by a wall still count separately.
 3. **Placement**: 0.5 m beyond the throat into the neighbouring region,
    continuing the **label -> throat** line (the label is a stable
    inside-the-room reference). Fallbacks when that line runs into a wall: the
@@ -1172,6 +1173,10 @@ Hard-won notes:
 - The old approach (probe an 8 m-away door and prove no other doorway is crossed)
   rejected most rooms; doors now come from watershed connectivity, so an opening
   wide enough to walk through is a door regardless of the DXF leaf.
+- A 4-connected boundary split falsely turns one diagonal stair-step throat into
+  two doors. `watershed.mjs` bridges one free cell before labelling; `200U2`
+  (one 0.8 m opening) resolves while ECB `208` (three real doors) and AS101-02
+  `210` (two real openings) still refuse.
 - **SU floor 02 is special**: its raster is one open ~1000 m2 blob (wall gaps not
   covered by door leaves), so room/door reasoning there is approximate. We tried a
   `buildGraphState` **gap-seal pass** (bridge wall ends < 1 m with no door leaf)

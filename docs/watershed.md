@@ -29,12 +29,18 @@ module derives doors from a segmentation instead of from leaf geometry.
    seeds (stairs, elevators, exits; if none, the widest open cell). Grow with a
    max-heap on DT (deterministic tie-break by cell index), so fronts meet at
    **narrow throats** rather than in the middle of open space.
-4. **Adjacency / throats**: boundary cells between two regions are collected and
-   split into **connected components** — two separate openings between the same
-   two regions are two doors, not one. Each throat's width is `2 × max DT` on its
+4. **Adjacency / throats**: boundary cells between two regions are collected,
+   bridged across **one layer of unblocked cells**, and split into
+   **8-connected components**. Watershed fronts often meet along a diagonal
+   stair-step, so this bridge keeps one physical opening as one door; a wall
+   still separates genuine openings. Each throat's width is `2 × max DT` on its
    component.
 5. **4-colouring**: greedy colouring of the region-adjacency graph (4 colours by
    default; a 5th only if a floor forces it).
+
+The bridge is deliberately local: one cell (`0.2 m`) and only into unblocked
+cells. It is not a blanket merge of every boundary between a region pair, so
+two openings separated by a wall remain two doors.
 
 Everything is deterministic (no simulated annealing); the watershed is cheap
 enough to compute lazily per floor (~0.1–0.4 s on the real campus).

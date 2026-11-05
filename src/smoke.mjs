@@ -3235,6 +3235,32 @@ const floor = { floorId: fl.floorId, navGraph: graph, obstacleLines: lines,
   roomLabels, doorways, doorPoints };
 const building = { id: cfg.id, sourceId: data.ID, groundFloor: cfg.groundFloor, floors: [floor] };
 const router = buildCampusRouter([building]);
+
+// Build the same minimal Room Pin fixture for another real floor. Kept local
+// to the roompin gate so the regression tests can cover several buildings.
+function pinFixture(buildingId, floorId) {
+  const cfg2 = CONFIG.find((b) => b.id === buildingId);
+  const fl2 = cfg2.floors.find((f) => f.floorId === floorId);
+  const data2 = JSON.parse(readFileSync(new URL('.' + fl2.url, import.meta.url), 'utf8'));
+  const toLL2 = makeToLL(cfg2, fl2);
+  const { lines: lines2, doors: doorPoints2 } = navGraphInputs(cfg2, fl2, data2, toLL2);
+  const graph2 = graphFromState(buildGraphState(lines2, doorPoints2, { passages: false }));
+  const portals2 = portalsFromCache(fl2.portals, toLL2);
+  const exits2 = (fl2.exits?.length ? fl2.exits : portals2.exits)
+    .map((e, i) => ({ id: e.id ?? `exits-${i}`, ll: toLL2(e.dxf[0], e.dxf[1]) }));
+  const doorways2 = doorwaysFromShapes(data2.shapes, toLL2);
+  const roomLabels2 = (data2.text_lines ?? []).map((t) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: toLL2(t.x, t.y) },
+    properties: { text: String(t.text ?? '').trim() },
+  })).filter((f) => f.properties.text);
+  const floor2 = { floorId: fl2.floorId, navGraph: graph2, obstacleLines: lines2,
+    elevators: portals2.elevators, stairs: portals2.stairs, exits: exits2, skybridges: [],
+    roomLabels: roomLabels2, doorways: doorways2, doorPoints: doorPoints2 };
+  const building2 = { id: cfg2.id, sourceId: data2.ID, groundFloor: cfg2.groundFloor, floors: [floor2] };
+  return { building: building2, router: buildCampusRouter([building2]) };
+}
+
 const hit = findRoomExact(building, '208');
 check('exact room lookup finds ECB 208', !hit.error && hit.floor.floorId === '02', hit.error ?? '');
 const multi = hit.error ? hit : resolveRoomPin(building, hit, router);
@@ -3248,6 +3274,34 @@ check('pin point is outside the doorway', !pin.error &&
   Math.hypot((pin.ll[0] - pin.doorLL[0]) * metresPerDegree(pin.ll[1]).lon,
              (pin.ll[1] - pin.doorLL[1]) * metresPerDegree(pin.ll[1]).lat) > 0.3,
   pin.error ?? '');
+
+// A diagonal watershed boundary used to split one 0.8 m doorway into two
+// 4-connected throat fragments. The one-cell free-space bridge must join them.
+const hitStair = findRoomExact(building, '200U2');
+check('exact room lookup finds a stair-step throat room',
+  !hitStair.error && hitStair.floor.floorId === '02', hitStair.error ?? '');
+const pinStair = hitStair.error ? hitStair : resolveRoomPin(building, hitStair, router);
+check('a diagonal stair-step throat is one door', !pinStair.error, pinStair.error ?? '');
+
+// AS162-02 room 202 has the same problem with a two-cell stair step (0.566 m
+// between fragments), which 8-connectivity alone does not bridge.
+const as162 = pinFixture('AS162', '02');
+const hit202 = findRoomExact(as162.building, '202');
+check('exact room lookup finds a two-cell stair-step room',
+  !hit202.error && hit202.floor.floorId === '02', hit202.error ?? '');
+const pin202 = hit202.error ? hit202 : resolveRoomPin(as162.building, hit202, as162.router);
+check('a two-cell stair-step throat is one door', !pin202.error, pin202.error ?? '');
+
+// Two genuinely separate openings between the same two regions must stay
+// ambiguous; the bridge must not merge them.
+const as101 = pinFixture('AS101', '02');
+const hit210 = findRoomExact(as101.building, '210');
+check('exact room lookup finds a same-region two-door room',
+  !hit210.error && hit210.floor.floorId === '02', hit210.error ?? '');
+const multi210 = hit210.error ? hit210 : resolveRoomPin(as101.building, hit210, as101.router);
+check('two real same-region openings are still refused',
+  multi210.error === 'Room 210 has multiple doors.', multi210.error ?? '');
+
 check('unknown exact room is rejected', !!findRoomExact(building, 'ZZZ').error);
 
 // The door comes from the watershed room territory / corridor throat (the
