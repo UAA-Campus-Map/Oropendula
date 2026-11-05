@@ -410,7 +410,8 @@ archive for the basemap.
   byte-identical to `@mapbox/vector-tile`.
 - Layer names beyond doors matter too: portal matching is case-insensitive
   (`DOORS`, `STAIRS`, `elevator`); walls are matched case-insensitively
-  (`WALLS`/`Windows`/`WINDOWS`).
+  (`WALLS`/`Windows`/`WINDOWS`, plus `Glass`: SU floor 01's food-court
+  storefront around Subway and the Seawolf Marketplace).
 
 ## Outdoor graph invariants (hard-won)
 
