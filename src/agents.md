@@ -100,17 +100,30 @@ in code, docs, deployment, and import-tool settings.
   `LngLat` properties are `lng`/`lat`. Marker handlers must read the placement
   at event time — the marker outlives refreshes.
 - `motion.mjs` — PDR signal processing + sensor wiring. Pure, testable classes:
-  `StepDetector` (scalar `|a|` high-pass + dynamic-envelope peak detection — see
-  below), `HeadingTracker` (circular compass smoothing + gyro bridging + bias),
-  `StepLengthModel` (cadence-scaled, clamped), `WalkCalibrator`.
-  `createMotion(opts)` normalises DeviceMotion/DeviceOrientation (iOS needs a
-  user-gesture permission and reports `webkitCompassHeading`). Headings are
-  radians clockwise-from-north.
+  `StepDetector` (gravity-projected, band-passed, rhythm-gated peak detection),
+  `HeadingTracker` (**compass/gyro complementary filter** with a rotation
+  consistency gate, gyro-bias learning, trust state and heading uncertainty —
+  see Positioning), `StepLengthModel` (cadence-scaled, clamped),
+  `WalkCalibrator`. `createMotion(opts)` normalises
+  DeviceMotion/DeviceOrientation (iOS needs a user-gesture permission and
+  reports `webkitCompassHeading`), prefers an opportunistic raw Generic-Sensor
+  magnetometer, rotates gyro rates into the world frame with the attitude, and
+  never mixes heading frames. Headings are radians clockwise-from-north.
+- `magnetometer.mjs` — magnetic hygiene. `MagneticFieldTracker` flags a
+  disturbed field (magnitude out of range / far from its median / abrupt
+  jump); `MagnetometerCalibration` fits hard iron (sphere centre) and diagonal
+  soft iron from a figure-8 and refuses an under-covered fit;
+  `tiltCompensatedHeading` turns a corrected 3-axis field + gravity into a
+  bearing. See `docs/magnetometer.md`.
 - `locate.mjs` — map-matching particle filter. `ParticleFilter` advances each
   particle one step per detected step and weights by `isWalkable`. `corridorAxis
   (isWalkable, ll)` ray-casts the free space to find a corridor bearing (null in
   open rooms). `HeadingDriftCalibrator` is the older corridor-only drift trimmer
-  (kept for reference; the app now uses `CompassSnapper`).
+  (kept for reference; the app now uses `CompassSnapper`). **Recovery is
+  anchored, never per-particle:** when almost the whole cloud is off-plan it
+  re-seeds around the last healthy mean (or the best walkable particle) with a
+  swept spray; snapping each particle with `nearestWalkable` could land on the
+  far side of a wall and let the walker "walk through" it.
 - `headingfield.mjs` — the floor's **allowed compass directions**. `buildPassages
   (nodes, adj, doorsM, segments)` turns every navgraph edge and every interior
   doorway into a bearing-bearing segment (built inside the navgraph worker);
@@ -561,6 +574,29 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   never double-count. Note that the base itself now decays by ×0.95 per step
   whenever the corridor snapper is not locked (see the hallway bullet below);
   only the manual trim is fixed.
+- **Compass/gyro fusion and magnetic interference** (`motion.mjs`,
+  `magnetometer.mjs`). The compass is now one *witness*, not truth. The gyro is
+  integrated continuously (with the device rate rotated into the world frame by
+  `worldYawRate`, so a tilted phone measures yaw correctly), its bias is learned
+  slowly while the compass is trusted and the walker is moving steadily, and a
+  **consistency gate** rejects a compass that disagrees with the gyro
+  prediction for two consecutive samples. The heading then **coasts on the
+  gyro** until the compass agrees again for a few samples; gating is on
+  rotation consistency with a **recent-peak** turn-rate-scaled lag budget, never
+  on absolute offset, so a real turn cannot be mistaken for drift (the old
+  failed idea). The peak-hold matters: after a fast turn the gyro reads ~0 while
+  the low-passed compass is still catching up, and the instantaneous-rate
+  budget treated that catch-up as interference and froze the heading.
+  `headingSigmaRad` widens with time-since-trust and is fed to the particle
+  filter, which no longer treats a wrong compass as exact. A raw Generic-Sensor
+  magnetometer, when the platform exposes it, also feeds `MagneticFieldTracker`
+  (instant magnitude/disturbance signal) and a one-time figure-8 iron fit.
+  After `maxUntrustedS` a doubtful absolute compass is re-accepted; outdoors the
+  GPS course is an independent absolute witness, indoors the heading field is.
+  The honest limit: a locally consistent distortion over a whole corridor is
+  invisible to the gate and cannot be removed by an iron fit — the plan and GPS
+  remain the absolute references. Kill switch: `?nofusion=1` /
+  `localStorage['pdr-fusion']='off'` reverts to the legacy compass-only smoother.
 - **Hallway heading-drift correction** (`CompassSnapper` in `app.html` and
   `index.html`; `HeadingDriftCalibrator` remains the older reference class).
   The compass drifts indoors; a person walking a
@@ -573,7 +609,10 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   bias the compass arrow, PDR and trim slider share (so one fix corrects all
   three; the filter's own `headingBias` is left alone to avoid double-counting).
   An **intentional turn** (a >25° step or >35° net over 3 steps) releases the
-  lock and re-locks on the new direction when the field is confident.
+  lock and re-locks on the new direction when the field is confident. A **slow
+  sustained turn** (never >35° over 3 steps) also releases via a longer
+  6-step/20° trend, and while a turn is developing no correction is applied, so
+  the snapper cannot fight a legitimate turn or leave the heading short of it.
   **While the snapper is not locked, `baseHeadingBias` decays by ×0.95 per
   step** toward the raw compass, so a bad correction (or a stale
   walk-calibration offset) can recover; the ±45° manual trim does not decay.

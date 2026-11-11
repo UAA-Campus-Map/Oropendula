@@ -7,8 +7,9 @@ happened** and **which way the walker is facing** — plus a step-length model.
 It is pure, testable code; the browser wiring is one small function.
 
 Exports: `StepDetector`, `HeadingTracker`, `StepLengthModel`, `WalkCalibrator`,
-`sensorSupport`, `headingFromOrientation`, `createMotion`, and the angle helpers
-`wrapAngle`, `shortestDelta`, `clamp`.
+`sensorSupport`, `headingFromOrientation`, `createMotion`, `worldYawRate`,
+`DECLINATION_E_DEG`, and the angle helpers `wrapAngle`, `shortestDelta`,
+`clamp`.
 
 ## Theory & why
 
@@ -41,15 +42,57 @@ the buffered peaks released. A long gap ends the walk and resets the rhythm.
 ### Heading (`HeadingTracker`)
 
 The compass sets the absolute heading (with a calibrated **bias**); the gyro
-bridges gaps. Compass samples are smoothed **circularly** (sin/cos accumulators,
-so the value never jumps across the ±π seam) with a time-based low-pass; gyro
-integration is applied directly but only when the compass is stale
-(`gyroBridgeAfterMs`) — otherwise it would just add jitter. This rides out a
-transient magnetic disturbance on the gyro until the next trustworthy compass
-sample. `gyroSign` maps device-frame rotation to our bearing convention. It
-exposes both `heading` (compass + bias) and `rawHeading` (the compass alone,
-smoothed the same way, no bias/trim) so the readout can show the **raw** and
-**corrected** headings side by side.
+carries it between samples **and through magnetic disturbances**. Since the
+fusion work this is a complementary filter, not the old "bridge only while the
+compass is stale" rule:
+
+- **Continuous gyro integration.** Every gyro sample advances the fused heading
+  (and a shadow prediction) by the bias-corrected yaw rate. `worldYawRate`
+  rotates DeviceMotion's device-frame rate into the world frame using the
+  attitude (`beta`/`gamma`) — integrating `rotationRate.alpha` alone is only
+  correct when the phone is flat.
+- **Consistency gate.** A compass sample is accepted only when it agrees with
+  the gyro prediction within `compassTol` plus a turn-lag budget. The budget
+  uses a **recent-peak turn rate** (`_rateLag`, decaying over `rateLagTauS`),
+  not the instantaneous rate: after a fast turn the gyro reads ~0 while the
+  low-passed compass is still catching up, and that catch-up must not look like
+  magnetic interference. A mismatch that persists drops the compass out of
+  trust (`state: 'coasting'`); the heading then runs on the bias-corrected gyro
+  until the compass agrees for `reacquireSamples` / `reacquireS`. Gating on
+  **rotation consistency**, never absolute offset, keeps a real turn from being
+  mistaken for drift (the old gyro-correction idea's failure).
+- **Gyro bias** is learned on a long baseline while the compass is trusted, the
+  walker is moving and not turning, and the phone is not idle. A set-down phone
+  or an elevator motor must not teach the gyro a fake rotation.
+- **Degradation ladder.** `headingSigmaRad` widens with time-since-trust and is
+  fed to the particle filter; after `maxUntrustedS` a doubtful absolute compass
+  is re-accepted (a drifting gyro-only heading is worse). The app additionally
+  re-biases from GPS course outdoors and the heading field indoors.
+- **Magnetic disturbance.** `createMotion` can feed
+  `HeadingTracker.setMagneticDisturbance()` from `magnetometer.mjs`
+  (`MagneticFieldTracker`), the fast magnitude-based signal. The two gates
+  compose.
+- **No gyro / `fusion: false`**: the tracker is exactly the old compass-only
+  smoother, so Firefox/desktop and the legacy tests are unaffected.
+
+Compass samples are smoothed **circularly** (sin/cos accumulators, so the value
+never jumps across the ±π seam) with a time-based low-pass. `rawHeading` is the
+same smoothing before bias/trim. It exposes both so the readout can show the
+**raw** and **corrected** headings side by side.
+
+The gate only sees *changes*: a locally consistent distortion (a corridor whose
+rebar bends the field uniformly) is invisible to it, and a one-time iron fit
+cannot remove a field that varies with position. The floor plan and GPS course
+remain the absolute witnesses. See [`magnetometer.md`](magnetometer.md).
+
+### Frames and declination
+
+All headings are **true-north** radians clockwise from north. Raw magnetometer
+headings are magnetic and add `DECLINATION_E_DEG` (+15.4° at Anchorage,
+WMM2025). iOS `webkitCompassHeading` depends on Location Services (true when
+on); `deviceorientationabsolute` is OS-fused. Frames are **never mixed**:
+`createMotion` uses one primary source — `raw-mag` (opportunistic Generic
+Sensor magnetometer), else `os-fused`, else the calibrated `relative` frame.
 
 ### Step length (`StepLengthModel`)
 

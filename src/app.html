@@ -1554,6 +1554,7 @@
     import { loadOsmShapes } from './osm.mjs';
     import { metresPerDegree, makeToLL } from './geo.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
+    import { MagnetometerCalibration } from './magnetometer.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
     import { AnchorStepCalibrator } from './anchorcal.mjs';
     import { ParticleFilter } from './locate.mjs';
@@ -1647,6 +1648,7 @@
     const blockDoorModal = document.getElementById('block-door-modal');
     const blockDoorContext = document.getElementById('block-door-context');
     const blockDoorError = document.getElementById('block-door-error');
+    const blockDoorConfirm = document.getElementById('block-door-confirm');
     const interfaceTour = document.getElementById('interface-tour');
     const tourSpotlight = document.getElementById('tour-spotlight');
     const tourTip = document.getElementById('tour-tip');
@@ -1696,6 +1698,15 @@
     const headingSnapVal = document.getElementById('heading-snap-val');
     const headingSnapToggle = document.getElementById('heading-snap-toggle');
     const statusText = document.getElementById('status-text');
+    // Action feedback ("Plan a route first", "Blocked ...") must survive the
+    // live-position status line, which renderEstimate rewrites on every fix.
+    // Holding the message briefly is what makes those actions visibly do
+    // something instead of flashing and being replaced.
+    let statusHoldUntil = 0;
+    function setStatus(msg, holdMs = 3500) {
+      statusText.textContent = msg;
+      statusHoldUntil = performance.now() + holdMs;
+    }
     const graphStats = document.getElementById('graph-stats');
     const regionsToggle = document.getElementById('regions-toggle');
     const calStateIcon = document.getElementById('cal-state-icon');
@@ -2292,6 +2303,11 @@
       applyHeadingTrim();
     }
 
+    /** Heading uncertainty (radians) for the particle filter, from fusion. */
+    function headingUncertainty() {
+      return motion?.heading?.headingSigmaRad ?? null;
+    }
+
     // --- calibration methods -------------------------------------------------
     // Step length ≈ 0.415 × height (an average walking step; the same figure
     // that lands a 1.75 m walker on the model's 0.72 m default).
@@ -2696,15 +2712,27 @@
 
     // --- corridor-lock pill (#corridor-badge) -------------------------------
     const CORRIDOR_BADGE_TEXT = 'Heading locked to hallway';
+    const COAST_BADGE_TEXT = 'Compass disturbed — holding heading on gyro';
     let corridorLocked = false;
+    let headingCoasting = false;
     function renderCorridorBadge() {
       if (!corridorBadgeEl) return;
-      const text = corridorLocked ? CORRIDOR_BADGE_TEXT : null;
+      const text = corridorLocked ? CORRIDOR_BADGE_TEXT
+        : (headingCoasting ? COAST_BADGE_TEXT : null);
       corridorBadgeEl.hidden = text == null;
       if (text != null && corridorBadgeEl.textContent !== text) corridorBadgeEl.textContent = text;
     }
     function setCorridorBadge(on) {
       corridorLocked = !!on;
+      renderCorridorBadge();
+    }
+    /** Reflect the compass/gyro trust state (fusion) in the same pill. */
+    function updateHeadingTrust() {
+      const h = motion?.heading;
+      const coasting = !!(h && h.hasHeading && h.hasGyro
+        && h.state !== 'trusted' && h.state !== 'searching');
+      if (coasting === headingCoasting) return;
+      headingCoasting = coasting;
       renderCorridorBadge();
     }
 
@@ -3557,24 +3585,34 @@
     }
 
     function openBlockDoor() {
+      // Always open the dialog. Previously a missing route/portal only wrote to
+      // the status chip, which live positioning immediately overwrote, so the
+      // button looked dead.
       const portal = nextBlockablePortal(lastRoute);
-      if (!lastRoute) {
-        statusText.textContent = 'Plan a route before blocking a door';
-        return;
-      }
-      if (!portal) {
-        statusText.textContent = 'No door or staircase left on this route to block';
-        return;
-      }
       pendingBlockPortal = portal;
       setBlockDoorError('');
-      blockDoorContext.textContent =
-        `Block ${blockPortalLabel(portal)} and find another route?`;
+      if (!lastRoute) {
+        blockDoorContext.textContent =
+          'Plan a route first, then mark a door or staircase on it as blocked.';
+        blockDoorConfirm.disabled = true;
+        setStatus('Plan a route before blocking a door');
+      } else if (!portal) {
+        blockDoorContext.textContent =
+          'This route has no door or staircase left to block. Choose a route that '
+          + 'passes through a doorway, stairs or an elevator.';
+        blockDoorConfirm.disabled = true;
+        setStatus('No door or staircase left on this route to block');
+      } else {
+        blockDoorContext.textContent =
+          `Block ${blockPortalLabel(portal)} and find another route?`;
+        blockDoorConfirm.disabled = false;
+      }
       blockDoorModal.hidden = false;
     }
 
     function closeBlockDoor() {
       blockDoorModal.hidden = true;
+      blockDoorConfirm.disabled = false;
       pendingBlockPortal = null;
     }
 
@@ -3586,15 +3624,16 @@
       const portal = pendingBlockPortal;
       blockedPortals.add(portal.key);
       blockDoorModal.hidden = true;
+      blockDoorConfirm.disabled = false;
       pendingBlockPortal = null;
       const req = lastRouteRequest;
       const route = planRoute(req.startLL, req.endLL, req.opts);
       if (route) {
         showRoute(route);
-        statusText.textContent = `Blocked ${blockPortalLabel(portal)} — alternate route found`;
+        setStatus(`Blocked ${blockPortalLabel(portal)} — alternate route found`);
       } else {
         showRoute(null);
-        statusText.textContent = `Blocked ${blockPortalLabel(portal)} — no alternate route found`;
+        setStatus(`Blocked ${blockPortalLabel(portal)} — no alternate route found`);
       }
     }
 
@@ -3946,6 +3985,26 @@
     // localStorage, so a reload returns to the walk-calibrated bias.
     const headingSnapper = new CompassSnapper();
     let headingSnapEnabled = true;    // advanced-panel toggle
+    // Compass/gyro fusion can be disabled at runtime (revert to the legacy
+    // heading pipeline) via ?nofusion=1 or the stored kill switch.
+    let compassFusion = true;
+    try {
+      const q = new URLSearchParams(location.search);
+      const flag = q.get('nofuse') ?? q.get('nofusion');
+      compassFusion = !(flag === '1' || flag === 'off')
+        && localStorage.getItem('pdr-fusion') !== 'off';
+    } catch (e) { /* ignore */ }
+    let savedGyroBias = 0;
+    try {
+      const gb = parseFloat(localStorage.getItem('pdr-fusion-v1-gyro-bias'));
+      if (Number.isFinite(gb)) savedGyroBias = Math.max(-0.05, Math.min(0.05, gb));
+    } catch (e) { /* ignore */ }
+    // A figure-8 iron fit made in locate-test (or a future settings screen).
+    let savedIronCal = null;
+    try {
+      savedIronCal = MagnetometerCalibration.fromJSON(
+        JSON.parse(localStorage.getItem('pdr-mag-iron-v1') || 'null'));
+    } catch (e) { savedIronCal = null; }
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -4426,7 +4485,8 @@
       const statusTxt = est.source === 'gps'
         ? `GPS ±${Math.round(est.accuracyM * FT_PER_M)} ft`
         : `Dead reckoning ±${Math.round(est.accuracyM * FT_PER_M)} ft`;
-      if (statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
+      if (performance.now() >= statusHoldUntil &&
+          statusText.textContent !== statusTxt) statusText.textContent = statusTxt;
       rerouteFromEstimate();
     }
 
@@ -4598,6 +4658,8 @@
     function startMotion() {
       if (motion) return motion.start();
       motion = createMotion({
+        fusion: compassFusion,
+        ironCalibration: savedIronCal,
         onStep: ({ t, cadenceHz }) => {
           // Keep the recent cadence for route ETAs. Smooth lightly so one
           // irregular step interval does not swing the estimate.
@@ -4626,14 +4688,26 @@
           anchorCal.addStep({ t, headingRad: heading, cadenceHz });
           locator.arbiter.setHeading(heading);
           const stepLengthM = stepModel.lengthFor(cadenceHz);
-          locator.arbiter.step({ stepLengthM, headingRad: heading });
+          // The fusion core's heading uncertainty lets the particle filter
+          // tighten its spread when the compass is trusted and widen it while
+          // coasting on the gyro, instead of treating every heading as exact.
+          locator.arbiter.step({
+            stepLengthM,
+            headingRad: heading,
+            headingSigmaRad: headingUncertainty(),
+          });
+          // A gyro-observed turn releases the corridor lock BEFORE a disturbed
+          // compass can hide it (steel stairwells, elevators).
+          if (motion.heading.turning) headingSnapper.release();
           const est = autoSwitchSkybridge(locator.arbiter.estimate(t));
           applyHeadingSnap(est, heading);
+          updateHeadingTrust();
           renderEstimate(est);
         },
         onHeading: ({ heading, raw }) => {
           if (locator) locator.arbiter.setHeading(heading);
           updateHeadingDisplay(heading, raw);
+          updateHeadingTrust();
         },
         onStatus: ({ type }) => {
           if (type === 'permission-denied') {
@@ -4649,9 +4723,28 @@
         motion.setHeadingMode('relative');
         if (savedHeadingBias != null) baseHeadingBias = savedHeadingBias;
       }
+      // Restore the learned gyro bias (session-persistent) so a warm start does
+      // not have to relearn it inside a steel-heavy walk.
+      if (compassFusion && Number.isFinite(savedGyroBias)) {
+        motion.heading.gyroBiasRadS = savedGyroBias;
+      }
       applyHeadingTrim();
+      // Persist the learned bias when the page goes away. Versioned key so a
+      // bad early release cannot poison a later one.
+      if (!appGyroBiasHooked) {
+        appGyroBiasHooked = true;
+        window.addEventListener('pagehide', () => {
+          try {
+            if (motion) {
+              localStorage.setItem('pdr-fusion-v1-gyro-bias',
+                String(motion.heading.gyroBiasRadS));
+            }
+          } catch (e) { /* ignore */ }
+        });
+      }
       return motion.start();
     }
+    let appGyroBiasHooked = false;
 
     function successPosition(position) {
       const { latitude, longitude, accuracy } = position.coords;
@@ -4683,7 +4776,27 @@
       const t = performance.now();
       ensureLocator(posLonLat);
       if (locator) {
-        locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
+        locator.arbiter.gps({
+          lon: longitude, lat: latitude, accuracy, t,
+          speedMps: position.coords.speed,
+          courseDeg: position.coords.heading,
+        });
+        // Outdoor GPS course is an independent absolute heading witness (true
+        // north). Nudge the heading bias only when the fused compass is
+        // trusted, the phone is moving, and the fix is not inside a building -
+        // indoors the course is unreliable and the floor plan is the witness.
+        if (motion?.heading?.hasHeading && motion.heading.trusted
+            && !locator.arbiter.insideBuilding({ lon: longitude, lat: latitude })
+            && Number.isFinite(position.coords.heading)
+            && Number.isFinite(position.coords.speed)
+            && position.coords.speed > 0.6) {
+          const err = motion.heading.courseError(
+            position.coords.heading * Math.PI / 180, { tolDeg: 25 });
+          if (err != null && Math.abs(err) > 2 * Math.PI / 180) {
+            baseHeadingBias = wrapAngle(baseHeadingBias + 0.15 * err);
+            applyHeadingTrim();
+          }
+        }
         renderEstimate(autoSwitchSkybridge(locator.arbiter.estimate(t)));
       }
       // ...and to the step-length auto-calibrator: RAW GPS ONLY. Its inputs

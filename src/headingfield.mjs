@@ -246,6 +246,9 @@ export class CompassSnapper {
     turnStepDeg = 25,
     turnWindowSteps = 3,
     turnWindowDeg = 35,
+    trendSteps = 6,       // a sustained heading trend over this many steps = turn
+    trendDeg = 20,
+    trendHoldFrac = 0.6,  // stop correcting once a turn is this far along
   } = {}) {
     Object.assign(this, {
       snapTol: snapTolDeg * DEG,
@@ -258,6 +261,9 @@ export class CompassSnapper {
       turnStep: turnStepDeg * DEG,
       turnWindowSteps,
       turnWindow: turnWindowDeg * DEG,
+      trendSteps,
+      trend: trendDeg * DEG,
+      trendHoldFrac,
     });
     this.reset();
   }
@@ -268,8 +274,25 @@ export class CompassSnapper {
     this.confidence = 0;
     this.prevHeading = null;
     this.window = [];
+    this.trendWindow = [];
     this.lastTurn = false;
   }
+
+  /**
+   * Release the lock from an EXTERNAL turn cue (the gyro saw a real turn
+   * before the heading stream did). The next confident field query re-locks on
+   * the new direction. Used indoors where a disturbed compass can hide a turn.
+   */
+  release() {
+    this.locked = false;
+    this.dir = null;
+    this.window = [];
+    this.trendWindow = [];
+    this.lastTurn = true;
+  }
+
+  /** The direction currently held (radians, folded), or null when unlocked. */
+  get lockedAxis() { return this.locked ? this.dir : null; }
 
   /**
    * @param {number} headingRad smoothed heading
@@ -289,15 +312,34 @@ export class CompassSnapper {
     if (this.window.length > this.turnWindowSteps) this.window.shift();
     const net = this.window.length >= 2
       ? Math.abs(shortestDelta(this.window[0], headingRad)) : 0;
-    const turning = Math.abs(delta) > this.turnStep || net > this.turnWindow;
+    // A slow, sustained turn never trips the short window (a 90 deg turn over
+    // 4 s is ~11 deg per step, under both thresholds), so the snapper kept
+    // correcting against it and left the heading short of the true direction.
+    // A longer trend window catches those legitimate turns.
+    this.trendWindow.push(headingRad);
+    if (this.trendWindow.length > this.trendSteps) this.trendWindow.shift();
+    const trendNet = this.trendWindow.length >= 2
+      ? Math.abs(shortestDelta(this.trendWindow[0], headingRad)) : 0;
+    const turning = Math.abs(delta) > this.turnStep || net > this.turnWindow
+      || trendNet > this.trend;
     this.lastTurn = turning;
-    if (turning) { this.locked = false; this.dir = null; this.window = [headingRad]; }
+    if (turning) {
+      this.locked = false;
+      this.dir = null;
+      this.window = [headingRad];
+      this.trendWindow = [headingRad];
+    }
+    // Stop pulling while a turn is developing, even before it is confirmed:
+    // otherwise the correction fights the walker and the net trend stays just
+    // under the release threshold.
+    const trendHolding = trendNet > this.trend * this.trendHoldFrac;
 
     const conf = field ? field.confidence : 0;
     this.confidence = conf;
     const candidates = field ? field.candidates : null;
 
-    if (!turning && candidates && candidates.length && conf >= this.minConfidence) {
+    if (!turning && !trendHolding && candidates && candidates.length
+        && conf >= this.minConfidence) {
       if (!this.locked) {
         // Nearest candidate to the current heading, within snapTol.
         let best = null, bestD = Infinity;
@@ -320,10 +362,11 @@ export class CompassSnapper {
     let err = shortestDelta(headingRad, this.dir);
     if (err > PI / 2) err -= PI; else if (err <= -PI / 2) err += PI;
     if (Math.abs(err) > this.maxErr) { this.locked = false; this.dir = null; return idle('mismatch'); }
-    const correctionRad = Math.abs(err) > this.deadband
+    const correctionRad = !trendHolding && Math.abs(err) > this.deadband
       ? clamp(this.gain * err, -this.maxCorr, this.maxCorr) : 0;
     return { locked: true, dir: this.dir, correctionRad, errRad: err,
-      confidence: conf, reason: correctionRad ? 'correcting' : 'locked' };
+      confidence: conf,
+      reason: trendHolding ? 'turn-hold' : (correctionRad ? 'correcting' : 'locked') };
   }
 }
 

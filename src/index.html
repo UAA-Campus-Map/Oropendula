@@ -929,9 +929,33 @@
       applyHeadingTrim();
     }
 
+    /** Heading uncertainty (radians) for the particle filter, from fusion. */
+    function headingUncertainty() {
+      return motion?.heading?.headingSigmaRad ?? null;
+    }
+
     // --- hallway compass-drift correction -----------------------------------
+    let corridorLocked = false;
+    let headingCoasting = false;
+    function renderCorridorBadge() {
+      if (!corridorBadgeEl) return;
+      const text = corridorLocked ? 'Heading locked to hallway'
+        : (headingCoasting ? 'Compass disturbed — holding heading on gyro' : null);
+      corridorBadgeEl.hidden = text == null;
+      if (text != null && corridorBadgeEl.textContent !== text) corridorBadgeEl.textContent = text;
+    }
     function setCorridorBadge(on) {
-      if (corridorBadgeEl) corridorBadgeEl.hidden = !on;
+      corridorLocked = !!on;
+      renderCorridorBadge();
+    }
+    /** Reflect the compass/gyro trust state (fusion) in the same pill. */
+    function updateHeadingTrust() {
+      const h = motion?.heading;
+      const coasting = !!(h && h.hasHeading && h.hasGyro
+        && h.state !== 'trusted' && h.state !== 'searching');
+      if (coasting === headingCoasting) return;
+      headingCoasting = coasting;
+      renderCorridorBadge();
     }
 
     /**
@@ -1754,6 +1778,17 @@
     // turn. SESSION-ONLY - it deliberately does NOT touch localStorage.
     const headingSnapper = new CompassSnapper();
     let headingSnapEnabled = true;
+    // Compass/gyro fusion kill switch (?nofusion=1 / localStorage pdr-fusion).
+    let compassFusion = true;
+    let savedGyroBias = 0;
+    try {
+      const q = new URLSearchParams(location.search);
+      const flag = q.get('nofuse') ?? q.get('nofusion');
+      compassFusion = !(flag === '1' || flag === 'off')
+        && localStorage.getItem('pdr-fusion') !== 'off';
+      const gb = parseFloat(localStorage.getItem('pdr-fusion-v1-gyro-bias'));
+      if (Number.isFinite(gb)) savedGyroBias = Math.max(-0.05, Math.min(0.05, gb));
+    } catch (e) { /* ignore */ }
     // Restore a previously calibrated step length and heading calibration.
     let savedHeadingBias = null;
     let savedHeadingMode = 'absolute';
@@ -2253,6 +2288,7 @@
     function startMotion() {
       if (motion) { motion.start(); return; }
       motion = createMotion({
+        fusion: compassFusion,
         onStep: ({ t, cadenceHz }) => {
           // Calibration counts steps regardless of location.
           if (calibration.active) {
@@ -2270,9 +2306,15 @@
           const heading = motion.heading.heading;
           locator.arbiter.setHeading(heading);
           const stepLengthM = stepModel.lengthFor(cadenceHz);
-          locator.arbiter.step({ stepLengthM, headingRad: heading });
+          locator.arbiter.step({
+            stepLengthM,
+            headingRad: heading,
+            headingSigmaRad: headingUncertainty(),
+          });
+          if (motion.heading.turning) headingSnapper.release();
           const est = locator.arbiter.estimate(t);
           applyHeadingSnap(est, heading);
+          updateHeadingTrust();
           renderEstimate(est);
         },
         onHeading: ({ heading, raw }) => {
@@ -2285,6 +2327,7 @@
           }
           if (locator) locator.arbiter.setHeading(heading);
           updateHeadingDisplay(heading, raw);
+          updateHeadingTrust();
         },
         onStatus: ({ type }) => {
           if (type === 'permission-denied') statusText.textContent = 'Motion sensor access denied';
@@ -2296,9 +2339,24 @@
         motion.setHeadingMode('relative');
         if (savedHeadingBias != null) baseHeadingBias = savedHeadingBias;
       }
+      if (compassFusion && Number.isFinite(savedGyroBias)) {
+        motion.heading.gyroBiasRadS = savedGyroBias;
+      }
       applyHeadingTrim();
+      if (!indexGyroBiasHooked) {
+        indexGyroBiasHooked = true;
+        window.addEventListener('pagehide', () => {
+          try {
+            if (motion) {
+              localStorage.setItem('pdr-fusion-v1-gyro-bias',
+                String(motion.heading.gyroBiasRadS));
+            }
+          } catch (e) { /* ignore */ }
+        });
+      }
       motion.start();
     }
+    let indexGyroBiasHooked = false;
 
     function successPosition(position) {
       const { latitude, longitude, accuracy } = position.coords;
@@ -2330,7 +2388,24 @@
       const t = performance.now();
       ensureLocator(posLonLat);
       if (locator) {
-        locator.arbiter.gps({ lon: longitude, lat: latitude, accuracy, t });
+        locator.arbiter.gps({
+          lon: longitude, lat: latitude, accuracy, t,
+          speedMps: position.coords.speed,
+          courseDeg: position.coords.heading,
+        });
+        // Outdoor GPS course is an independent absolute heading witness.
+        if (motion?.heading?.hasHeading && motion.heading.trusted
+            && !locator.arbiter.insideBuilding({ lon: longitude, lat: latitude })
+            && Number.isFinite(position.coords.heading)
+            && Number.isFinite(position.coords.speed)
+            && position.coords.speed > 0.6) {
+          const err = motion.heading.courseError(
+            position.coords.heading * Math.PI / 180, { tolDeg: 25 });
+          if (err != null && Math.abs(err) > 2 * Math.PI / 180) {
+            baseHeadingBias = wrapAngle(baseHeadingBias + 0.15 * err);
+            applyHeadingTrim();
+          }
+        }
         renderEstimate(locator.arbiter.estimate(t));
       }
       // ...and to the step-length auto-calibrator: RAW GPS ONLY. Its inputs

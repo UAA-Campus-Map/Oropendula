@@ -60,7 +60,12 @@ State machine `SEARCHING -> LOCKED(dir) -> (turn) -> SEARCHING`.
   quantise, so the readout stays continuous.
 - **Turn release:** an *obvious turn* — a single-step change > `turnStepDeg`
   (25°) or a net change > `turnWindowDeg` (35°) over `turnWindowSteps` (3) steps
-  — releases the lock *before* it can fight the turn. At a junction the lock then
+  — releases the lock *before* it can fight the turn. A **slow but sustained
+  turn** (e.g. 90° over 4 s, ~11°/step) never trips those, so a longer trend
+  window (`trendSteps` 6, `trendDeg` 20) releases it too, and once a turn is
+  developing (`trendHoldFrac`) the snapper applies **no correction** even while
+  still locked. Without that, the correction fought a legitimate slow turn and
+  left the heading short of the true direction. At a junction the lock then
   re-snaps to the new branch.
 - **Guards:** nothing outdoors / in free-roam, during the calibration walk, or
   when the field is absent (open room, wide lobby).
@@ -73,13 +78,23 @@ compass and can recover. The ±45° manual trim is separate and does not decay.
 The Advanced panel's *Snap* row shows the locked direction and confidence, and
 *Snap heading to corridors* disables it (which also freezes the decay).
 
-## Why not use the gyro to correct the compass?
+## Why the snapper does not use the gyro to correct the compass
 
-An earlier attempt used the gyro as a rotation reference to *predict* the compass
-and fold the mismatch into an offset. It failed because the compass is laggy and
-on a different scale from the gyro, so real turns looked like drift and were
-suppressed. This design uses the plan for the *directions* and the heading
-stream only to detect turns; the gyro is not needed for the correction.
+An earlier attempt used the gyro as a rotation reference to *predict* the
+compass and fold the mismatch into an offset. It failed because the compass is
+laggy and on a different scale from the gyro, so real turns looked like drift
+and were suppressed.
+
+That lesson stands, and it shapes the current fusion design (`motion.mjs`):
+the gyro is **not** used to correct the compass's absolute value. Instead the
+compass/gyro consistency gate operates on **rotation** over a short window with
+a turn-rate-scaled tolerance, so lag cannot masquerade as drift, and it never
+folds an offset into the bias. The snapper still gets its *directions* from the
+plan; the gyro only releases the lock when it observes a real turn (steel
+stairwells, elevators) that a disturbed compass could hide.
+
+Indoors the heading field remains the magnetic-free absolute direction witness;
+it is also what the app uses to re-bias after a long gyro-only coast.
 
 ## See also
 

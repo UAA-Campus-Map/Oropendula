@@ -62,9 +62,15 @@ down-weights particles behind the (measured) heading, and the arbiter's
 U-turn step or a stall-recovery step lifts both.
 
 **It must be able to recover.** If the cloud is misplaced and *every* step is
-blocked, a naive filter freezes. The **stall guard** relaxes the priors for a few
-steps so the noise re-diffuses the cloud toward a doorway — while collision stays
-on, so a particle still never crosses a wall.
+blocked, a **last-resort recovery** re-seeds the cloud from a single anchor:
+the last position at which the cloud was healthy (falling back to the walkable
+particle with the highest weight, and only then to the nearest walkable cell).
+Seeding is a swept spray from that anchor, so no particle can appear on the far
+side of a wall. This matters: snapping each particle independently with
+`nearestWalkable` would cross walls whenever the cloud sat just past a wall's
+centreline. The **stall guard** below also relaxes the priors for a few steps
+so the noise re-diffuses the cloud toward a doorway — while collision stays on,
+so a particle still never crosses a wall.
 
 **Never report an impossible point.** `estimate()` averages only walkable
 particles (a cloud straddling a thin wall would otherwise average *into* the
@@ -94,6 +100,18 @@ the belief does *not* collapse on its own.)
   outdoor PDR works even without free roam / GPS.
 - `points()` returns `{ lon, lat, w }` for the map overlay (`w` is relative
   weight); empty until seeded.
+- `predict` accepts an optional `headingSigma` (radians) from the fusion
+  core; it narrows the per-step jitter when the compass is trusted and widens it
+  while coasting on the gyro, never beyond the configured `headingJitterDeg`.
+  `null` keeps the legacy fixed jitter.
+- **Recovery never teleports across a wall.** `_recover()` picks one anchor
+  (`_recoveryAnchor`: last good mean -> best walkable particle -> nearest
+  walkable) and re-seeds the whole cloud around it with a sweep, instead of
+  calling `nearestWalkable` per particle. `lastGood` is updated only on a
+  healthy step.
+- `_pickSurvivor()` only returns walkable particles, and post-resample
+  roughening re-anchors a non-walkable source to `lastGood`, so a particle that
+  slipped into a wall cannot seed a new generation behind it.
 - **Respawn and roughening jitter are swept, not endpoint-tested.** A wall-killed
   particle inherits a surviving particle's position and a Gaussian jitter; the
   jitter segment is walked with `_advance` so a larger spread (e.g. 0.3 m)

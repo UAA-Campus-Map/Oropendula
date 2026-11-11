@@ -322,6 +322,8 @@ export class ParticleFilter {
     // (a short step cannot jump the ~0.6 m clearance band).
     this._fastAdvanceMaxM = 1.0;
     this.headingBias = 0;
+    // Latest heading uncertainty from the fusion core (null = not provided).
+    this.headingSigmaRad = null;
     // When the walker is outside the bound building, PDR must NOT be tied to
     // the floor-plan raster (skybridges, the gaps between buildings and any
     // unmapped walkway are all off it). Free roam lifts the walkability
@@ -331,6 +333,11 @@ export class ParticleFilter {
     this.initialized = false;
     this.lastHeading = null;   // measured heading at the previous step
     this.reversed = false;     // this step followed a ~180 deg U-turn
+    // The last weighted mean at which the cloud was HEALTHY (enough walkable
+    // particles). Recovery re-seeds around this, never around a per-particle
+    // nearest-walkable snap: the latter can jump the whole cloud - and the
+    // walker - to the other side of a wall.
+    this.lastGood = null;
     this.accuracyM = Infinity; // the arbiter's trusted accuracy radius
     this.stallCount = 0;
     this.relaxLeft = 0;
@@ -394,12 +401,21 @@ export class ParticleFilter {
     this.stallCount = 0;
     this.relaxLeft = 0;
     this._prevMean = null;
+    this.lastGood = { lon: base[0], lat: base[1] };
     this.version++;
   }
 
-  predict(stepLengthM, headingRad, { accuracyM = Infinity } = {}) {
+  predict(stepLengthM, headingRad, { accuracyM = Infinity, headingSigmaRad = null } = {}) {
     if (!this.initialized) return;
     this.accuracyM = accuracyM;
+    // Heading uncertainty from the fusion core. Trusted headings tighten the
+    // per-step spread (better along-corridor accuracy); a gyro-coasting heading
+    // widens it so the cloud does not follow a wrong compass with false
+    // confidence. Never exceeds the configured maximum jitter.
+    this.headingSigmaRad = headingSigmaRad;
+    const headingJitter = headingSigmaRad != null
+      ? Math.min(this.headingJitter, Math.max(0, headingSigmaRad))
+      : this.headingJitter;
 
     // A ~180 deg swing in the measured heading is an intentional U-turn. This
     // step must not punish the (now-behind) particles or the cloud would
@@ -412,10 +428,11 @@ export class ParticleFilter {
     // across a floor, so recomputing it per particle (40k times) was pure waste.
     const mpd = metresPerDegree(this.lat[0]);
     this._mpd = mpd;
-    const jitter = this.headingJitter, distNoise = this.distanceNoise, latNoise = this.lateralNoiseM;
+    const jitter = headingJitter, distNoise = this.distanceNoise, latNoise = this.lateralNoiseM;
     const bias = this.headingBias, hOff = this._hOff;
     for (let i = 0; i < this.count; i++) {
-      // Uniform random heading jitter in +/- headingJitter (default +/-35 deg).
+      // Uniform random heading jitter in +/- jitter (default +/-35 deg; tighter
+      // when the fusion core reports a trusted heading).
       const h = headingRad + bias + hOff[i] + (Math.random() * 2 - 1) * jitter;
       const d = Math.max(0.05, stepLengthM * (1 + gaussian() * distNoise));
       // Lateral jitter PERPENDICULAR to the travel direction (not on the east
@@ -471,8 +488,10 @@ export class ParticleFilter {
    */
   _respawn(i, heading) {
     const src = this._pickSurvivor();
-    const bx = src >= 0 ? this.lon[src] : this.lon[i];
-    const by = src >= 0 ? this.lat[src] : this.lat[i];
+    // Prefer a walkable survivor. With none, fall back to the last healthy
+    // position (never a particle that may be sitting inside a wall).
+    const bx = src >= 0 ? this.lon[src] : (this.lastGood?.lon ?? this.lon[i]);
+    const by = src >= 0 ? this.lat[src] : (this.lastGood?.lat ?? this.lat[i]);
     const [plon, plat] = offsetLL(bx, by,
       gaussian() * this.respawnSpreadM, gaussian() * this.respawnSpreadM);
     if (this.freeRoam) {
@@ -489,11 +508,29 @@ export class ParticleFilter {
     this._hOff[i] = src >= 0 ? this._hOff[src] : 0;
   }
 
-  /** Index of a random particle that still carries weight, or -1. */
+  /** Is particle `i` on walkable ground (or free to move, in free roam)? */
+  _walkableAt(i) {
+    if (this.freeRoam) return true;
+    return typeof this.isWalkable !== 'function'
+      || this.isWalkable([this.lon[i], this.lat[i]]);
+  }
+
+  /** Is this lon/lat on walkable ground (free roam always yes)? */
+  _walkableLL(lon, lat) {
+    if (this.freeRoam) return true;
+    return typeof this.isWalkable !== 'function' || this.isWalkable([lon, lat]);
+  }
+
+  /**
+   * Index of a random WALKABLE particle that still carries weight, or -1.
+   * Never returns a particle sitting inside a wall's clearance band: respawning
+   * from one can leave the replacement in the wall and let the cloud bleed
+   * across it.
+   */
   _pickSurvivor() {
     for (let t = 0; t < 12; t++) {
       const j = (Math.random() * this.count) | 0;
-      if (this.weight[j] > 0) return j;
+      if (this.weight[j] > 0 && this._walkableAt(j)) return j;
     }
     return -1;
   }
@@ -577,11 +614,19 @@ export class ParticleFilter {
     if (total <= 0) return;
     for (let i = 0; i < this.count; i++) this.weight[i] /= total;
 
-    // Nearly everything died: recover by snapping to the nearest free cell.
-    if (live < 0.1 * this.count && this.nearestWalkable) {
+    // Nearly everything died: re-seed around the last healthy position (never
+    // a per-particle nearest-walkable snap, which can cross a wall).
+    if (live < 0.1 * this.count) {
       this._recover();
       if (relaxed) this.relaxLeft--;
       return;
+    }
+
+    // Healthy step: remember the position recovery may return to. It must
+    // itself be walkable, or recovery could start on the wrong side of a wall.
+    const goodMean = this._weightedMean();
+    if (goodMean && this._walkableLL(goodMean.lon, goodMean.lat)) {
+      this.lastGood = { lon: goodMean.lon, lat: goodMean.lat };
     }
 
     this._applyPriors(forwardHeading, relaxed);
@@ -666,12 +711,18 @@ export class ParticleFilter {
       const u = r + i * step;
       while (u > c && idx < n - 1) { idx++; c += weight[idx]; }
       // Roughening so copies do not stay identical forever. Sweep the jitter
-      // too, otherwise the 0.2 m roughening can put a copy across a thin wall.
+      // too, otherwise the 0.2 m roughening can put a copy through a thin wall.
+      // A copy roughened from a cell that is itself blocked would be promoted
+      // to full weight next step, so re-root it at the last healthy point.
+      let bx = this.lon[idx], by = this.lat[idx];
+      if (!this.freeRoam && this.lastGood && !this._walkableLL(bx, by)) {
+        bx = this.lastGood.lon; by = this.lastGood.lat;
+      }
       const re = gaussian() * this.roughenM, rn = gaussian() * this.roughenM;
-      let plon = this.lon[idx] + re / mpd.lon;
-      let plat = this.lat[idx] + rn / mpd.lat;
+      let plon = bx + re / mpd.lon;
+      let plat = by + rn / mpd.lat;
       if (!this.freeRoam) {
-        const p = this._advance(this.lon[idx], this.lat[idx], plon, plat);
+        const p = this._advance(bx, by, plon, plat);
         plon = p[0]; plat = p[1];
       }
       const h = this.heading[idx] + gaussian() * this.headingNoise * 0.5;
@@ -687,12 +738,90 @@ export class ParticleFilter {
     for (let i = 0; i < this.count; i++) this.weight[i] = w;
   }
 
-  _recover() {
+  /**
+   * The point recovery re-seeds around.
+   *
+   * Order matters: the last position at which the cloud was healthy comes
+   * first, so a cloud that has drifted into a wall cannot "recover" onto the
+   * far side of that wall. Only if that point is no longer usable do we fall
+   * back to the heaviest walkable particle, and only as a last resort to a
+   * nearest-walkable snap of the cloud mean. That final snap moves the WHOLE
+   * cloud at once (never one particle at a time), which is the distinction
+   * that stops individual particles tunnelling to the other side of a wall.
+   */
+  _recoveryAnchor() {
+    const lg = this.lastGood;
+    if (lg && this._walkableLL(lg.lon, lg.lat)) {
+      return [lg.lon, lg.lat];
+    }
+    let best = -1, bestW = -1;
     for (let i = 0; i < this.count; i++) {
-      const near = this.nearestWalkable([this.lon[i], this.lat[i]]);
-      if (near) { this.lon[i] = near[0]; this.lat[i] = near[1]; }
+      if (!this._walkableAt(i)) continue;
+      if (this.weight[i] > bestW) { bestW = this.weight[i]; best = i; }
+    }
+    if (best >= 0) return [this.lon[best], this.lat[best]];
+    const mean = this._weightedMean();
+    if (!mean) return null;
+    return this.nearestWalkable?.([mean.lon, mean.lat]) ?? null;
+  }
+
+  /** Weighted circular mean heading over the walkable particles. */
+  _weightedHeading() {
+    let sin = 0, cos = 0, wsum = 0;
+    for (let i = 0; i < this.count; i++) {
+      if (!this._walkableAt(i)) continue;
+      const w = this.weight[i];
+      sin += Math.sin(this.heading[i]) * w;
+      cos += Math.cos(this.heading[i]) * w;
+      wsum += w;
+    }
+    return wsum > 0 ? Math.atan2(sin, cos) : 0;
+  }
+
+  /**
+   * Recover a cloud that is (almost) entirely off the walkable area.
+   *
+   * The old implementation snapped every particle to its own nearest walkable
+   * cell. `nearestWalkable` spirals in every direction, so a particle just
+   * inside a wall could land on the FAR side of it; repeated per step this let
+   * the whole cloud - and the walker - pass through walls. Recovery now sprays
+   * a fresh cloud around a single anchor with a swept line-of-sight move, so a
+   * particle can never appear on the far side of a wall from that anchor.
+   */
+  _recover() {
+    const anchor = this._recoveryAnchor();
+    if (!anchor) {
+      // Nothing usable to recover to: equalise weights so a later step (or the
+      // stall guard) can diffuse the cloud instead of killing it outright.
+      this.weight.fill(1 / this.count);
+      return;
+    }
+    const heading = this._weightedHeading();
+    const spread = Math.max(this.respawnSpreadM, 0.5);
+    this._mpd = metresPerDegree(anchor[1]);
+    for (let i = 0; i < this.count; i++) {
+      const e = gaussian() * spread, n = gaussian() * spread;
+      if (this.freeRoam) {
+        const [plon, plat] = offsetLL(anchor[0], anchor[1], e, n);
+        this.lon[i] = plon;
+        this.lat[i] = plat;
+      } else {
+        const [plon, plat] = offsetLL(anchor[0], anchor[1], e, n);
+        const p = this._advance(anchor[0], anchor[1], plon, plat, this.isWalkable);
+        this.lon[i] = p[0];
+        this.lat[i] = p[1];
+      }
+      this.heading[i] = wrapAngle(heading + gaussianClamped(60 * DEG, 90 * DEG));
+      this._hOff[i] = 0;
     }
     this.weight.fill(1 / this.count);
+    // A recovery is a fresh hypothesis: the previous step's heading priors must
+    // not punish it.
+    this.lastHeading = null;
+    this.reversed = false;
+    this.stallCount = 0;
+    this._prevMean = null;
+    this.version++;
   }
 
   /**

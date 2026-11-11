@@ -68,6 +68,10 @@
       <button id="replayBtn" class="secondary">Replay walk</button>
       <button id="clearBtn" class="secondary">Clear trail</button>
     </div>
+    <div class="controls">
+      <button id="magStart" class="secondary" disabled>Compass figure-8: start</button>
+      <button id="magFinish" class="secondary" disabled>Finish</button>
+    </div>
 
     <div class="card">
       <h2>Live</h2>
@@ -82,6 +86,10 @@
       <div class="row"><span>Heading source</span><span class="val" id="mHeadSrc">—</span></div>
       <div class="row"><span>Heading events (abs / rel)</span><span class="val" id="mHeadEvents">0 / 0</span></div>
       <div class="row"><span>Heading age</span><span class="val" id="mHeadAge">—</span></div>
+      <div class="row"><span>Fusion</span><span class="val" id="mFusion">—</span></div>
+      <div class="row"><span>Compass trust</span><span class="val" id="mTrust">—</span></div>
+      <div class="row"><span>Gyro bias</span><span class="val" id="mGyroBias">—</span></div>
+      <div class="row"><span>Field |B| / dip</span><span class="val" id="mField">—</span></div>
       <div class="row"><span>|a|</span><span class="val" id="mMag">—</span></div>
     </div>
 
@@ -133,6 +141,7 @@
     import { shapeSegments, isWallLayer } from './campus.mjs';
     import { makeToLL } from './geo.mjs';
     import { createMotion, sensorSupport, StepLengthModel, WalkCalibrator, wrapAngle } from './motion.mjs';
+    import { MagnetometerCalibration } from './magnetometer.mjs';
     import { ParticleFilter } from './locate.mjs';
     import { PositionArbiter } from './arbiter.mjs';
 
@@ -158,6 +167,7 @@
       ['DeviceMotion', support.deviceMotion],
       ['DeviceOrientation', support.deviceOrientation],
       ['Generic Sensor API', support.generic],
+      ['Raw magnetometer', support.magnetometer],
       ['Needs permission (iOS)', support.needsPermission],
     ].map(([k, v]) => `<div class="row"><span>${k}</span><span class="${v ? 'ok' : 'warn'}">${v ? 'yes' : 'no'}</span></div>`).join('');
 
@@ -165,6 +175,18 @@
     const calibrator = new WalkCalibrator();
     let headingBias = 0, distance = 0, lastHeading = null, cadenceHz = 0;
     let absEvents = 0, relEvents = 0, lastHeadingT = null;
+
+    // --- compass iron calibration -------------------------------------------
+    // A figure-8/tumble fits the phone's own hard/soft iron. The fit is
+    // persisted because a good one is worth keeping; a bad one is never applied
+    // (MagnetometerCalibration.fit() refuses under-covered samples).
+    const IRON_KEY = 'pdr-mag-iron-v1';
+    let appliedCal = null;
+    let collectCal = null;
+    try {
+      appliedCal = MagnetometerCalibration.fromJSON(
+        JSON.parse(localStorage.getItem(IRON_KEY) || 'null'));
+    } catch (e) { /* ignore */ }
     const logLines = [];
     function log(line) {
       const t = (performance.now() / 1000).toFixed(2);
@@ -285,6 +307,7 @@
 
     // --- sensors -------------------------------------------------------------
     const motion = createMotion({
+      ironCalibration: appliedCal,
       onStep: ({ t, cadenceHz: c }) => {
         cadenceHz = c;
         if (calibrator.running) calibrator.addStep();
@@ -294,11 +317,15 @@
         $('mStepLen').textContent = `${stepLen.lengthFor(cadenceHz).toFixed(2)} m`;
         if (locator && motion.heading.hasHeading) {
           locator.arbiter.setHeading(motion.heading.heading);
-          locator.arbiter.step({ stepLengthM: stepLen.lengthFor(c), headingRad: motion.heading.heading });
+          locator.arbiter.step({
+            stepLengthM: stepLen.lengthFor(c),
+            headingRad: motion.heading.heading,
+            headingSigmaRad: motion.heading.headingSigmaRad,
+          });
           renderLive();
         }
       },
-      onHeading: ({ heading, absolute }) => {
+      onHeading: ({ heading, absolute, trusted, state, headingSigmaRad, gyroBiasRadS, source }) => {
         lastHeading = heading;
         lastHeadingT = performance.now();
         if (absolute) absEvents++; else relEvents++;
@@ -306,7 +333,19 @@
         if (locator) locator.arbiter.setHeading(heading);
         $('mHeading').textContent = `${((heading * DEG + 360) % 360).toFixed(1)}°`;
         $('mHeadSrc').textContent = absolute ? 'absolute (north)' : 'relative';
+        $('mFusion').textContent = source ?? '—';
+        $('mTrust').textContent = state
+          ? `${state}${trusted || !Number.isFinite(headingSigmaRad) ? '' : ` (σ ${(headingSigmaRad * 180 / Math.PI).toFixed(0)}°)`}`
+          : '—';
+        $('mTrust').className = `val ${trusted ? 'ok' : 'warn'}`;
+        if (Number.isFinite(gyroBiasRadS)) {
+          $('mGyroBias').textContent = `${(gyroBiasRadS * 1000 * 180 / Math.PI).toFixed(1)} m°/s`;
+        }
         renderLive();
+      },
+      onMagneticField: (f) => {
+        $('mField').textContent = `${f.magnitudeUT.toFixed(1)} µT${f.dipDeg == null ? '' : ` / ${f.dipDeg.toFixed(0)}°`}${f.disturbed ? ' ⚠' : ''}`;
+        $('mField').className = `val ${f.disturbed ? 'warn' : 'ok'}`;
       },
       onSample: ({ ax, ay, az }) => {
         $('mMag').textContent = `${Math.sqrt(ax * ax + ay * ay + az * az).toFixed(2)} m/s²`;
@@ -345,6 +384,9 @@
       $('stopBtn').disabled = false;
       $('calStart').disabled = false;
       $('headCap').disabled = false;
+      const rawMag = motion.headingSource === 'raw-mag';
+      $('magStart').disabled = !rawMag;
+      if (!rawMag) log('no raw magnetometer (flag-gated in Chrome) — OS-fused heading only');
       startGeo();
       ensureLocator([map.getCenter().lng, map.getCenter().lat]);
       if (!support.deviceMotion && !support.deviceOrientation) log('no motion sensors — use Replay walk');
@@ -354,6 +396,38 @@
       motion.stop();
       if (geoWatchId !== null) { navigator.geolocation.clearWatch(geoWatchId); geoWatchId = null; }
       $('startBtn').disabled = false; $('stopBtn').disabled = true;
+      $('magStart').disabled = true; $('magFinish').disabled = true;
+    };
+
+    // --- figure-8 compass calibration (raw-magnetometer devices only) --------
+    $('magStart').onclick = () => {
+      collectCal = new MagnetometerCalibration();
+      collectCal.start();
+      motion.setIronCalibration(collectCal);
+      $('magStart').disabled = true;
+      $('magFinish').disabled = false;
+      log('tumble the phone in a figure-8 for ~10 s, then Finish');
+    };
+    $('magFinish').onclick = () => {
+      $('magStart').disabled = false;
+      $('magFinish').disabled = true;
+      if (!collectCal) return;
+      const fit = collectCal.fit();
+      // Revert to the known-good fit until this one proves usable.
+      motion.setIronCalibration(appliedCal);
+      if (fit.ok) {
+        appliedCal = collectCal;
+        motion.setIronCalibration(appliedCal);
+        try {
+          localStorage.setItem(IRON_KEY, JSON.stringify(appliedCal.toJSON()));
+        } catch (e) { /* ignore */ }
+        log(`iron fit ok: h=[${fit.hardIron.map((v) => v.toFixed(1)).join(', ')}] `
+          + `residual ${(fit.residualFrac * 100).toFixed(1)}%`);
+      } else {
+        log(`iron fit refused: ${fit.reason} (coverage ${fit.coverage.toFixed(2)}, ` +
+          `residual ${(fit.residualFrac * 100).toFixed(1)}%, ${fit.samples} samples)`);
+      }
+      collectCal = null;
     };
 
     function anchorAt(p) {

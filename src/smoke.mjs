@@ -26,7 +26,8 @@ import { pmtilesGetZxy } from './pmtiles-node.mjs';
 import { convexHull, hullSamples, bestFitRigid, bestFitTranslation, meanPoint } from './align.mjs';
 
 import { DXF_SCALE, metresPerDegree, makeToLL, crossBarrier, nearestApproach } from './geo.mjs';
-import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion } from './motion.mjs';
+import { StepDetector, HeadingTracker, StepLengthModel, WalkCalibrator, wrapAngle, headingFromOrientation, createMotion, worldYawRate } from './motion.mjs';
+import { MagneticFieldTracker, MagnetometerCalibration, tiltCompensatedHeading } from './magnetometer.mjs';
 import { GpsStepCalibrator, calibrationConfidence } from './autocal.mjs';
 import { AnchorStepCalibrator } from './anchorcal.mjs';
 import { ParticleFilter, corridorAxis, HeadingDriftCalibrator } from './locate.mjs';
@@ -102,6 +103,7 @@ const ALL_CATEGORIES = [
   'osm',         // osm-paths cache + live OSM network
   'multifloor',  // multi-floor routing, skybridges, connector anchors
   'motion',      // StepDetector / HeadingTracker / StepLengthModel
+  'magnetometer', // field disturbance + hard/soft-iron calibration + tilt heading
   'autocal',     // GPS step-length auto-calibration
   'anchorcal',   // step-length refinement from manual anchors
   'headingfield', // allowed compass directions + compass snapping
@@ -778,6 +780,29 @@ console.log('\nPDR particle filter:');
     }
     check('0.4 m spread does not spawn across a sealed wall',
       crossed === 0, `${crossed} crossed`);
+
+    // Recovery after the cloud drifts into the wall must return to the last
+    // HEALTHY position (left room), never snap per-particle to the far side.
+    const r = new ParticleFilter({
+      isWalkable: sealedWalkable, nearestWalkable: roomNearest,
+      count: 300, headingNoiseDeg: 4, distanceNoise: 0.05, respawnSpreadM: 0.2,
+    });
+    r.seed(toLL(-1.0, 0.0), { spreadM: 0.2, heading: Math.PI / 2, headingSpreadDeg: 5 });
+    r.predict(0.7, Math.PI / 2, { accuracyM: 20 });   // a healthy step sets lastGood
+    // Simulate drift into the wall, right of the centreline.
+    for (let i = 0; i < r.count; i++) {
+      const [lo, la] = toLL(0.2, (i / r.count - 0.5) * 1.0);
+      r.lon[i] = lo; r.lat[i] = la;
+      r.weight[i] = 1 / r.count;
+    }
+    r._recover();
+    let recoveredCrossed = 0;
+    for (let i = 0; i < r.count; i++) {
+      const e = (r.lon[i] - lon0) * mpd.lon;
+      if (e > 0.3) recoveredCrossed++;
+    }
+    check('recovery cannot teleport the cloud across a sealed wall',
+      recoveredCrossed === 0, `${recoveredCrossed} crossed`);
   }
   // The reported estimate is walkable even with the cloud split across the wall.
   {
@@ -2363,12 +2388,176 @@ function runSteps(det, samples) {
   g.pushGyro(-Math.PI, 100);   // 180 deg/s about +z for 100 ms
   check('gyro bridges a right turn upward', wrapAngle(g.heading - before) > 0.2, `+${((g.heading - before) * 180 / Math.PI).toFixed(1)} deg`);
 
-  // ...but not while the compass is fresh (that would only add jitter).
+  // The gyro now participates CONTINUOUSLY (fusion), so a fresh compass no
+  // longer freezes it out. The invariant that matters is that the compass
+  // wins: a gyro burst is transient and consistent compass samples pull the
+  // fused heading back. (This deliberately replaces "gyro does not perturb a
+  // fresh compass", which encoded the old stale-only bridging.)
   const g2 = new HeadingTracker({ gyroSign: -1, gyroBridgeAfterMs: 250 });
   g2.pushCompass(0, 1000);
   g2.pushGyro(0, 1000);
-  g2.pushGyro(-Math.PI, 1100);   // compass only 100 ms old
-  check('gyro does not perturb a fresh compass', Math.abs(wrapAngle(g2.heading)) < 1e-9, `${(g2.heading * 180 / Math.PI).toFixed(2)} deg`);
+  g2.pushGyro(-Math.PI, 1100);   // 100 ms at 180 deg/s
+  check('gyro participates between compass samples',
+    Math.abs(wrapAngle(g2.heading)) > 0.2, `${(g2.heading * 180 / Math.PI).toFixed(1)} deg`);
+  for (let i = 1; i <= 60; i++) g2.pushCompass(0, 1100 + i * 20);
+  check('a consistent compass pulls the fused heading back',
+    Math.abs(wrapAngle(g2.heading)) < 0.01,
+    `${(g2.heading * 180 / Math.PI).toFixed(2)} deg`);
+  check('a consistent compass stream stays trusted',
+    g2.trusted && g2.state === 'trusted');
+
+  // Magnetic interference: a sudden compass offset must be rejected and the
+  // gyro must carry the heading; once the compass returns, trust recovers.
+  {
+    const f = new HeadingTracker();
+    const truth = 0.5;
+    // 1 s of a consistent stationary stream at 10 Hz compass / 50 Hz gyro.
+    for (let i = 0; i < 50; i++) f.pushGyro(0, i * 20);
+    for (let i = 0; i < 10; i++) f.pushCompass(truth, i * 100);
+    check('fusion: a consistent stream is trusted', f.trusted && f.state === 'trusted',
+      `${f.state}`);
+
+    // 1 s of a 34 deg offset (walking past steel).
+    let maxDrift = 0;
+    for (let i = 10; i < 20; i++) {
+      for (let k = 0; k < 5; k++) f.pushGyro(0, (i * 100) + k * 20);
+      f.pushCompass(truth + 34 * Math.PI / 180, i * 100);
+      maxDrift = Math.max(maxDrift, Math.abs(wrapAngle(f.heading - truth)));
+    }
+    check('fusion: a magnetic step-offset drops the compass out of trust',
+      !f.trusted && f.state === 'coasting', `${f.state}`);
+    check('fusion: the heading coasts on the gyro instead of following the offset',
+      maxDrift < 15 * Math.PI / 180, `${(maxDrift * 180 / Math.PI).toFixed(1)} deg`);
+
+    // Restore the true compass for 2 s.
+    for (let i = 20; i < 40; i++) {
+      for (let k = 0; k < 5; k++) f.pushGyro(0, (i * 100) + k * 20);
+      f.pushCompass(truth, i * 100);
+    }
+    check('fusion: trust recovers once the compass agrees again',
+      f.trusted && f.state === 'trusted', `${f.state}`);
+    check('fusion: the recovered heading matches the compass',
+      Math.abs(wrapAngle(f.heading - truth)) < 8 * Math.PI / 180,
+      `${(f.heading * 180 / Math.PI).toFixed(1)} deg`);
+  }
+
+  // A field-monitor flag acts immediately, even when the compass reading looks
+  // internally consistent with the gyro.
+  {
+    const f = new HeadingTracker();
+    for (let i = 0; i < 10; i++) { f.pushGyro(0, i * 100); f.pushCompass(1.0, i * 100); }
+    f.setMagneticDisturbance(true, 1000);
+    check('fusion: a field flag coasts immediately (no compass sample needed)',
+      !f.trusted && f.state === 'coasting', `${f.state}`);
+    f.pushGyro(0, 1000);
+    f.pushCompass(1.0, 1000);
+    f.pushCompass(1.0, 1100);
+    check('fusion: a field-strength disturbance stops trusting the compass',
+      !f.trusted, `${f.state}`);
+  }
+
+  // Gyro-bias learning: a known rate bias must be learned and removed, so a
+  // long gyro-only stretch does not drift.
+  {
+    const f = new HeadingTracker();
+    const bias = 0.01;             // rad/s the gyro over-reports
+    for (let i = 0; i <= 60 * 50; i++) {
+      const t = i * 20;
+      // gyroSign -1: gz = -bias gives a +bias bearing rate.
+      f.pushGyro(-bias, t);
+      if (i % 5 === 0) f.pushCompass(0, t);
+    }
+    check('fusion: gyro bias converges to the true bias',
+      Math.abs(f.gyroBiasRadS - bias) < 0.006,
+      `${f.gyroBiasRadS.toFixed(4)} rad/s`);
+    check('fusion: the bias-corrected heading stays put',
+      Math.abs(wrapAngle(f.heading)) < 2 * Math.PI / 180,
+      `${(f.heading * 180 / Math.PI).toFixed(2)} deg`);
+  }
+
+  // A fast legitimate turn must NOT be mistaken for interference: the gyro
+  // reads ~0 the moment the turn stops while the low-passed compass is still
+  // catching up. That catch-up used to drop the compass and freeze the heading.
+  {
+    const f = new HeadingTracker();
+    const TURN_DEG = Math.PI / 180;
+    const rate = 90 * TURN_DEG, lagS = 0.25, dt = 1 / 60, turnEndS = 1.5;
+    let truth = 0, idx = 0, dropped = false;
+    const hist = [];
+    for (let t = 0; t <= 4 + 1e-9; t += dt, idx++) {
+      if (t < turnEndS) truth += rate * dt;
+      hist.push({ t, truth });
+      f.pushGyro(t < turnEndS ? -rate : 0, t * 1000);
+      if (idx % 3 === 0) {          // 20 Hz compass, 0.25 s behind
+        const tc = t - lagS;
+        let past = hist[0];
+        for (let k = hist.length - 1; k >= 0; k--) if (hist[k].t <= tc) { past = hist[k]; break; }
+        f.pushCompass(past.truth, t * 1000, true);
+        if (!f.trusted) dropped = true;
+      }
+    }
+    check('a fast legitimate turn keeps the compass trusted', !dropped, f.state);
+    check('the heading catches up after a fast turn',
+      Math.abs(wrapAngle(f.heading - truth)) < 3 * TURN_DEG,
+      `${(wrapAngle(f.heading - truth) * 180 / Math.PI).toFixed(1)} deg`);
+  }
+
+  // Attitude-rotated yaw: a flat phone uses -alpha; a phone held upright
+  // (beta = 90) turns about device y instead.
+  {
+    const flat = worldYawRate({ alpha: -90, beta: 0, gamma: 0 }, 0, 0);
+    check('worldYawRate: flat phone -> +90 deg/s for a right turn',
+      Math.abs(flat - Math.PI / 2) < 1e-6, `${(flat * 180 / Math.PI).toFixed(1)} deg/s`);
+    const upright = worldYawRate({ alpha: 0, beta: 90, gamma: 90 }, 90, 0);
+    check('worldYawRate: upright phone maps device y rotation to yaw',
+      Math.abs(upright + Math.PI / 2) < 1e-6, `${(upright * 180 / Math.PI).toFixed(1)} deg/s`);
+    check('worldYawRate: unknown attitude returns null',
+      worldYawRate({ alpha: 1, beta: 2, gamma: 3 }, null, 0) === null);
+  }
+
+  // A no-gyro tracker must behave exactly like the old compass-only smoother.
+  {
+    const f = new HeadingTracker();
+    for (let i = 0; i < 100; i++) f.pushCompass(0.3, i * 20);
+    check('no-gyro fallback follows the smoothed compass', f.trusted &&
+      Math.abs(wrapAngle(f.heading - 0.3)) < 1e-9);
+    check('no-gyro fallback reports no fusion uncertainty', f.headingSigmaRad === null);
+  }
+
+  // Kill switch: fusion:false restores the legacy stale-only gyro bridging.
+  {
+    const f = new HeadingTracker({ fusion: false, gyroBridgeAfterMs: 250 });
+    f.pushCompass(0, 1000);
+    f.pushGyro(0, 1000);
+    f.pushGyro(-Math.PI, 1100);   // compass only 100 ms old
+    check('fusion off: gyro does not perturb a fresh compass',
+      Math.abs(wrapAngle(f.heading)) < 1e-9,
+      `${(f.heading * 180 / Math.PI).toFixed(2)} deg`);
+    check('fusion off: no uncertainty is reported (legacy filter behaviour)',
+      f.headingSigmaRad === null);
+  }
+
+  // A stable relative-frame offset (calibration walk) must not trip the gate:
+  // consistency is about rotation, so the arbitrary offset cancels.
+  {
+    const f = new HeadingTracker();
+    for (let i = 0; i < 20; i++) { f.pushGyro(0, i * 50); f.pushCompass(2.0, i * 50); }
+    check('relative frame: a stable offset stays trusted', f.trusted,
+      `${f.state}`);
+  }
+
+  // GPS-course witness: only absolute frames, and only a plausible error.
+  {
+    const f = new HeadingTracker();
+    for (let i = 0; i < 20; i++) { f.pushGyro(0, i * 50); f.pushCompass(0.5, i * 50); }
+    check('courseError: a relative frame is ignored', f.courseError(0.5) === null);
+    f.pushCompass(0.5, 1100, true);
+    const err = f.courseError(0.6);
+    check('courseError: a small absolute error is returned',
+      err != null && Math.abs(err - 0.1) < 1e-6, err == null ? 'null' : err.toFixed(4));
+    check('courseError: an implausible error is rejected',
+      f.courseError(2.0) === null);
+  }
 
   // Compass bias calibration shifts the reported heading.
   const c = new HeadingTracker();
@@ -2574,8 +2763,154 @@ function runSteps(det, samples) {
 }
 
 // ---------------------------------------------------------------------------
-// GPS step length auto-calibration (autocal.mjs) - synthetic GPS walks.
+// Magnetometer hygiene (magnetometer.mjs): field monitoring, iron fit and
+// tilt-compensated heading. Synthetic fields, no hardware.
 // ---------------------------------------------------------------------------
+if (want('magnetometer')) {
+console.log('\nMagnetometer (magnetometer.mjs):');
+
+// A flat phone facing north: up = +z, magnetic field points along device +y
+// with a downward component (Anchorage-like inclination is steep, but the
+// heading math only needs the horizontal part).
+const H = 14, V = 48;   // uT horizontal / vertical (total ~50 uT)
+{
+  const h = tiltCompensatedHeading([0, H, -V], { x: 0, y: 0, z: 9.8 });
+  check('tilt heading: flat phone facing north reads 0',
+    h && Math.abs(wrapAngle(h.heading)) < 1e-9,
+    h ? `${(h.heading * 180 / Math.PI).toFixed(2)} deg` : 'null');
+
+  // Facing east: magnetic north is now device -x.
+  const e = tiltCompensatedHeading([-H, 0, -V], { x: 0, y: 0, z: 9.8 });
+  check('tilt heading: flat phone facing east reads +90',
+    e && Math.abs(wrapAngle(e.heading - Math.PI / 2)) < 1e-9,
+    e ? `${(e.heading * 180 / Math.PI).toFixed(1)} deg` : 'null');
+
+  // Declination is added (magnetic -> true).
+  const d = tiltCompensatedHeading([0, H, -V], { x: 0, y: 0, z: 9.8 }, 15.4 * Math.PI / 180);
+  check('tilt heading: declination is added',
+    d && Math.abs(wrapAngle(d.heading - 15.4 * Math.PI / 180)) < 1e-9,
+    d ? `${(d.heading * 180 / Math.PI).toFixed(1)} deg` : 'null');
+
+  // Pitch the phone forward by 35 deg (rotate up and field together about x):
+  // the bearing must not change.
+  const th = 35 * Math.PI / 180;
+  const upT = [0, -Math.sin(th), Math.cos(th)];
+  const magT = [0, H * Math.cos(th) + V * Math.sin(th), H * Math.sin(th) - V * Math.cos(th)];
+  const t = tiltCompensatedHeading(magT, { x: upT[0], y: upT[1], z: upT[2] });
+  check('tilt heading: a pitched phone keeps its bearing',
+    t && Math.abs(wrapAngle(t.magneticHeading)) < 1e-6,
+    t ? `${(t.magneticHeading * 180 / Math.PI).toFixed(2)} deg` : 'null');
+
+  check('tilt heading: field parallel to gravity is unusable',
+    tiltCompensatedHeading([0, 0, -50], { x: 0, y: 0, z: 9.8 }) === null);
+}
+
+{
+  // Magnitude monitor: steady ~50 uT is quiet; steel trips it.
+  const f = new MagneticFieldTracker();
+  let r = null;
+  for (let i = 0; i < 60; i++) r = f.push({ x: 0, y: 14, z: -48 });
+  check('field tracker: a steady earth-strength field is not disturbed',
+    !r.disturbed, `${r.magnitudeUT.toFixed(1)} uT`);
+  const strong = f.push({ x: 0, y: 40, z: -140 });
+  check('field tracker: a strong field (steel) is flagged',
+    strong.disturbed && strong.reason === 'strong',
+    `${strong.magnitudeUT.toFixed(1)} uT ${strong.reason}`);
+  for (let i = 0; i < 5; i++) f.push({ x: 0, y: 14, z: -48 });
+  const weak = new MagneticFieldTracker();
+  let w = null;
+  for (let i = 0; i < 5; i++) w = weak.push({ x: 0, y: 5, z: -10 });
+  check('field tracker: a weak field is flagged', w.disturbed && w.reason === 'weak',
+    `${w.magnitudeUT.toFixed(1)} uT`);
+}
+
+{
+  // Hard-iron + soft-iron fit from a full-ish sphere with a known offset and
+  // anisotropy. A figure-8 tumble is approximated by a dense sphere.
+  const cal = new MagnetometerCalibration({ minSamples: 60 });
+  cal.start();
+  const center = [12, -8, 6];
+  const scale = [1.0, 1.15, 0.9];
+  const target = 50;
+  for (let i = 0; i < 400; i++) {
+    // Fibonacci sphere -> even coverage.
+    const phi = Math.acos(1 - 2 * (i + 0.5) / 400);
+    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+    const unit = [Math.cos(theta) * Math.sin(phi), Math.sin(theta) * Math.sin(phi), Math.cos(phi)];
+    cal.add({
+      x: center[0] + target * scale[0] * unit[0],
+      y: center[1] + target * scale[1] * unit[1],
+      z: center[2] + target * scale[2] * unit[2],
+    });
+  }
+  const fit = cal.fit();
+  check('iron fit: a full tumble calibrates', fit.ok, fit.reason || 'ok');
+  check('iron fit: hard iron matches the true offset',
+    Math.abs(fit.hardIron[0] - center[0]) < 1 &&
+    Math.abs(fit.hardIron[1] - center[1]) < 1 &&
+    Math.abs(fit.hardIron[2] - center[2]) < 1,
+    fit.hardIron.map((v) => v.toFixed(1)).join(', '));
+  check('iron fit: soft iron recovers the axis ratios',
+    Math.abs(fit.softIron[0] - 1 / scale[0]) < 0.05 &&
+    Math.abs(fit.softIron[1] - 1 / scale[1]) < 0.05 &&
+    Math.abs(fit.softIron[2] - 1 / scale[2]) < 0.05,
+    fit.softIron.map((v) => v.toFixed(2)).join(', '));
+
+  // A tiny half-wave must be refused, not silently installed.
+  const poor = new MagnetometerCalibration({ minSamples: 20 });
+  poor.start();
+  for (let i = 0; i < 40; i++) poor.add({ x: 0, y: 45 + i * 0.01, z: -5 });
+  const poorFit = poor.fit();
+  check('iron fit: insufficient coverage is refused',
+    !poorFit.ok && (poorFit.reason === 'coverage' || poorFit.reason === 'samples'),
+    poorFit.reason || 'ok');
+}
+
+{
+  // createMotion raw-mag path: a fake Generic-Sensor Magnetometer drives the
+  // heading through tilt compensation, with the OS-fused heading demoted.
+  const listeners = {};
+  let magListeners = null;
+  class FakeMagnetometer {
+    constructor() { magListeners = {}; this.x = 0; this.y = 14; this.z = -48; this.timestamp = 0; }
+    addEventListener(type, fn) { (magListeners[type] ||= []).push(fn); }
+    removeEventListener() {}
+    start() {}
+    stop() {}
+  }
+  const win = {
+    addEventListener: (t, fn) => { (listeners[t] ||= []).push(fn); },
+    removeEventListener: () => {},
+    performance: { now: () => 1000 },
+    DeviceMotionEvent: undefined,
+    DeviceOrientationEvent: undefined,
+    Magnetometer: FakeMagnetometer,
+  };
+  const win2 = { ...win, UncalibratedMagnetometer: undefined };
+  const mags = [];
+  const mc = createMotion({ win: win2, onMagnetometer: (m) => mags.push(m) });
+  await mc.start();
+  check('createMotion: a raw magnetometer switches the source to raw-mag',
+    mc.headingSource === 'raw-mag', mc.headingSource);
+
+  // Gravity first (flat phone), then the field.
+  (listeners.devicemotion || []).forEach((fn) => fn({
+    accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 }, timeStamp: 1000 }));
+  mc.magnetometer.x = 0; mc.magnetometer.y = 14; mc.magnetometer.z = -48;
+  mc.magnetometer.timestamp = 1000;
+  (magListeners.reading || []).forEach((fn) => fn({}));
+  check('createMotion: raw-mag readings reach onMagnetometer', mags.length === 1);
+  check('createMotion: the raw-mag heading is tilt-compensated (declination applied)',
+    Math.abs(wrapAngle(mc.heading.heading - 15.4 * Math.PI / 180)) < 0.02,
+    `${(mc.heading.heading * 180 / Math.PI).toFixed(1)} deg`);
+
+  // Switching to the relative frame must release the magnetometer.
+  mc.setHeadingMode('relative');
+  check('createMotion: relative mode disables the raw magnetometer',
+    mc.headingSource === 'relative' && mc.magnetometer == null);
+}
+}
+
 }
 if (want('autocal')) {
 console.log('\nGPS step length auto-calibration (autocal.mjs):');
@@ -3119,6 +3454,28 @@ if (want('headingfield')) {
     const after = s2.update(0, tq);
     check('after the turn it re-locks to the new direction',
       after.locked && distPi(after.dir, 0) < 3 * DEG, `${after.reason}`);
+
+    // A slow, legitimate turn (90 deg over 8 steps, ~11 deg/step) stays under
+    // both the per-step and 3-step thresholds. It must still release the lock
+    // promptly and must not be dragged short by the hallway correction.
+    {
+      const slowField = { candidates: [0], weights: [1], confidence: 1, axis: 0 };
+      const s3 = new CompassSnapper();
+      s3.update(0, slowField);
+      let h = 0, released = -1, corrections = 0;
+      for (let k = 0; k < 8; k++) {
+        h = wrapAngle(h + 11.25 * DEG);
+        const r = s3.update(h, slowField);
+        if (r.correctionRad) corrections++;
+        h = wrapAngle(h + (r.correctionRad || 0));
+        if (!r.locked && released < 0) released = k;
+      }
+      check('a slow legitimate turn releases the lock', released >= 0 && released <= 2,
+        `released @step ${released}`);
+      check('a slow turn is not dragged short by the snapper',
+        Math.abs(wrapAngle(h - 90 * DEG)) < 5 * DEG,
+        `${((h * 180 / Math.PI) + 360) % 360} kept (${corrections} corrections)`);
+    }
   }
 
   // --- no field (outdoors / wide lobby) -> never corrects -------------------

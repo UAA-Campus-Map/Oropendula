@@ -19,6 +19,15 @@
  */
 
 const EARTH = 6371000;
+const DEG = Math.PI / 180;
+
+/** Wrap an angle to [-PI, PI]. */
+function wrapPi(a) {
+  a = a % (2 * Math.PI);
+  if (a > Math.PI) a -= 2 * Math.PI;
+  if (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
 
 function distanceM([lon1, lat1], [lon2, lat2]) {
   const r = Math.PI / 180;
@@ -51,8 +60,7 @@ export class PositionArbiter {
    * @param {number}   [opts.pdrDriftPerM=0.20]   added PDR error per metre walked
    * @param {number}   [opts.buildingZoneM=15]    within this of a wall = "at a building"
    */
-  constructor({ filter, isWalkable, nearestWalkable, isOutsideBuildings = null,
-    gpsStalenessS = 6, gpsMaxAccuracyM = 60,
+  constructor({ filter, isWalkable, nearestWalkable, isOutsideBuildings = null,    gpsStalenessS = 6, gpsMaxAccuracyM = 60,
     gpsSeedAccuracyM = 20, gpsOverrideAccuracyM = 3,
     gpsHoldS = 10, hysteresisS = 3,
     pdrBaseAccM = 2.5, pdrDriftPerM = 0.20, buildingZoneM = 15 } = {}) {
@@ -75,6 +83,9 @@ export class PositionArbiter {
     this._candidateSince = null; // when it started being ahead
     this.heading = null;
     this.lastAnchor = null;
+    // Last usable GPS course (true north) while the user was actually moving.
+    // It is an independent absolute heading witness outdoors.
+    this.gpsCourse = null;
   }
 
   /**
@@ -90,6 +101,17 @@ export class PositionArbiter {
   /** A geolocation fix. `accuracy` in metres. */
   gps(fix) {
     this.gpsFix = fix;
+    // Keep a course only while the walker is actually moving: a stationary
+    // fix's heading is noise. `courseDeg` is true north, matching the fused
+    // absolute heading; the app uses it to correct slow bias outdoors.
+    if (Number.isFinite(fix?.courseDeg) && Number.isFinite(fix?.speedMps) &&
+        fix.speedMps > 0.5 && fix.accuracy <= 15) {
+      this.gpsCourse = {
+        headingRad: wrapPi(fix.courseDeg * DEG),
+        t: Number.isFinite(fix.t) ? fix.t : null,
+        accuracyM: fix.accuracy,
+      };
+    }
     const plausible = this.isPlausible(fix);
     const indoor = this.insideBuilding(fix);
     const outdoor = plausible && !indoor;
@@ -122,13 +144,13 @@ export class PositionArbiter {
   }
 
   /** One detected step: advance the filter and grow PDR uncertainty. */
-  step({ stepLengthM, headingRad }) {
+  step({ stepLengthM, headingRad, headingSigmaRad = null }) {
     if (headingRad != null) this.heading = headingRad;
     if (!this.filter.initialized) return;
     // The PDR accuracy is the trusted radius the filter confines its cloud to
     // (particles never live farther than this from their own mean).
     this.filter.predict(stepLengthM, headingRad ?? this.heading ?? 0,
-      { accuracyM: this.pdrAccuracy() });
+      { accuracyM: this.pdrAccuracy(), headingSigmaRad });
     this.metresSinceCorrection += stepLengthM;
   }
 
@@ -142,6 +164,7 @@ export class PositionArbiter {
   clearGps() {
     this.gpsFix = null;
     this.heldGps = null;
+    this.gpsCourse = null;
     if (this.source === 'gps') {
       this.source = null;
       this._candidate = null;
@@ -200,6 +223,13 @@ export class PositionArbiter {
   gpsCandidate(t) {
     if (!this.gpsFix || t - this.gpsFix.t > this.gpsStalenessS * 1000) return null;
     return this.isPlausible(this.gpsFix) ? this.gpsFix : null;
+  }
+
+  /** A fresh GPS course (true north) while moving, or null. */
+  courseWitness(t, { maxAgeS = 5 } = {}) {
+    const c = this.gpsCourse;
+    if (!c || c.t == null || t - c.t > maxAgeS * 1000) return null;
+    return c;
   }
 
   /**
