@@ -1557,7 +1557,7 @@
     import { MagnetometerCalibration } from './magnetometer.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
     import { AnchorStepCalibrator } from './anchorcal.mjs';
-    import { ParticleFilter } from './locate.mjs';
+    import { ParticleFilter, corridorAxis } from './locate.mjs';
     import { CompassSnapper } from './headingfield.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     import { splitRoomQuery, findRoom, findRoomExact, doorwayFor, normName, placeTarget,
@@ -2739,6 +2739,31 @@
 
     // --- compass snapping ---------------------------------------------------
     /**
+     * The allowed-directions field at the estimate, with a geometric fallback.
+     *
+     * The plan's bearing histogram is diluted at a skybridge landing or a very
+     * short bridge: the strongest bearing is correct but `confidence` sits just
+     * under the snapper gate (AS120-02's bridge landing: one candidate at ~71°,
+     * confidence 0.31). When the plan is weak or absent AND the walkable space
+     * is clearly elongated (`corridorAxis` requires >=6:1), the corridor/bridge
+     * axis is the allowed direction. Open rooms fail the aspect test, so this
+     * cannot snap there.
+     */
+    function headingFieldFor(est) {
+      const field = locator.headingField([est.lon, est.lat]);
+      if (field && field.confidence >= (headingSnapper.minConfidence ?? 0.4)) return field;
+      const ll = [est.lon, est.lat];
+      // The BOUND plan first: the union of same-level plans merges through a
+      // skybridge doorway and hides the bridge's elongation (AS120-02's
+      // landing reads 67 deg on its own plan, null on the union).
+      const planWalk = locator.floor?.navGraph?.isWalkable;
+      let axis = typeof planWalk === 'function' ? corridorAxis(planWalk, ll) : null;
+      if (axis == null) axis = corridorAxis(locator.isWalkable, ll);
+      if (axis == null) return field;
+      return { candidates: [axis], weights: [1], confidence: 1, axis };
+    }
+
+    /**
      * One step's worth of heading snapping. Only indoors on PDR: the floor's
      * heading field (corridor axes + junction branches + doorways) provides the
      * allowed directions; the walker's heading is pulled toward the nearest one
@@ -2747,8 +2772,14 @@
     function applyHeadingSnap(est, headingRad) {
       // Snapping off (or calibrating) freezes the bias: no correction, no decay.
       const canDecay = headingSnapEnabled && !calWizard.armed;
+      // Free roam exists for off-plan outdoor PDR. A stray indoor fix can flip
+      // it on while the walker is on a mapped plan (a skybridge landing, a
+      // doorway band) - that must not silently disable the lock. Only disable
+      // snapping when free roam is genuinely OFF the floor plan.
+      const onPlan = !!locator?.isWalkable?.([est?.lon, est?.lat]);
+      const freeRoamOffPlan = !!locator?.filter?.freeRoam && !onPlan;
       if (!headingSnapEnabled || !locator || !est || est.source !== 'pdr'
-          || locator.filter.freeRoam || calWizard.armed || !positionSeeded
+          || freeRoamOffPlan || calWizard.armed || !positionSeeded
           || !locator.headingField) {
         headingSnapper.reset();
         setCorridorBadge(false);
@@ -2756,7 +2787,7 @@
         if (canDecay) decayHeadingBias();
         return;
       }
-      const field = locator.headingField([est.lon, est.lat]);
+      const field = headingFieldFor(est);
       const r = headingSnapper.update(headingRad, field);
       if (r.locked) {
         if (r.correctionRad) {

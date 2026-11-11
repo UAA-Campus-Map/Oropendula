@@ -552,7 +552,7 @@
     import { floorRank, floorLabelOf, floorLevelOf } from './floors.mjs';
     import { createMotion, StepLengthModel, wrapAngle } from './motion.mjs';
     import { GpsStepCalibrator } from './autocal.mjs';
-    import { ParticleFilter } from './locate.mjs';
+    import { ParticleFilter, corridorAxis } from './locate.mjs';
     import { CompassSnapper } from './headingfield.mjs';
     import { PositionArbiter } from './arbiter.mjs';
     maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs');
@@ -959,6 +959,23 @@
     }
 
     /**
+     * The allowed-directions field at the estimate, with a geometric fallback:
+     * when the plan's histogram is too mixed to clear the snapper gate but the
+     * walkable space is clearly elongated (a skybridge/short bridge landing),
+     * the corridor axis is the allowed direction. Open rooms fail the 6:1 test.
+     */
+    function headingFieldFor(est) {
+      const field = locator.headingField([est.lon, est.lat]);
+      if (field && field.confidence >= (headingSnapper.minConfidence ?? 0.4)) return field;
+      const ll = [est.lon, est.lat];
+      const planWalk = locator.floor?.navGraph?.isWalkable;
+      let axis = typeof planWalk === 'function' ? corridorAxis(planWalk, ll) : null;
+      if (axis == null) axis = corridorAxis(locator.isWalkable, ll);
+      if (axis == null) return field;
+      return { candidates: [axis], weights: [1], confidence: 1, axis };
+    }
+
+    /**
      * One step's worth of hallway heading correction. Only indoors on PDR: the
      * floor plan provides the corridor axis, the walker provides the direction.
      * `wantsAxis` gates the ray-cast so it is only paid while arming/active.
@@ -966,15 +983,20 @@
     function applyHeadingSnap(est, headingRad) {
       // Snapping off (or calibrating) freezes the bias: no correction, no decay.
       const canDecay = headingSnapEnabled && !calibration.active;
+      // Free roam is for off-plan outdoor PDR; a stray indoor fix flipping it on
+      // while the walker is on a mapped plan (skybridge landing, doorway band)
+      // must not disable the lock.
+      const onPlan = !!locator?.isWalkable?.([est?.lon, est?.lat]);
+      const freeRoamOffPlan = !!locator?.filter?.freeRoam && !onPlan;
       if (!headingSnapEnabled || !locator || !est || est.source !== 'pdr'
-          || locator.filter.freeRoam || calibration.active || !locator.headingField) {
+          || freeRoamOffPlan || calibration.active || !locator.headingField) {
         headingSnapper.reset();
         setCorridorBadge(false);
         updateSnapReadout(null);
         if (canDecay) decayHeadingBias();
         return;
       }
-      const field = locator.headingField([est.lon, est.lat]);
+      const field = headingFieldFor(est);
       const r = headingSnapper.update(headingRad, field);
       if (r.locked) {
         if (r.correctionRad) {

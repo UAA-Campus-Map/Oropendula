@@ -55,6 +55,14 @@ State machine `SEARCHING -> LOCKED(dir) -> (turn) -> SEARCHING`.
 
 - **SEARCHING:** lock the nearest candidate within `snapTol` (35°) once the field
   is confident enough (`minConfidence`, 0.4).
+- **Weak-field fallback (bridges):** at a skybridge landing the plan's bearing
+  histogram can point the right way but score just under the gate (AS120-02's
+  landing: one candidate at ~71°, confidence 0.31), so the compass never locks.
+  When the field is weak/absent AND the **bound floor's** walkable space is
+  clearly elongated (`corridorAxis`, 6:1), that axis is used as the allowed
+  direction. Test the bound plan, not the union of same-level plans: the union
+  merges through the bridge doorway and hides the elongation. Open rooms fail
+  the aspect test, so this cannot snap there.
 - **LOCKED:** pull the heading toward `dir` with a small, bounded correction
   (`gain` 0.5, deadband 3°, clamp 3°/step, distrust > 50°) — never a hard
   quantise, so the readout stays continuous.
@@ -67,8 +75,10 @@ State machine `SEARCHING -> LOCKED(dir) -> (turn) -> SEARCHING`.
   still locked. Without that, the correction fought a legitimate slow turn and
   left the heading short of the true direction. At a junction the lock then
   re-snaps to the new branch.
-- **Guards:** nothing outdoors / in free-roam, during the calibration walk, or
-  when the field is absent (open room, wide lobby).
+- **Guards:** nothing outdoors / off-plan (free roam), during the calibration
+  walk, or when the field is absent (open room, wide lobby). Free roam only
+  disables snapping while the estimate is **off** the mapped plan; a stray
+  indoor GPS fix must not switch the lock off over a skybridge or doorway band.
 
 The correction is applied to the app's heading bias (session-only, like the old
 corridor lock) — it never touches localStorage. While the snapper is **not

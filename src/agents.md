@@ -613,6 +613,12 @@ and a learned "mouse sensor"/optical flow was judged the wrong tool for a
   sustained turn** (never >35° over 3 steps) also releases via a longer
   6-step/20° trend, and while a turn is developing no correction is applied, so
   the snapper cannot fight a legitimate turn or leave the heading short of it.
+  At a **skybridge landing** the plan's bearing histogram is right but too
+  mixed to clear `minConfidence` (AS120-02: one candidate, confidence 0.31), so
+  the app falls back to `corridorAxis` on the BOUND floor (6:1 aspect) and locks
+  to that axis; open rooms fail the aspect test. Free roam disables snapping
+  only when the estimate is genuinely off-plan, so a stray indoor GPS fix cannot
+  switch the lock off over a bridge.
   **While the snapper is not locked, `baseHeadingBias` decays by ×0.95 per
   step** toward the raw compass, so a bad correction (or a stale
   walk-calibration offset) can recover; the ±45° manual trim does not decay.
