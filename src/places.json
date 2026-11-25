@@ -54,5 +54,96 @@
     "category": "lab",
     "building": "SMH",
     "room": "CNA Lab"
+  },
+  {
+    "id": "su-student-organization-services",
+    "names": ["Student Organization Services", "Student Organizations"],
+    "category": "service",
+    "building": "SU",
+    "room": "210"
+  },
+  {
+    "id": "su-seawolf-grounds",
+    "names": ["Seawolf Grounds", "Coffee Shop", "Coffee"],
+    "category": "food",
+    "building": "SU",
+    "room": "212"
+  },
+  {
+    "id": "su-student-leadership-lab",
+    "names": ["Student Leadership Lab", "Leadership Lab"],
+    "category": "lab",
+    "building": "SU",
+    "room": "206"
+  },
+  {
+    "id": "su-seawolf-store",
+    "names": ["Seawolf Store"],
+    "category": "service",
+    "building": "SU",
+    "room": "203"
+  },
+  {
+    "id": "su-student-activities",
+    "names": ["Student Activities"],
+    "category": "service",
+    "building": "SU",
+    "room": "218"
+  },
+  {
+    "id": "su-information-desk",
+    "names": ["Information Desk", "Info Desk"],
+    "category": "service",
+    "building": "SU",
+    "room": "214"
+  },
+  {
+    "id": "su-usuaa",
+    "names": ["USUAA", "Student Government Office", "Student Government"],
+    "category": "service",
+    "building": "SU",
+    "room": "201"
+  },
+  {
+    "id": "su-student-engagement",
+    "names": ["Student Engagement"],
+    "category": "service",
+    "building": "SU",
+    "room": "204"
+  },
+  {
+    "id": "su-kruaa",
+    "names": ["KRUAA 88.1 Remote Station", "KRUAA", "KRUAA 88.1"],
+    "category": "service",
+    "building": "SU",
+    "room": "204K"
+  },
+  {
+    "id": "su-new-student-orientation",
+    "names": ["New Student Orientation", "Orientation"],
+    "category": "service",
+    "building": "SU",
+    "room": "101"
+  },
+  {
+    "id": "su-military-veteran-student-resource-center",
+    "names": ["Military & Veteran Student Resource Center", "Veteran Student Resource Center", "Military Resource Center", "Veterans Center"],
+    "category": "service",
+    "building": "SU",
+    "room": "102"
+  },
+  {
+    "id": "su-lyla-richards-conference-room",
+    "names": ["Lyla Richards Conference Room", "Lyla Richards"],
+    "category": "meeting",
+    "building": "SU",
+    "room": "103"
+  },
+  {
+    "id": "su-the-den",
+    "names": ["The Den", "Den"],
+    "category": "recreation",
+    "building": "SU",
+    "room": "110"
   }
 ]
